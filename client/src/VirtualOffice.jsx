@@ -101,16 +101,24 @@ function VirtualOffice({ earshotRadius = 200 }) {
 
         canvas.width = 1000;
         canvas.height = 600;
-
         // Keyboard
+
         const handleKeyDown = (event) => {
+            if (
+                event.key === "ArrowUp" ||
+                event.key === "ArrowDown" ||
+                event.key === "ArrowLeft" ||
+                event.key === "ArrowRight"
+            ) {
+                event.preventDefault();
+            }
+
             keys.current[event.key] = true;
         };
 
         const handleKeyUp = (event) => {
             keys.current[event.key] = false;
         };
-
         window.addEventListener("keydown", handleKeyDown);
         window.addEventListener("keyup", handleKeyUp);
 
