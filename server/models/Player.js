@@ -8,6 +8,7 @@ const playerSchema = new mongoose.Schema(
             unique: true,
             index: true,
         },
+        // Flat pixel coordinates on the 2D canvas (1000 x 600)
         x: {
             type: Number,
             required: true,
@@ -18,17 +19,12 @@ const playerSchema = new mongoose.Schema(
             required: true,
             default: 400,
         },
-        location: {
-            type: {
-                type: String,
-                enum: ["Point"],
-                default: "Point",
-                required: true,
-            },
-            coordinates: {
-                type: [Number], // [lng, lat]
-                required: true,
-            },
+        // 2D geospatial position array [x, y] in canvas pixels
+        // Used with MongoDB 2d index for Euclidean $near proximity queries
+        position: {
+            type: [Number],
+            required: true,
+            default: [400, 400],
         },
         lastSeen: {
             type: Date,
@@ -40,7 +36,8 @@ const playerSchema = new mongoose.Schema(
     }
 );
 
-// 2dsphere index for geospatial proximity queries
-playerSchema.index({ location: "2dsphere" });
+// 2D geospatial index for flat Cartesian coordinates ([x, y])
+// Allows $near queries with direct pixel distances (e.g. $maxDistance: 100)
+playerSchema.index({ position: "2d" });
 
 module.exports = mongoose.model("Player", playerSchema);

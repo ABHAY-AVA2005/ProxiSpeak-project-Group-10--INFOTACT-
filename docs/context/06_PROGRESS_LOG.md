@@ -25,12 +25,44 @@
 - Problems / fixes:
 - Tomorrow (Day 3):
 
+### Day 4 - Tue 13 Oct 2026 (Kajal, kajal-backend)
+- Planned: debounced position save to MongoDB, verify index
+- Done:
+  - Replaced GeoJSON `location` field and `2dsphere` index with flat `position: [x, y]` and `2d` geospatial index in Player model
+  - Created `server/utils/validation.js` with defensive coordinate validation for 1000x600 canvas boundaries
+  - Updated `server/server.js` to broadcast movements in real-time while debouncing MongoDB writes by 1000ms per player
+  - Handled disconnect safely: cancel pending debounce timer, persist latest position if pending, delete player record, and guard against delayed async operations recreating deleted records
+  - Guarded database connection on server import to prevent test runner hanging and unreferenced disconnect cleanup timers
+  - Added inFlightWrites tracking to guarantee in-flight operations complete before deleteOne runs on disconnect
+  - Added automated test suite in `server/test/debounce-index.test.js` with 9 passing tests verifying actual server handlers and race-condition guards
+- Files changed:
+  - `server/models/Player.js`
+  - `server/utils/validation.js`
+  - `server/server.js`
+  - `server/scripts/migrate-indexes.js`
+  - `server/test/debounce-index.test.js`
+  - `server/package.json`
+  - `docs/context/06_PROGRESS_LOG.md`
+- Commit message(s): feat: debounced position save to MongoDB, verify index
+- Problems / fixes: Resolved test hanging by modularizing validation into `utils/validation.js`, wrapping database connection inside `connectDB()` executed only on direct startup, and adding `.unref()` to disconnect timers. Eliminated race conditions between in-flight writes and deleteOne by tracking and awaiting in-flight promises.
+- Tomorrow (Day 5): test: script spawning fake socket clients
+
 <!-- Copy the block above for each new day. -->
 
 ## Viva notes (add as you go)
 - What each file does in simple words:
-- Key decisions and why (2d index, throttling, mesh cap, lower-id offer rule):
+  - `server/models/Player.js`: Defines the Mongoose schema for players with `playerId`, `x`, `y`, `position: [x, y]`, and a `2d` geospatial index.
+  - `server/utils/validation.js`: Contains canvas boundary limits (1000x600), debounce timing constants, and coordinate validation to protect against NaN, strings, and out-of-bounds positions.
+  - `server/server.js`: Express and Socket.IO server handling player connections, real-time broadcasts, debounced writes to MongoDB, and safe disconnect cleanup.
+  - `server/scripts/migrate-indexes.js`: Standalone migration script that safely inspects existing MongoDB indexes, drops the obsolete `location_2dsphere` index if present, and creates the `position_2d` index without touching player records.
+  - `server/test/debounce-index.test.js`: Automated test suite verifying validation, debounced persistence, disconnect cleanup, and schema index definitions.
+- Key decisions and why (2d index, debouncing, disconnect cleanup):
+  - **2D index vs 2dsphere**: The office is a flat 1000x600 pixel grid. `2dsphere` is for Earth coordinates and spherical trigonometry, whereas `2d` index works directly with flat Cartesian coordinates and Euclidean distance (`$near` with `$maxDistance: 100` pixels).
+  - **Debouncing**: Avatars move at 30-60 updates per second. Writing to MongoDB on every event would cause thousands of writes per second and ruin our 20ms response time target. Debouncing saves only after 1 second of stillness, reducing database load by over 95%.
+  - **Disconnect safety**: When a user leaves, we cancel pending debounce timers, save the latest position if needed, delete the database record, and guard with `disconnectedSockets` so asynchronous callbacks can never resurrect a deleted player.
 - Questions I should be ready for:
+  - *Why not write to MongoDB on every move?* Because WebSocket broadcast must happen immediately (zero latency, 60 FPS), but disk/network DB I/O would bottleneck the system under multi-user load.
+  - *Does changing Mongoose schema delete the old index in MongoDB?* No, Mongoose only creates indexes; obsolete database indexes must be dropped explicitly using a migration script or mongosh.
 
 ## Done checklist
 - [ ] Week 1 merged to main
