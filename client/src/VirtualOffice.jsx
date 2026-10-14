@@ -52,49 +52,79 @@ function VirtualOffice({ earshotRadius = 200 }) {
 
         socket.on("connect", () => {
             console.log("Connected to ProxiSpeak server:", socket.id);
-        });
-
-        // Receive other players' positions
-        socket.on("current-players", (players) => {
-            remotePlayers.current = {};
-
-            Object.values(players).forEach((otherPlayer) => {
-                if (otherPlayer.id !== socket.id) {
-                    remotePlayers.current[otherPlayer.id] = {
-                        x: otherPlayer.x,
-                        y: otherPlayer.y,
-                        targetX: otherPlayer.x,
-                        targetY: otherPlayer.y,
-                    };
-                }
+            // Announce join to server
+            socket.emit("join", {
+                username: "You",
+                x: player.current.x,
+                y: player.current.y
             });
         });
 
-        socket.on("player-joined", (otherPlayer) => {
-            remotePlayers.current[otherPlayer.id] = {
-                x: otherPlayer.x,
-                y: otherPlayer.y,
-                targetX: otherPlayer.x,
-                targetY: otherPlayer.y,
-            };
-        });
+        // Receive snapshot of other players (supports both users:list and current-players)
+        const handlePlayerList = (players) => {
+            remotePlayers.current = {};
+            const list = Array.isArray(players) ? players : Object.values(players);
 
-        socket.on("player-moved", (otherPlayer) => {
-            if (remotePlayers.current[otherPlayer.id]) {
-                remotePlayers.current[otherPlayer.id].targetX = otherPlayer.x;
-                remotePlayers.current[otherPlayer.id].targetY = otherPlayer.y;
-            } else {
-                remotePlayers.current[otherPlayer.id] = {
-                    x: otherPlayer.x,
-                    y: otherPlayer.y,
-                    targetX: otherPlayer.x,
-                    targetY: otherPlayer.y,
+            list.forEach((other) => {
+                const id = other.socketId || other.id;
+                if (id && id !== socket.id) {
+                    remotePlayers.current[id] = {
+                        x: other.x,
+                        y: other.y,
+                        targetX: other.x,
+                        targetY: other.y,
+                    };
+                }
+            });
+        };
+
+        socket.on("users:list", handlePlayerList);
+        socket.on("current-players", handlePlayerList);
+
+        // When a new player joins (supports user:joined and player-joined)
+        const handlePlayerJoined = (other) => {
+            const id = other.socketId || other.id;
+            if (id && id !== socket.id) {
+                remotePlayers.current[id] = {
+                    x: other.x,
+                    y: other.y,
+                    targetX: other.x,
+                    targetY: other.y,
                 };
             }
-        });
+        };
 
+        socket.on("user:joined", handlePlayerJoined);
+        socket.on("player-joined", handlePlayerJoined);
+
+        // When a player moves (supports user:moved and player-moved)
+        const handlePlayerMoved = (other) => {
+            const id = other.socketId || other.id;
+            if (!id || id === socket.id) return;
+
+            if (remotePlayers.current[id]) {
+                remotePlayers.current[id].targetX = other.x;
+                remotePlayers.current[id].targetY = other.y;
+            } else {
+                remotePlayers.current[id] = {
+                    x: other.x,
+                    y: other.y,
+                    targetX: other.x,
+                    targetY: other.y,
+                };
+            }
+        };
+
+        socket.on("user:moved", handlePlayerMoved);
+        socket.on("player-moved", handlePlayerMoved);
+
+        // When a player leaves (supports user:left and player-disconnected)
+        socket.on("user:left", (data) => {
+            const id = data?.socketId || data;
+            if (id) delete remotePlayers.current[id];
+        });
         socket.on("player-disconnected", (playerId) => {
-            delete remotePlayers.current[playerId];
+            if (playerId) delete remotePlayers.current[playerId];
         });
         const canvas = canvasRef.current;
         const ctx = canvas.getContext("2d");
