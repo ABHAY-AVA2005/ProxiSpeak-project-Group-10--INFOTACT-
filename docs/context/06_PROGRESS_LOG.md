@@ -45,7 +45,25 @@
   - `docs/context/06_PROGRESS_LOG.md`
 - Commit message(s): feat: debounced position save to MongoDB, verify index
 - Problems / fixes: Resolved test hanging by modularizing validation into `utils/validation.js`, wrapping database connection inside `connectDB()` executed only on direct startup, and adding `.unref()` to disconnect timers. Eliminated race conditions between in-flight writes and deleteOne by tracking and awaiting in-flight promises.
-- Tomorrow (Day 5): test: script spawning fake socket clients
+### Day 5 - Wed 14 Oct 2026 (Kajal, kajal-backend)
+- Planned: test: script spawning fake socket clients
+- Done:
+  - Created `server/scripts/fake-clients.js` to spawn configurable fake Socket.IO clients connecting to the real backend (`http://localhost:5000`)
+  - Added `socket.io-client` as a development dependency in `server/package.json`
+  - Added npm command `"test:clients"` running `node scripts/fake-clients.js`
+  - Supported configurable parameters via CLI flags and environment variables: client count (default: 5), duration (default: 5000ms), movement interval (default: 250ms), connect timeout, and server URL
+  - Simulated bounded avatar movement within 1000x600 canvas coordinates using `isValidCoordinate`
+  - Tracked connection lifecycle, `player-move` events emitted, and incoming Socket.IO broadcasts (`player-moved`, `player-joined`, `player-disconnected`)
+  - Implemented clean shutdown disconnecting every client and clearing all timers and intervals
+  - Handled connection errors and server unavailability cleanly without hanging
+- Files changed:
+  - `server/scripts/fake-clients.js`
+  - `server/package.json`
+  - `server/package-lock.json`
+  - `docs/context/06_PROGRESS_LOG.md`
+- Commit message(s): test: script spawning fake socket clients
+- Problems / fixes: Implemented connection timeout watchdog and error handling so the script exits with code 1 if the server is offline rather than hanging indefinitely. Verified real-network execution with live server (5 clients connected, 55 moves emitted, 220 broadcasts received, 0 errors, clean disconnects), verified unavailable server handling (clean exit with code 1), and verified all 9 existing unit tests pass.
+- Tomorrow (Day 6): docs: socket events list and DB schema in README
 
 <!-- Copy the block above for each new day. -->
 
