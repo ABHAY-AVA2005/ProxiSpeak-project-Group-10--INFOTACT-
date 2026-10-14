@@ -1,19 +1,23 @@
 {
-  "name": "server",
-  "version": "1.0.0",
-  "description": "",
-  "main": "server.js",
+  "name": "proxispeak-server",
+  "version": "0.1.0",
+  "description": "ProxiSpeak signaling and backend server",
+  "main": "src/server.js",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node --watch server.js",
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
     "test": "node --test test/**/*.test.js",
     "test:clients": "node scripts/fake-clients.js",
     "migrate:indexes": "node scripts/migrate-indexes.js"
   },
-  "keywords": [],
-  "author": "",
+  "keywords": [
+    "webrtc",
+    "socket.io",
+    "spatial-audio",
+    "proximity"
+  ],
+  "author": "Abhay Varshit Aripirala (Team Lead)",
   "license": "ISC",
-  "type": "commonjs",
   "dependencies": {
     "cors": "^2.8.6",
     "dotenv": "^18.0.5",
