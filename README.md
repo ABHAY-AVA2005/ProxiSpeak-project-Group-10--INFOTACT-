@@ -72,6 +72,24 @@ ProxiSpeak/
 └── README.md
 ```
 
+## 🔌 Socket.IO Events Reference
+ 
+| Event Name | Direction | Payload | Description |
+|---|---|---|---|
+| `join` | Client ➔ Server | `{ username: string, x?: number, y?: number }` | Register user into spatial session and persist join |
+| `users:list` | Server ➔ Client | `Array<User>` | Initial snapshot of all active players in the world |
+| `user:joined` | Server ➔ Client (broadcast) | `User` | Notifies active clients when a new user enters |
+| `move` / `player-move` | Client ➔ Server | `{ x: number, y: number }` | Sends client's updated coordinate position |
+| `user:moved` / `player-moved` | Server ➔ Client (broadcast) | `{ socketId, id, x, y }` | Zero-lag WebSocket broadcast to all peers |
+| `user:left` / `player-left` | Server ➔ Client (broadcast) | `{ socketId, id }` | Clean disconnect cleanup and DB persistence flush |
+
+## 🧪 Testing & Simulation Scripts
+
+From the `server/` directory:
+- `npm test`: Runs Node.js automated test suite (`persistence.test.js` validating Cartesian `2d` index, clamping, and debouncing).
+- `npm run test:clients`: Runs `fake-clients.js` multi-avatar simulation with customizable duration and client count.
+- `npm run migrate:indexes`: Audits and ensures the `position_2d` index in MongoDB.
+
 ## 🚀 Getting Started
 
 > Setup steps will be finalised as the project grows. Update this section each week.
