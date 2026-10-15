@@ -31,8 +31,8 @@ export function useSocket(username) {
       setUsers(new Map());
     });
 
-    // 1. Snapshot of players (supports users:list and legacy current-players)
-    const handleUsersList = (players) => {
+    // 1. Snapshot of players on join
+    s.on('users:list', (players) => {
       const map = new Map();
       const list = Array.isArray(players) ? players : Object.values(players || {});
       list.forEach((u) => {
@@ -40,7 +40,6 @@ export function useSocket(username) {
         if (id && id !== s.id) {
           map.set(id, {
             socketId: id,
-            id,
             username: u.username || `User_${id.slice(0, 4)}`,
             x: u.x,
             y: u.y,
@@ -48,19 +47,16 @@ export function useSocket(username) {
         }
       });
       setUsers(map);
-    };
-    s.on('users:list', handleUsersList);
-    s.on('current-players', handleUsersList);
+    });
 
-    // 2. New player joined (supports user:joined and legacy player-joined)
-    const handleUserJoined = (user) => {
+    // 2. New player joined
+    s.on('user:joined', (user) => {
       const id = user.socketId || user.id;
       if (id && id !== s.id) {
         setUsers((prev) => {
           const next = new Map(prev);
           next.set(id, {
             socketId: id,
-            id,
             username: user.username || `User_${id.slice(0, 4)}`,
             x: user.x,
             y: user.y,
@@ -68,12 +64,10 @@ export function useSocket(username) {
           return next;
         });
       }
-    };
-    s.on('user:joined', handleUserJoined);
-    s.on('player-joined', handleUserJoined);
+    });
 
-    // 3. Player moved (supports user:moved and legacy player-moved)
-    const handleUserMoved = (coords) => {
+    // 3. Player moved
+    s.on('user:moved', (coords) => {
       const id = coords.socketId || coords.id;
       if (!id || id === s.id) return;
       setUsers((prev) => {
@@ -87,12 +81,10 @@ export function useSocket(username) {
         });
         return next;
       });
-    };
-    s.on('user:moved', handleUserMoved);
-    s.on('player-moved', handleUserMoved);
+    });
 
-    // 4. Player disconnected (supports user:left and legacy player-disconnected)
-    const handleUserLeft = (data) => {
+    // 4. Player disconnected
+    s.on('user:left', (data) => {
       const id = typeof data === 'object' && data !== null ? (data.socketId || data.id) : data;
       if (!id) return;
       setUsers((prev) => {
@@ -100,9 +92,7 @@ export function useSocket(username) {
         next.delete(id);
         return next;
       });
-    };
-    s.on('user:left', handleUserLeft);
-    s.on('player-disconnected', handleUserLeft);
+    });
 
     return () => {
       s.disconnect();
@@ -111,9 +101,7 @@ export function useSocket(username) {
 
   const sendMove = useCallback((x, y) => {
     if (socketRef.current && isConnected) {
-      // Emit standardized 'move' and legacy 'player-move' for dual-compatibility
       socketRef.current.emit('move', { x, y });
-      socketRef.current.emit('player-move', { x, y });
     }
   }, [isConnected]);
 

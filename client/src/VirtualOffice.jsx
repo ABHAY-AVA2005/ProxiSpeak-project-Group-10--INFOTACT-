@@ -60,10 +60,10 @@ function VirtualOffice({ earshotRadius = 200 }) {
             });
         });
 
-        // Receive snapshot of other players (supports both users:list and current-players)
-        const handlePlayerList = (players) => {
+        // Receive snapshot of other players
+        socket.on("users:list", (players) => {
             remotePlayers.current = {};
-            const list = Array.isArray(players) ? players : Object.values(players);
+            const list = Array.isArray(players) ? players : Object.values(players || {});
 
             list.forEach((other) => {
                 const id = other.socketId || other.id;
@@ -76,13 +76,10 @@ function VirtualOffice({ earshotRadius = 200 }) {
                     };
                 }
             });
-        };
+        });
 
-        socket.on("users:list", handlePlayerList);
-        socket.on("current-players", handlePlayerList);
-
-        // When a new player joins (supports user:joined and player-joined)
-        const handlePlayerJoined = (other) => {
+        // When a new player joins
+        socket.on("user:joined", (other) => {
             const id = other.socketId || other.id;
             if (id && id !== socket.id) {
                 remotePlayers.current[id] = {
@@ -92,13 +89,10 @@ function VirtualOffice({ earshotRadius = 200 }) {
                     targetY: other.y,
                 };
             }
-        };
+        });
 
-        socket.on("user:joined", handlePlayerJoined);
-        socket.on("player-joined", handlePlayerJoined);
-
-        // When a player moves (supports user:moved and player-moved)
-        const handlePlayerMoved = (other) => {
+        // When a player moves
+        socket.on("user:moved", (other) => {
             const id = other.socketId || other.id;
             if (!id || id === socket.id) return;
 
@@ -113,18 +107,12 @@ function VirtualOffice({ earshotRadius = 200 }) {
                     targetY: other.y,
                 };
             }
-        };
-
-        socket.on("user:moved", handlePlayerMoved);
-        socket.on("player-moved", handlePlayerMoved);
-
-        // When a player leaves (supports user:left and player-disconnected)
-        socket.on("user:left", (data) => {
-            const id = data?.socketId || data;
-            if (id) delete remotePlayers.current[id];
         });
-        socket.on("player-disconnected", (playerId) => {
-            if (playerId) delete remotePlayers.current[playerId];
+
+        // When a player leaves
+        socket.on("user:left", (data) => {
+            const id = data?.socketId || data?.id;
+            if (id) delete remotePlayers.current[id];
         });
         const canvas = canvasRef.current;
         const ctx = canvas.getContext("2d");
@@ -232,7 +220,7 @@ function VirtualOffice({ earshotRadius = 200 }) {
                 };
                 lastEmitTime = now;
 
-                socket.emit("player-move", {
+                socket.emit("move", {
                     x: player.current.x,
                     y: player.current.y,
                 });
