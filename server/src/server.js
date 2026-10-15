@@ -5,12 +5,16 @@ import cors from "cors";
 import dotenv from "dotenv";
 import { setupSocketHandlers } from "./sockets/socketHandler.js";
 import { getUserCount } from "./services/userManager.js";
+import { connectDB } from "./config/db.js";
 
 // Load environment variables
 dotenv.config();
 
 const PORT = process.env.PORT || 5000;
 const CLIENT_URL = process.env.CLIENT_URL || "http://localhost:5173";
+
+// Initialize MongoDB connection asynchronously
+connectDB();
 
 // Create Express app
 const app = express();

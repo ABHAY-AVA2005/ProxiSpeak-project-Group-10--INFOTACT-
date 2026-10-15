@@ -1,4 +1,5 @@
 import { addUser, removeUser, getAllUsers, updateUserPosition } from "../services/userManager.js";
+import { persistPlayerJoin, scheduleDebouncedMove, persistPlayerDisconnect } from "../services/persistenceManager.js";
 
 /**
  * Register all Socket.io event listeners
@@ -28,19 +29,59 @@ export function setupSocketHandlers(io) {
 
       // 2. Broadcast to all OTHER users that someone joined
       socket.broadcast.emit("user:joined", newUser);
+
+      // 3. Persist to MongoDB (if connected)
+      persistPlayerJoin(newUser);
     });
+
+    /**
+     * Movement handler (supports both 'move' and legacy 'player-move')
+     * Payload: { x: number, y: number }
+     */
+    const handleMove = (coords) => {
+      if (!coords || typeof coords !== "object") return;
+      const { x, y } = coords;
+
+      const updatedUser = updateUserPosition(socket.id, x, y);
+      if (!updatedUser) return;
+
+      // Broadcast immediately over WebSockets (zero DB lag for smooth 60 FPS motion)
+      socket.broadcast.emit("user:moved", {
+        socketId: socket.id,
+        id: socket.id,
+        x: updatedUser.x,
+        y: updatedUser.y
+      });
+      // Backward compatibility event
+      socket.broadcast.emit("player-moved", {
+        id: socket.id,
+        x: updatedUser.x,
+        y: updatedUser.y
+      });
+
+      // Schedule debounced write to MongoDB
+      scheduleDebouncedMove(socket.id, updatedUser.x, updatedUser.y);
+    };
+
+    socket.on("move", handleMove);
+    socket.on("player-move", handleMove);
 
     /**
      * Disconnect cleanup
      */
-    socket.on("disconnect", (reason) => {
+    socket.on("disconnect", async (reason) => {
       const removedUser = removeUser(socket.id);
       console.log(`[Socket Disconnected] ID: ${socket.id} (Reason: ${reason})`);
 
       if (removedUser) {
         // Broadcast user departure so all clients remove the avatar immediately
         socket.broadcast.emit("user:left", { socketId: socket.id });
+        socket.broadcast.emit("player-disconnected", socket.id);
       }
+
+      // Safe DB disconnect cleanup (cancels timer, saves final state, deletes record)
+      await persistPlayerDisconnect(socket.id, removedUser);
     });
   });
 }
+
