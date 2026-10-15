@@ -72,6 +72,205 @@ ProxiSpeak/
 └── README.md
 ```
 
+## 🔌 Socket.IO Events
+
+The real-time layer is managed by Node.js and Socket.IO in `server/server.js`. Below are the verified Socket.IO events currently implemented in the backend, along with their direction, payload structure, and server-side handling logic:
+
+### Implemented Events Summary
+
+| Event Name | Direction | Payload Type | Trigger / Description |
+|---|---|---|---|
+| `connection` | Client → Server | Standard handshake | Established when a client connects to the server |
+| `current-players` | Server → Client | `Object` (Player Map) | Sent exclusively to the connecting client with all active players |
+| `player-joined` | Server → Client | `Object` (Player) | Broadcast to all other clients when a newcomer joins |
+| `player-move` | Client → Server | `Object` (`{ x, y }`) | Emitted by client on avatar movement (validated & debounced) |
+| `player-moved` | Server → Client | `Object` (`{ id, x, y }`) | Broadcast immediately to all other clients upon valid movement |
+| `disconnect` | Client → Server | Lifecycle event | Triggered when a socket connection terminates |
+| `player-disconnected` | Server → Client | `string` (`id`) | Broadcast to remaining clients to remove the departed avatar |
+
+---
+
+### Detailed Event Specifications
+
+#### 1. `connection` (Lifecycle)
+- **Direction:** Client → Server
+- **When it occurs:** When a client opens a Socket.IO connection to `http://localhost:5000`.
+- **Server Behavior:**
+  - Assigns initial spawn state in memory: `players[socket.id] = { id: socket.id, x: 400, y: 400 }`.
+  - Emits `current-players` to the joining socket.
+  - Broadcasts `player-joined` to all other connected sockets.
+  - Triggers asynchronous MongoDB upsert via `Player.findOneAndUpdate({ playerId: socket.id }, ...)`.
+  - Tracks the database operation in `inFlightWrites` to prevent race conditions during early disconnection.
+
+#### 2. `current-players`
+- **Direction:** Server → Client (Unicast to connecting client)
+- **Payload Structure:**
+  ```json
+  {
+    "<socketId>": {
+      "id": "8UiVQwcLOvzoPaQBAAAA",
+      "x": 400,
+      "y": 400
+    }
+  }
+  ```
+- **When it occurs:** Immediately upon successful socket connection.
+- **Server Behavior:** Delivers the complete snapshot of active players from in-memory state so the new client can render existing avatars.
+
+#### 3. `player-joined`
+- **Direction:** Server → Client (Broadcast to all other clients: `socket.broadcast.emit`)
+- **Payload Structure:**
+  ```json
+  {
+    "id": "8UiVQwcLOvzoPaQBAAAA",
+    "x": 400,
+    "y": 400
+  }
+  ```
+- **When it occurs:** Immediately after a new player's initial memory record is registered.
+- **Server Behavior:** Informs all other connected clients of the newcomer so their canvases render the new avatar.
+
+#### 4. `player-move`
+- **Direction:** Client → Server
+- **Payload Structure:**
+  ```json
+  {
+    "x": 425,
+    "y": 380
+  }
+  ```
+  - `x`: `number` — Canvas horizontal coordinate
+  - `y`: `number` — Canvas vertical coordinate
+- **When it occurs:** Emitted by the client when the user moves the avatar.
+- **Server Behavior:**
+  - **Validation:** Verifies the socket is registered and not marked disconnected. Validates coordinates via `isValidCoordinate(x, y)` (`0 <= x <= 1000`, `0 <= y <= 600`, finite numbers). Invalid inputs are discarded with no state mutation or broadcast.
+  - **In-Memory Update:** Updates `players[socket.id].x` and `players[socket.id].y` immediately (in-memory state is the single source of truth for real-time rendering).
+  - **Real-Time Broadcast:** Immediately broadcasts `player-moved` to all other clients (zero database lag for 60 FPS motion).
+  - **Debounced Persistence:** Resets a 1000ms debounce timer (`DB_DEBOUNCE_MS`). Writes to MongoDB via `Player.updateOne` only after 1 second of stillness, minimizing database write load.
+
+#### 5. `player-moved`
+- **Direction:** Server → Client (Broadcast to all other clients: `socket.broadcast.emit`)
+- **Payload Structure:**
+  ```json
+  {
+    "id": "8UiVQwcLOvzoPaQBAAAA",
+    "x": 425,
+    "y": 380
+  }
+  ```
+- **When it occurs:** Immediately upon receiving a valid `player-move` event.
+- **Server Behavior:** Propagates the new coordinates to all other clients in real time for smooth remote interpolation.
+
+#### 6. `disconnect` & `player-disconnected`
+- **Direction:**
+  - `disconnect`: Client → Server (Socket.IO standard event)
+  - `player-disconnected`: Server → Client (Broadcast to all other clients)
+- **`player-disconnected` Payload Structure:**
+  - Primitive `string` containing the disconnected socket ID (e.g., `"8UiVQwcLOvzoPaQBAAAA"`).
+- **When it occurs:** When a client closes the tab, navigates away, or drops connection.
+- **Server Behavior:**
+  - Registers the socket in `disconnectedSockets` tombstone set to prevent delayed asynchronous operations from recreating the record.
+  - Clears any pending movement debounce timer.
+  - Removes the player from in-memory `players` map.
+  - Broadcasts `player-disconnected` with the socket ID to remaining clients.
+  - Awaits any in-flight database write for this player (`inFlightWrites`).
+  - Persists the final position if a movement write was pending.
+  - Removes the player record from MongoDB via `Player.deleteOne({ playerId: socket.id })`.
+  - Clears the tombstone after an unreferenced 5-second buffer timer.
+
+> **Note on Roadmap Events:** WebRTC signaling events (`webrtc:offer`, `webrtc:answer`, `webrtc:ice`) and proximity boundary events (`nearby:enter`, `nearby:leave`) mentioned in architectural specifications are scheduled for Week 2 (Proximity and WebRTC Audio) and are not yet implemented in `server/server.js`.
+
+---
+
+## 🗄️ Database Schema & Persistence
+
+The database layer is managed with Mongoose in `server/models/Player.js` and coordinates with `server/server.js`.
+
+### Mongoose Player Schema
+
+```javascript
+const playerSchema = new mongoose.Schema(
+    {
+        playerId: {
+            type: String,
+            required: true,
+            unique: true,
+            index: true,
+        },
+        x: {
+            type: Number,
+            required: true,
+            default: 400,
+        },
+        y: {
+            type: Number,
+            required: true,
+            default: 400,
+        },
+        position: {
+            type: [Number], // [x, y] in canvas pixels
+            required: true,
+            default: [400, 400],
+        },
+        lastSeen: {
+            type: Date,
+            default: Date.now,
+        },
+    },
+    {
+        timestamps: true, // adds createdAt and updatedAt
+    }
+);
+
+// 2D geospatial index for flat Cartesian coordinates
+playerSchema.index({ position: "2d" });
+```
+
+### Schema Fields & Types
+
+| Field | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `playerId` | `String` | Yes | — | Unique Socket.IO socket identifier (`socket.id`), indexed for fast lookup |
+| `x` | `Number` | Yes | `400` | Current horizontal coordinate on the 1000x600 canvas |
+| `y` | `Number` | Yes | `400` | Current vertical coordinate on the 1000x600 canvas |
+| `position` | `[Number]` | Yes | `[400, 400]` | 2D coordinate array `[x, y]` in canvas pixels |
+| `lastSeen` | `Date` | No | `Date.now` | Timestamp of the most recent connect or position write |
+| `createdAt` | `Date` | Auto | Generated | Document creation timestamp (managed by `timestamps: true`) |
+| `updatedAt` | `Date` | Auto | Generated | Document last update timestamp (managed by `timestamps: true`) |
+
+### Geospatial `2d` Index
+- **Index Definition:** `{ position: "2d" }`
+- **Index Type:** MongoDB legacy `2d` index on flat Cartesian coordinate pairs `[x, y]`.
+- **Purpose & Rationale:** The virtual office is a flat `1000 x 600` pixel canvas. Unlike spherical `2dsphere` indexes designed for Earth latitude/longitude coordinates, the `2d` index computes planar Euclidean distances directly in pixel units.
+- **Intended Proximity Queries:** Designed to power planned `$near` and `$geoWithin` queries (e.g. `Player.find({ position: { $near: [x, y], $maxDistance: 100 } })` for finding peers within the 100-pixel earshot radius).
+- *Implementation Note:* Proximity filtering logic is planned for Week 2; current movement updates broadcast to all connected clients while utilizing the `2d` index for coordinate storage.
+
+### Coordinate Validation Rules
+Validation is defined in `server/utils/validation.js` and enforced before any state updates:
+- **Canvas Boundaries:** Defined by `CANVAS_BOUNDS = { MIN_X: 0, MAX_X: 1000, MIN_Y: 0, MAX_Y: 600 }`.
+- **Type Safety:** Coordinates must be finite JavaScript numbers (`typeof === 'number'`, `Number.isFinite()`).
+- **Range Constraints:** Rejects negative coordinates (`x < 0`, `y < 0`) and out-of-bounds coordinates (`x > 1000`, `y > 600`).
+- **Defensive Dropping:** Non-numbers, `NaN`, `Infinity`, strings, `null`, and undefined values are dropped silently without mutating in-memory players or scheduling database operations.
+
+### Lifecycle & Persistence Mechanics
+
+1. **Player Creation & Upsert on Join:**
+   - Handled via `Player.findOneAndUpdate({ playerId: socket.id }, { ... }, { upsert: true, returnDocument: "after", setDefaultsOnInsert: true })`.
+   - Initialized with default spawn point `[400, 400]`.
+   - Tracked in `inFlightWrites` to prevent race conditions during early disconnection.
+2. **Debounced Movement Persistence:**
+   - Avatars can generate 15–60 move events per second. Writing every event to disk would bottleneck the database.
+   - Updates are held in memory, and writes are debounced with `DB_DEBOUNCE_MS = 1000` (1 second).
+   - Only after movement ceases for 1 second is `Player.updateOne` called with final coordinates `[latestX, latestY]`.
+   - Reduces database writes by over 95% while maintaining instantaneous client-side broadcasts.
+3. **Safe Disconnect Cleanup:**
+   - Cancels any active debounce timer to prevent dangling timeouts.
+   - Immediately registers the socket in `disconnectedSockets` so late async writes cannot resurrect deleted documents.
+   - Flushes the final pending position to the database if an unsaved movement existed.
+   - Awaits any in-flight database write for this socket to ensure sequential execution.
+   - Deletes the document via `Player.deleteOne({ playerId: socket.id })`.
+   - Unrefs a 5-second cleanup timer to prune the tombstone set without keeping the Node.js event loop alive.
+
 ## 🚀 Getting Started
 
 > Setup steps will be finalised as the project grows. Update this section each week.
