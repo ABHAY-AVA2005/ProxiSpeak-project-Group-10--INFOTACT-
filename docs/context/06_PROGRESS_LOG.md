@@ -44,7 +44,7 @@ Day 3 - Mon 12 Oct 2026
 
 Planned: feat: join event, in-memory users, broadcast users
 
-Done: Created in-memory user manager service and wired join, users:list, user:joined, and user:left events in Socket.io handler.
+Done: Created in-memory user manager service and wired join, users, user, and user events in Socket.io handler.
 
 Files changed: server/src/services/userManager.js, server/src/sockets/socketHandler.js
 
@@ -60,7 +60,7 @@ Done:
 
 Replaced GeoJSON location field and 2dsphere index with flat Cartesian position: [x, y] and 2d geospatial index in Mongoose Player model.
 
-Implemented real-time position broadcast via WebSockets (move / player-move -> user:moved / player-moved) with zero DB latency for 60 FPS movement.
+Implemented real-time position broadcast via WebSockets (move / player-move -> user / player-moved) with zero DB latency for 60 FPS movement.
 
 Debounced MongoDB writes (1000ms delay per player) in persistenceManager service to reduce write overhead by over 95%.
 
@@ -128,7 +128,7 @@ Created server/scripts/fake-clients.js to spawn configurable fake Socket.IO clie
 
 Added socket.io-client as a development dependency in server/package.json.
 
-Added npm command "test:clients" running node scripts/fake-clients.js.
+Added npm command "test" running node scripts/fake-clients.js.
 
 Supported configurable parameters via CLI flags and environment variables: client count (default: 5), duration (default: 5000ms), movement interval (default: 250ms), connect timeout, and server URL.
 
@@ -159,6 +159,44 @@ Tomorrow (Day 6): docs: socket events list and DB schema in README
 <!-- Copy the block above for each new day. -->
 
 Viva notes (add as you go)
+
+=======
+
+<!-- Copy the block above for each new day. -->
+
+Viva notes (add as you go)
+
+What each file does in simple words:
+
+  - server/src/server.js: Starts Express HTTP and Socket.io server, applies CORS and parses JSON.
+
+  - server/src/sockets/socketHandler.js: Central Socket.io hub handling connection, movement, and disconnect events.
+
+  - server/src/services/userManager.js: Fast in-memory Map storing connected active users (socketId, username, position [x, y]).
+
+  - server/src/services/persistenceManager.js: Handles debounced persistence to MongoDB, in-flight promise tracking, and safe disconnect cleanup.
+
+  - server/src/models/Player.js: Mongoose model with Cartesian position: [x, y] and a 2d index.
+
+  - server/src/scripts/migrate-indexes.js: Standalone script to inspect and migrate MongoDB geospatial indexes.
+
+Key decisions and why (2d index, throttling, mesh cap, lower-id offer rule):
+
+  - 2D index vs 2dsphere: The office is a flat Cartesian 2D grid in pixels. 2dsphere calculates spherical distance on earth coordinates, whereas legacy 2d index works directly with Euclidean distance ($near with $maxDistance: 100 pixels).
+
+  - Debouncing: Avatars move at 30-60 updates per second. Emitting real-time updates over WebSockets maintains 60 FPS, while debouncing MongoDB writes by 1 second reduces database I/O by over 95%.
+
+  - Disconnect safety: When a user leaves, debounce timers are cleared, active in-flight writes are awaited before deleteOne runs, and disconnectedSockets prevents async operations from resurrecting deleted records.
+
+Questions I should be ready for:
+
+  - Why keep live coordinates in memory instead of reading from DB? Database roundtrips add latency and high I/O overhead; in-memory lookup is sub-millisecond.
+
+  - Why not write to MongoDB on every move? Because real-time broadcast must happen immediately (zero latency, 60 FPS), but disk/network DB I/O would bottleneck the system under multi-user load.
+
+  - Does changing Mongoose schema delete old indexes in MongoDB? No, Mongoose only creates indexes; obsolete database indexes must be dropped explicitly using a migration script or mongosh.
+
+>>>>>>> origin/kajal-backend
 
 What each file does in simple words:
 
