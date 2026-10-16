@@ -154,13 +154,52 @@ Commit message(s): test: script spawning fake socket clients
 
 Problems / fixes: Implemented connection timeout watchdog and error handling so the script exits with code 1 if the server is offline rather than hanging indefinitely. Verified real-network execution with live server (5 clients connected, 55 moves emitted, 220 broadcasts received, 0 errors, clean disconnects), verified unavailable server handling (clean exit with code 1), and verified all 9 existing unit tests pass.
 
-Tomorrow (Day 6): docs: socket events list and DB schema in README
+Day 6 - Thu 15 Oct 2026 (Kajal, kajal-backend)
 
-<!-- Copy the block above for each new day. -->
+Planned: docs: socket events list and DB schema in README
 
-Viva notes (add as you go)
+Done:
+- Documented all Socket.IO events (join, users:list, user:joined, move, player-move, user:moved, player-moved, disconnect, user:left, player-disconnected) with direction, payload schemas, and server side-effects.
+- Documented MongoDB Player schema, fields, types, and flat [x, y] position array with 2D Cartesian index ({ position: "2d" }).
+- Documented coordinate validation rules and persistence lifecycle (debouncing at 1000ms, in-flight write locks, and safe disconnect cleanup).
+- Recorded changes in README.md, verified against implementation and tests, and committed to kajal-backend.
 
-=======
+Files changed: README.md
+
+Commit message(s): docs: add socket events and database schema to README
+
+Problems / fixes: Verified documentation consistency against server/server.js, server/models/Player.js, and server/utils/validation.js.
+
+Tomorrow (Day 7): docs: DB schema notes, fix bugs found
+
+Day 7 - Fri 16 Oct 2026 (Kajal, kajal-backend)
+
+Planned: docs: DB schema notes, fix bugs found
+
+Done:
+- Created comprehensive database schema and geospatial persistence notes in docs/database-schema.md covering architecture, schema definitions, 2D vs 2dsphere indexing, concurrency guards, and viva voce preparation.
+- Fixed MongoDB URI fallback bug in server/src/config/db.js and server/src/scripts/migrate-indexes.js to support both MONGODB_URI and MONGO_URI.
+- Fixed isDbConnected() race condition during server startup to recognize readyState 2 (connecting), ensuring Mongoose command buffering preserves initial player join records.
+- Added explicit playerId to $set during player join upsert in persistenceManager.js.
+- Added defensive validation against non-finite or invalid coordinates (NaN, Infinity, strings) in scheduleDebouncedMove and persistPlayerDisconnect to protect the MongoDB 2d index.
+- Added mongoose.models.Player safeguard in server/models/Player.js to prevent OverwriteModelError and added username field for schema parity.
+- Added post-migration verification in server/src/scripts/migrate-indexes.js.
+- Expanded backend unit test suite in server/test/persistence.test.js with tests for defensive coordinate filtering and username schema validation; all 14 tests passing.
+
+Files changed:
+- docs/database-schema.md
+- server/src/config/db.js
+- server/src/services/persistenceManager.js
+- server/models/Player.js
+- server/src/scripts/migrate-indexes.js
+- server/test/persistence.test.js
+- docs/context/06_PROGRESS_LOG.md
+
+Commit message(s): docs: DB schema notes, fix bugs found
+
+Problems / fixes: Cleaned up leftover merge conflict markers and duplicated viva notes in docs/context/06_PROGRESS_LOG.md. All 14 unit tests pass with zero regressions.
+
+Tomorrow (Day 8): feat: getNearbyUsers() using $near, 100px
 
 <!-- Copy the block above for each new day. -->
 
@@ -168,89 +207,37 @@ Viva notes (add as you go)
 
 What each file does in simple words:
 
-  - server/src/server.js: Starts Express HTTP and Socket.io server, applies CORS and parses JSON.
-
-  - server/src/sockets/socketHandler.js: Central Socket.io hub handling connection, movement, and disconnect events.
-
-  - server/src/services/userManager.js: Fast in-memory Map storing connected active users (socketId, username, position [x, y]).
-
-  - server/src/services/persistenceManager.js: Handles debounced persistence to MongoDB, in-flight promise tracking, and safe disconnect cleanup.
-
-  - server/src/models/Player.js: Mongoose model with Cartesian position: [x, y] and a 2d index.
-
-  - server/src/scripts/migrate-indexes.js: Standalone script to inspect and migrate MongoDB geospatial indexes.
-
-Key decisions and why (2d index, throttling, mesh cap, lower-id offer rule):
-
-  - 2D index vs 2dsphere: The office is a flat Cartesian 2D grid in pixels. 2dsphere calculates spherical distance on earth coordinates, whereas legacy 2d index works directly with Euclidean distance ($near with $maxDistance: 100 pixels).
-
-  - Debouncing: Avatars move at 30-60 updates per second. Emitting real-time updates over WebSockets maintains 60 FPS, while debouncing MongoDB writes by 1 second reduces database I/O by over 95%.
-
-  - Disconnect safety: When a user leaves, debounce timers are cleared, active in-flight writes are awaited before deleteOne runs, and disconnectedSockets prevents async operations from resurrecting deleted records.
-
-Questions I should be ready for:
-
-  - Why keep live coordinates in memory instead of reading from DB? Database roundtrips add latency and high I/O overhead; in-memory lookup is sub-millisecond.
-
-  - Why not write to MongoDB on every move? Because real-time broadcast must happen immediately (zero latency, 60 FPS), but disk/network DB I/O would bottleneck the system under multi-user load.
-
-  - Does changing Mongoose schema delete old indexes in MongoDB? No, Mongoose only creates indexes; obsolete database indexes must be dropped explicitly using a migration script or mongosh.
-
->>>>>>> origin/kajal-backend
-
-What each file does in simple words:
-
-server/src/server.js: Starts the Express HTTP and Socket.IO server, applies CORS, and parses JSON.
-
-server/src/sockets/socketHandler.js: Central Socket.IO handler for connections, join events, movement broadcasts, and disconnect events.
-
-server/src/services/userManager.js: Maintains an in-memory Map of connected users, including socket ID, username, and position.
-
-server/src/services/persistenceManager.js: Handles debounced MongoDB persistence, in-flight write tracking, and safe disconnect cleanup.
-
-server/src/models/Player.js: Defines the Mongoose Player schema with Cartesian position: [x, y] and a 2d geospatial index.
-
-server/models/Player.js: Legacy Player model used by the existing CommonJS backend.
-
-server/utils/validation.js: Validates coordinates against the 1000x600 canvas boundaries and protects against invalid or out-of-range values.
-
-server/server.js: Legacy Express and Socket.IO server handling movement broadcasts, debounced MongoDB writes, and disconnect cleanup.
-
-server/scripts/migrate-indexes.js: Legacy index migration script for managing MongoDB geospatial indexes.
-
-server/src/scripts/migrate-indexes.js: ES-module migration script for inspecting and updating MongoDB geospatial indexes.
-
-server/scripts/fake-clients.js: Spawns configurable Socket.IO clients to test concurrent connections, movement broadcasts, and disconnect behavior.
-
-server/test/debounce-index.test.js: Tests coordinate validation, debounced persistence, disconnect cleanup, and schema index definitions.
-
-server/test/persistence.test.js: Tests schema indexes, coordinate clamping, and persistence/disconnect safeguards.
+- server/src/server.js: Starts the Express HTTP and Socket.IO server, applies CORS, and parses JSON.
+- server/src/sockets/socketHandler.js: Central Socket.IO handler for connections, join events, movement broadcasts, and disconnect events.
+- server/src/services/userManager.js: Maintains an in-memory Map of connected users, including socket ID, username, and position [x, y].
+- server/src/services/persistenceManager.js: Handles debounced MongoDB persistence, in-flight write tracking, and safe disconnect cleanup.
+- server/src/models/Player.js: Defines the Mongoose Player schema with Cartesian position: [x, y] and a 2d geospatial index.
+- server/models/Player.js: Legacy Player model used by the existing CommonJS backend.
+- server/utils/validation.js: Validates coordinates against the 1000x600 canvas boundaries and protects against invalid or out-of-range values.
+- server/server.js: Legacy Express and Socket.IO server handling movement broadcasts, debounced MongoDB writes, and disconnect cleanup.
+- server/scripts/migrate-indexes.js: Legacy index migration script for managing MongoDB geospatial indexes.
+- server/src/scripts/migrate-indexes.js: ES-module migration script for inspecting, updating, and verifying MongoDB geospatial indexes.
+- server/scripts/fake-clients.js: Spawns configurable Socket.IO clients to test concurrent connections, movement broadcasts, and disconnect behavior.
+- server/test/debounce-index.test.js: Tests coordinate validation, debounced persistence, disconnect cleanup, and schema index definitions.
+- server/test/persistence.test.js: Tests schema indexes, coordinate clamping, defensive coordinate validation, and persistence/disconnect safeguards.
+- docs/database-schema.md: Comprehensive technical notes covering the database schema, 2D vs 2dsphere indexing, and persistence concurrency guards.
 
 Key decisions and why (2d index, debouncing, disconnect cleanup, in-memory map):
 
-In-memory Map: Keeps connected users' current positions available without querying MongoDB for every movement update.
-
-2D index vs. 2dsphere: The virtual office is a flat 1000x600 pixel grid. A 2d index is appropriate for Cartesian coordinates, while 2dsphere is designed for geographic coordinates.
-
-Debouncing: Movement updates are broadcast immediately, while MongoDB writes are delayed to reduce unnecessary database operations.
-
-Disconnect safety: Pending timers are cleared, in-flight writes are awaited where necessary, and asynchronous operations are guarded to prevent deleted player records from being recreated.
-
-Movement interpolation: Remote avatar positions are interpolated between received updates to make movement appear smoother.
-
-Socket.IO compatibility: The client currently listens for both legacy event names and the newer event names so it can interoperate with the respective server handlers.
+- In-memory Map: Keeps connected users' current positions available in sub-millisecond memory lookups without querying MongoDB for every movement update.
+- 2D index vs. 2dsphere: The virtual office is a flat 1000x600 pixel grid. A 2d index is appropriate for Cartesian coordinates and direct Euclidean pixel distance ($near with $maxDistance: 100), while 2dsphere is designed for geographic spherical coordinates.
+- Debouncing: Movement updates are broadcast immediately over WebSockets (zero DB lag for 60 FPS), while MongoDB writes are delayed by 1000ms to reduce database I/O by >95%.
+- Disconnect safety: Pending timers are cleared, in-flight writes are awaited where necessary, and asynchronous operations are guarded with a tombstone set (disconnectedSockets) to prevent deleted player records from being resurrected.
+- Movement interpolation: Remote avatar positions are interpolated between received updates to make movement appear smoother.
+- Socket.IO compatibility: The client listens for both legacy and newer event names to interoperate smoothly with both server implementations.
 
 Questions I should be ready for:
 
-Why keep live coordinates in memory instead of reading from the database? In-memory access avoids a database round trip for every real-time movement update.
-
-Why not write to MongoDB on every move? Frequent database writes would add overhead to a high-frequency movement stream. Debouncing reduces that overhead while keeping movement broadcasts responsive.
-
-Does changing a Mongoose schema automatically delete an old database index? No. Obsolete indexes must be removed explicitly through a migration or database command.
-
-Why use a 2d index instead of a 2dsphere index? The virtual office uses flat pixel coordinates rather than geographic coordinates.
-
-Why interpolate remote player positions? Interpolation smooths the visual movement between network updates.
+- Why keep live coordinates in memory instead of reading from the database? In-memory access avoids a database round trip for every real-time movement update, keeping latency under 20ms.
+- Why not write to MongoDB on every move? Frequent database writes would saturate disk and network I/O during rapid movement. Debouncing reduces overhead while keeping movement broadcasts responsive.
+- Does changing a Mongoose schema automatically delete an old database index? No. Obsolete indexes must be removed explicitly through a migration script (collection.dropIndex) or database command.
+- Why use a 2d index instead of a 2dsphere index? The virtual office uses flat pixel coordinates rather than geographic spherical coordinates.
+- How do you prevent zombie records on disconnect? By registering the socket in a disconnectedSockets tombstone set and awaiting active in-flight writes before issuing deleteOne.
 
 Done checklist
 

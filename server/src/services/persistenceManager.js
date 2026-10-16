@@ -22,6 +22,7 @@ export async function persistPlayerJoin(user) {
         { playerId: user.socketId },
         {
           $set: {
+            playerId: user.socketId,
             username: user.username,
             x: user.x,
             y: user.y,
@@ -48,6 +49,11 @@ export async function persistPlayerJoin(user) {
  * Schedule debounced update to MongoDB for a moving player
  */
 export function scheduleDebouncedMove(socketId, x, y) {
+  // Guard against non-finite or invalid coordinates to protect MongoDB 2d index
+  if (!socketId || !Number.isFinite(x) || !Number.isFinite(y)) {
+    return;
+  }
+
   // Clear previous timer for this user
   if (moveDebounceTimers.has(socketId)) {
     clearTimeout(moveDebounceTimers.get(socketId));
@@ -122,7 +128,7 @@ export async function persistPlayerDisconnect(socketId, lastState) {
   }
 
   try {
-    if (hadPendingDebounce && lastState) {
+    if (hadPendingDebounce && lastState && Number.isFinite(lastState.x) && Number.isFinite(lastState.y)) {
       await Player.updateOne(
         { playerId: socketId },
         {

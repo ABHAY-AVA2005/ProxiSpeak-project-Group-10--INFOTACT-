@@ -43,3 +43,26 @@ test("PersistenceManager - Debounced movement schedule and cancellation on disco
   assert.equal(moveDebounceTimers.has(socketId), false, "Debounce timer must be cancelled on disconnect");
   assert.equal(disconnectedSockets.has(socketId), true, "Socket must be registered in disconnectedSockets");
 });
+
+test("PersistenceManager - Rejects invalid or non-finite coordinates defensively", () => {
+  const socketId = "test-socket-invalid-coords";
+
+  scheduleDebouncedMove(socketId, NaN, 300);
+  assert.equal(moveDebounceTimers.has(socketId), false, "Must reject NaN coordinate");
+
+  scheduleDebouncedMove(socketId, 300, Infinity);
+  assert.equal(moveDebounceTimers.has(socketId), false, "Must reject Infinity coordinate");
+
+  scheduleDebouncedMove(socketId, "400", 300);
+  assert.equal(moveDebounceTimers.has(socketId), false, "Must reject string coordinate");
+
+  scheduleDebouncedMove(null, 100, 100);
+  assert.equal(moveDebounceTimers.has(null), false, "Must reject null socketId");
+});
+
+test("Mongoose Player Schema - Includes username field with default Anonymous", () => {
+  const usernamePath = Player.schema.path("username");
+  assert.ok(usernamePath, "Player schema must have 'username' field");
+  assert.equal(usernamePath.instance, "String");
+  assert.equal(usernamePath.defaultValue, "Anonymous");
+});

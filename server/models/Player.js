@@ -8,6 +8,11 @@ const playerSchema = new mongoose.Schema(
             unique: true,
             index: true,
         },
+        username: {
+            type: String,
+            trim: true,
+            default: "Anonymous",
+        },
         // Flat pixel coordinates on the 2D canvas (1000 x 600)
         x: {
             type: Number,
@@ -40,4 +45,4 @@ const playerSchema = new mongoose.Schema(
 // Allows $near queries with direct pixel distances (e.g. $maxDistance: 100)
 playerSchema.index({ position: "2d" });
 
-module.exports = mongoose.model("Player", playerSchema);
+module.exports = mongoose.models.Player || mongoose.model("Player", playerSchema);

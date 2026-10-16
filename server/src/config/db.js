@@ -3,12 +3,12 @@ import mongoose from "mongoose";
 let isConnected = false;
 
 /**
- * Connect to MongoDB instance if MONGODB_URI is provided
+ * Connect to MongoDB instance if MONGODB_URI or MONGO_URI is provided
  */
 export async function connectDB() {
-  const uri = process.env.MONGODB_URI;
+  const uri = process.env.MONGODB_URI || process.env.MONGO_URI;
   if (!uri) {
-    console.log("ℹ️ MONGODB_URI not set. Running with in-memory persistence only.");
+    console.log("ℹ️ MONGODB_URI/MONGO_URI not set. Running with in-memory persistence only.");
     return false;
   }
 
@@ -28,5 +28,6 @@ export async function connectDB() {
 }
 
 export function isDbConnected() {
-  return mongoose.connection.readyState === 1;
+  // readyState 1 is connected, readyState 2 is connecting (Mongoose buffers operations until ready)
+  return mongoose.connection.readyState === 1 || mongoose.connection.readyState === 2;
 }
