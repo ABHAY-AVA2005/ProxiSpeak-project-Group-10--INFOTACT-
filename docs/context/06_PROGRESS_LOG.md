@@ -201,6 +201,29 @@ Problems / fixes: Cleaned up leftover merge conflict markers and duplicated viva
 
 Tomorrow (Day 8): feat: getNearbyUsers() using $near, 100px
 
+Day 8 - Sat 17 Oct 2026 (Kajal, kajal-backend)
+
+Planned: feat: getNearbyUsers() using $near, 100px
+
+Done:
+- Implemented and exported getNearbyUsers() in server/src/services/persistenceManager.js using MongoDB's legacy 2d index on position with $near and a default 100-pixel radius.
+- Enforced input validation for origin coordinates ([x, y] or {x, y}), maxDistance, and candidate user coordinates to reject invalid/non-finite values (NaN, Infinity, strings, negative radius).
+- Excluded requesting user from proximity results at both database level (playerId: { $ne: excludePlayerId }) and in-memory level (matching socketId, playerId, and id).
+- Added in-memory fallback using Euclidean distance calculation when MongoDB is disconnected or if the query fails, preserving non-blocking operation without circular imports.
+- Ensured results are returned in ascending distance order (closest first) in both database and in-memory paths.
+- Added comprehensive offline unit tests in server/test/persistence.test.js covering $near query shape, requester exclusion, boundary distance filtering (inside, exactly on, outside 100px), distance ordering, invalid coordinates, offline fallback, and error recovery. All 20 tests pass.
+
+Files changed:
+- server/src/services/persistenceManager.js
+- server/test/persistence.test.js
+- docs/context/06_PROGRESS_LOG.md
+
+Commit message(s): feat: getNearbyUsers() using $near, 100px
+
+Problems / fixes: Handled property naming differences (playerId vs socketId) across layers defensively and ensured fallback array handling is completely decoupled from userManager.js imports.
+
+Tomorrow (Day 9): feat: cluster users into groups (connected components)
+
 <!-- Copy the block above for each new day. -->
 
 Viva notes (add as you go)

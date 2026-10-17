@@ -162,3 +162,103 @@ function scheduleDisconnectedSocketCleanup(socketId) {
     cleanupTimer.unref();
   }
 }
+
+/**
+ * Find nearby players within maxDistance pixels using MongoDB $near with 2d index,
+ * falling back to in-memory Euclidean distance calculation when MongoDB is unavailable.
+ *
+ * @param {Array<number>|{x: number, y: number}} origin - Origin coordinates [x, y] or {x, y}
+ * @param {object} [options]
+ * @param {number} [options.maxDistance=100] - Search radius in canvas pixels
+ * @param {string} [options.excludePlayerId] - Player or socket ID to exclude from results
+ * @param {Array<object>} [options.fallbackUsers] - Candidate users for offline/error fallback
+ * @returns {Promise<Array<object>>} Matching users sorted by distance ascending (closest first)
+ */
+export async function getNearbyUsers(origin, options = {}) {
+  // 1. Validate and normalize origin coordinates
+  const originX = Array.isArray(origin) ? origin[0] : origin?.x;
+  const originY = Array.isArray(origin) ? origin[1] : origin?.y;
+
+  if (!Number.isFinite(originX) || !Number.isFinite(originY)) {
+    return [];
+  }
+
+  // 2. Validate maxDistance
+  const {
+    maxDistance,
+    excludePlayerId = null,
+    fallbackUsers = null
+  } = options;
+
+  let validMaxDistance = 100;
+  if (maxDistance !== undefined && maxDistance !== null) {
+    if (typeof maxDistance !== "number" || !Number.isFinite(maxDistance) || maxDistance < 0) {
+      return [];
+    }
+    validMaxDistance = maxDistance;
+  }
+
+  // 3. Query MongoDB using 2d $near if database is connected
+  if (isDbConnected()) {
+    try {
+      const query = {
+        position: {
+          $near: [originX, originY],
+          $maxDistance: validMaxDistance
+        }
+      };
+
+      if (excludePlayerId) {
+        query.playerId = { $ne: String(excludePlayerId) };
+      }
+
+      return await Player.find(query).lean().exec();
+    } catch (err) {
+      console.warn("MongoDB $near query failed, using in-memory fallback:", err.message);
+    }
+  }
+
+  // 4. In-memory fallback calculation
+  if (Array.isArray(fallbackUsers)) {
+    if (fallbackUsers.length === 0) {
+      return [];
+    }
+
+    const maxDistSq = validMaxDistance * validMaxDistance;
+    const candidates = [];
+
+    for (const u of fallbackUsers) {
+      if (!u || typeof u !== "object") continue;
+
+      // Match against both database playerId and in-memory socketId/id
+      const id = u.playerId ?? u.socketId ?? u.id;
+      if (excludePlayerId && id !== undefined && id !== null && String(id) === String(excludePlayerId)) {
+        continue;
+      }
+
+      // Validate candidate user coordinates
+      const ux = u.x ?? u.position?.[0];
+      const uy = u.y ?? u.position?.[1];
+      if (!Number.isFinite(ux) || !Number.isFinite(uy)) {
+        continue;
+      }
+
+      const dx = ux - originX;
+      const dy = uy - originY;
+      const distSq = dx * dx + dy * dy;
+
+      if (distSq <= maxDistSq) {
+        candidates.push({
+          user: u,
+          distance: Math.sqrt(distSq)
+        });
+      }
+    }
+
+    // Sort by ascending distance (closest first, matching MongoDB $near behavior)
+    candidates.sort((a, b) => a.distance - b.distance);
+    return candidates.map((item) => item.user);
+  }
+
+  return [];
+}
