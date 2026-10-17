@@ -14,7 +14,7 @@ export function useMovement({ startX = 100, startY = 100, onPositionChange, spee
   const activeKeys = useRef({});
   const lastEmit = useRef(0);
 
-  // throttle socket emits to ~15 per sec
+  // throttle socket emits to ~15 per sec (66ms)
   const emitPosition = useCallback((x, y) => {
     const now = Date.now();
     if (now - lastEmit.current > 66) {
@@ -25,8 +25,12 @@ export function useMovement({ startX = 100, startY = 100, onPositionChange, spee
     }
   }, [onPositionChange]);
 
+  // Clean event listener registration & edge-case cleanup (Alt-Tab, window blur, visibility change)
   useEffect(() => {
     const onKeyDown = (e) => {
+      // Ignore if user is typing inside an input field
+      if (['INPUT', 'TEXTAREA'].includes(e.target.tagName)) return;
+
       const k = e.key.toLowerCase();
       if (['w', 'a', 's', 'd', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(k)) {
         e.preventDefault();
@@ -40,18 +44,28 @@ export function useMovement({ startX = 100, startY = 100, onPositionChange, spee
       delete activeKeys.current[k];
     };
 
-    const onBlur = () => {
+    const resetKeys = () => {
       activeKeys.current = {};
+      destination.current = null;
+    };
+
+    const onVisibilityChange = () => {
+      if (document.hidden) resetKeys();
     };
 
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
-    window.addEventListener('blur', onBlur);
+    window.addEventListener('blur', resetKeys);
+    window.addEventListener('focus', resetKeys);
+    document.addEventListener('visibilitychange', onVisibilityChange);
 
     return () => {
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
-      window.removeEventListener('blur', onBlur);
+      window.removeEventListener('blur', resetKeys);
+      window.removeEventListener('focus', resetKeys);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      resetKeys();
     };
   }, []);
 
@@ -76,7 +90,6 @@ export function useMovement({ startX = 100, startY = 100, onPositionChange, spee
           y += dy;
           didMove = true;
         } else if (destination.current) {
-          // click to move interpolation
           const tx = destination.current.x;
           const ty = destination.current.y;
           const dist = Math.hypot(tx - x, ty - y);
@@ -93,7 +106,7 @@ export function useMovement({ startX = 100, startY = 100, onPositionChange, spee
           }
         }
 
-        // keep inside world bounds
+        // Clamp inside world bounds
         x = Math.max(BOUNDS.minX, Math.min(BOUNDS.maxX, x));
         y = Math.max(BOUNDS.minY, Math.min(BOUNDS.maxY, y));
 
@@ -119,8 +132,5 @@ export function useMovement({ startX = 100, startY = 100, onPositionChange, spee
     };
   }, []);
 
-  return {
-    coords,
-    setTarget,
-  };
+  return { coords, setTarget };
 }
