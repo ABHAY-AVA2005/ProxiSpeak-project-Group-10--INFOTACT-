@@ -224,6 +224,28 @@ Problems / fixes: Handled property naming differences (playerId vs socketId) acr
 
 Tomorrow (Day 9): feat: cluster users into groups (connected components)
 
+Day 9 - Sun 18 Oct 2026 (Kajal, kajal-backend)
+
+Planned: feat: cluster users into groups (connected components)
+
+Done:
+- Implemented and exported clusterUsers() (and alias clusterUsersIntoGroups()) in server/src/services/persistenceManager.js using Breadth-First Search (BFS) to find connected components in an undirected proximity graph.
+- Applied the 100-pixel proximity rule: an edge exists between two users if Euclidean distance <= 100px.
+- Guaranteed transitivity: if A is within 100px of B, and B is within 100px of C, all three belong to the same group/cluster even if A and C are > 100px apart.
+- Handled edge cases: empty input returns [], single-user input returns [[user]], invalid/malformed entries and coordinates are safely skipped, and duplicate users are deduplicated.
+- Added comprehensive offline unit tests in server/test/persistence.test.js covering empty/null inputs, single users, directly connected pairs, disconnected pairs, transitive chains, multi-cluster partitions with isolated users, deduplication, and custom maxDistance thresholds. All 28 tests passing.
+
+Files changed:
+- server/src/services/persistenceManager.js
+- server/test/persistence.test.js
+- docs/context/06_PROGRESS_LOG.md
+
+Commit message(s): feat: cluster users into groups (connected components)
+
+Problems / fixes: Ensured zero circular imports by accepting users collection as an argument, and normalized user identifiers across socketId, playerId, and id.
+
+Tomorrow (Day 10): feat: emit nearby:enter and nearby:leave diffs
+
 <!-- Copy the block above for each new day. -->
 
 Viva notes (add as you go)

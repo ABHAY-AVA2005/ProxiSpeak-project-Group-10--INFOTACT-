@@ -9,7 +9,9 @@ import {
   disconnectedSockets,
   scheduleDebouncedMove,
   persistPlayerDisconnect,
-  getNearbyUsers
+  getNearbyUsers,
+  clusterUsers,
+  clusterUsersIntoGroups
 } from "../src/services/persistenceManager.js";
 import { clampCoordinate, sanitizeUsername, addUser, removeUser } from "../src/services/userManager.js";
 
@@ -228,4 +230,127 @@ test("getNearbyUsers - MongoDB query failure gracefully falls back to fallbackUs
       writable: true
     });
   }
+});
+
+// ---------------------------------------------------------------------
+// DAY 9: Connected Components Clustering Tests
+// ---------------------------------------------------------------------
+
+test("clusterUsers - Handles empty, null, or undefined user inputs", () => {
+  assert.deepEqual(clusterUsers([]), []);
+  assert.deepEqual(clusterUsers(null), []);
+  assert.deepEqual(clusterUsers(undefined), []);
+});
+
+test("clusterUsers - Handles a single user", () => {
+  const single = [{ socketId: "user-1", username: "Solo", x: 100, y: 100 }];
+  const clusters = clusterUsers(single);
+
+  assert.equal(clusters.length, 1);
+  assert.equal(clusters[0].length, 1);
+  assert.equal(clusters[0][0].socketId, "user-1");
+});
+
+test("clusterUsers - Groups directly connected users within 100px", () => {
+  const users = [
+    { socketId: "u1", x: 100, y: 100 },
+    { socketId: "u2", x: 160, y: 100 } // dist = 60px <= 100px
+  ];
+
+  const clusters = clusterUsers(users);
+  assert.equal(clusters.length, 1);
+  assert.equal(clusters[0].length, 2);
+  const ids = clusters[0].map((u) => u.socketId).sort();
+  assert.deepEqual(ids, ["u1", "u2"]);
+});
+
+test("clusterUsers - Places disconnected users (>100px) into separate clusters", () => {
+  const users = [
+    { socketId: "u1", x: 100, y: 100 },
+    { socketId: "u2", x: 300, y: 100 } // dist = 200px > 100px
+  ];
+
+  const clusters = clusterUsers(users);
+  assert.equal(clusters.length, 2);
+  assert.equal(clusters[0].length, 1);
+  assert.equal(clusters[1].length, 1);
+  const clusterIds = clusters.map((c) => c[0].socketId).sort();
+  assert.deepEqual(clusterIds, ["u1", "u2"]);
+});
+
+test("clusterUsers - Guarantees transitivity (A near B, B near C, A far from C)", () => {
+  // A at (100, 100), B at (170, 100), C at (240, 100)
+  // Dist(A, B) = 70 <= 100
+  // Dist(B, C) = 70 <= 100
+  // Dist(A, C) = 140 > 100 (not directly in earshot, but transitively connected!)
+  const users = [
+    { socketId: "userA", x: 100, y: 100 },
+    { socketId: "userB", x: 170, y: 100 },
+    { socketId: "userC", x: 240, y: 100 }
+  ];
+
+  const clusters = clusterUsers(users);
+  assert.equal(clusters.length, 1, "Must form exactly 1 transitive cluster");
+  assert.equal(clusters[0].length, 3, "All 3 users must belong to the cluster");
+
+  const clusterIds = clusters[0].map((u) => u.socketId).sort();
+  assert.deepEqual(clusterIds, ["userA", "userB", "userC"]);
+});
+
+test("clusterUsers - Partitions multiple distinct groups and isolated users", () => {
+  const users = [
+    // Group 1: u1 and u2 (dist = 40)
+    { socketId: "g1-a", x: 50, y: 50 },
+    { socketId: "g1-b", x: 90, y: 50 },
+    // Group 2: u3, u4, u5 (transitive chain: 500 -> 570 -> 640)
+    { socketId: "g2-a", x: 500, y: 500 },
+    { socketId: "g2-b", x: 570, y: 500 },
+    { socketId: "g2-c", x: 640, y: 500 },
+    // Isolated user
+    { socketId: "isolated", x: 1800, y: 1800 }
+  ];
+
+  const clusters = clusterUsers(users);
+  assert.equal(clusters.length, 3, "Must produce exactly 3 disjoint clusters");
+
+  // Map each cluster to its sorted list of socket IDs
+  const clusterMemberSets = clusters
+    .map((c) => c.map((u) => u.socketId).sort())
+    .sort((a, b) => a.length - b.length);
+
+  assert.deepEqual(clusterMemberSets[0], ["isolated"]);
+  assert.deepEqual(clusterMemberSets[1], ["g1-a", "g1-b"]);
+  assert.deepEqual(clusterMemberSets[2], ["g2-a", "g2-b", "g2-c"]);
+});
+
+test("clusterUsers - Deduplicates identical users and filters out invalid coordinates", () => {
+  const users = [
+    { socketId: "dup-1", x: 100, y: 100 },
+    { socketId: "dup-1", x: 100, y: 100 }, // Duplicate
+    { socketId: "invalid-coords", x: NaN, y: 100 }, // Invalid coordinate
+    { socketId: "no-coords" }, // Missing coordinates
+    null, // Malformed entry
+    { socketId: "valid-peer", x: 150, y: 100 }
+  ];
+
+  const clusters = clusterUsers(users);
+  assert.equal(clusters.length, 1);
+  assert.equal(clusters[0].length, 2);
+  const ids = clusters[0].map((u) => u.socketId).sort();
+  assert.deepEqual(ids, ["dup-1", "valid-peer"]);
+});
+
+test("clusterUsers - Supports custom maxDistance threshold and clusterUsersIntoGroups alias", () => {
+  const users = [
+    { socketId: "p1", x: 100, y: 100 },
+    { socketId: "p2", x: 160, y: 100 } // dist = 60px
+  ];
+
+  // At maxDistance = 50, dist(60) is outside -> 2 clusters
+  const clustersSmall = clusterUsersIntoGroups(users, 50);
+  assert.equal(clustersSmall.length, 2);
+
+  // At maxDistance = 70, dist(60) is inside -> 1 cluster
+  const clustersLarge = clusterUsersIntoGroups(users, 70);
+  assert.equal(clustersLarge.length, 1);
 });

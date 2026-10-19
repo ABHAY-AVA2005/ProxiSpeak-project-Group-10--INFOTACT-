@@ -262,3 +262,100 @@ export async function getNearbyUsers(origin, options = {}) {
 
   return [];
 }
+
+/**
+ * Cluster users into connected proximity groups (connected components)
+ * using Breadth-First Search (BFS) and the 100-pixel proximity rule.
+ *
+ * Transitive property: If A is within maxDistance of B, and B is within
+ * maxDistance of C, then A, B, and C belong to the same group.
+ *
+ * @param {Array<object>|Iterable<object>} users - Collection of user objects with coordinates
+ * @param {number} [maxDistance=100] - Proximity radius threshold in pixels
+ * @returns {Array<Array<object>>} Disjoint clusters of connected users
+ */
+export function clusterUsers(users = [], maxDistance = 100) {
+  if (!users) return [];
+
+  // Convert iterable/Map/Set to an array if needed
+  const userList = Array.isArray(users)
+    ? users
+    : typeof users.values === "function"
+      ? Array.from(users.values())
+      : Array.from(users);
+
+  if (userList.length === 0) return [];
+
+  const validMaxDistance =
+    typeof maxDistance === "number" && Number.isFinite(maxDistance) && maxDistance >= 0
+      ? maxDistance
+      : 100;
+  const maxDistSq = validMaxDistance * validMaxDistance;
+
+  // Deduplicate users and filter out invalid/malformed entries
+  const uniqueUsers = [];
+  const seenIds = new Set();
+
+  for (const u of userList) {
+    if (!u || typeof u !== "object") continue;
+    const id = u.playerId ?? u.socketId ?? u.id;
+    if (id === undefined || id === null) continue;
+    const idStr = String(id);
+    if (seenIds.has(idStr)) continue;
+
+    // Validate finite coordinates
+    const ux = u.x ?? u.position?.[0];
+    const uy = u.y ?? u.position?.[1];
+    if (!Number.isFinite(ux) || !Number.isFinite(uy)) continue;
+
+    seenIds.add(idStr);
+    uniqueUsers.push(u);
+  }
+
+  if (uniqueUsers.length === 0) return [];
+  if (uniqueUsers.length === 1) return [[uniqueUsers[0]]];
+
+  const visited = new Set();
+  const clusters = [];
+
+  for (const user of uniqueUsers) {
+    const userId = String(user.playerId ?? user.socketId ?? user.id);
+    if (visited.has(userId)) continue;
+
+    const currentCluster = [];
+    const queue = [user];
+    visited.add(userId);
+
+    while (queue.length > 0) {
+      const current = queue.shift();
+      currentCluster.push(current);
+
+      const currX = current.x ?? current.position?.[0];
+      const currY = current.y ?? current.position?.[1];
+
+      for (const neighbor of uniqueUsers) {
+        const neighborId = String(neighbor.playerId ?? neighbor.socketId ?? neighbor.id);
+        if (visited.has(neighborId)) continue;
+
+        const nX = neighbor.x ?? neighbor.position?.[0];
+        const nY = neighbor.y ?? neighbor.position?.[1];
+
+        const dx = currX - nX;
+        const dy = currY - nY;
+        const distSq = dx * dx + dy * dy;
+
+        if (distSq <= maxDistSq) {
+          visited.add(neighborId);
+          queue.push(neighbor);
+        }
+      }
+    }
+
+    clusters.push(currentCluster);
+  }
+
+  return clusters;
+}
+
+// Alias for explicit naming matching team plan
+export const clusterUsersIntoGroups = clusterUsers;
