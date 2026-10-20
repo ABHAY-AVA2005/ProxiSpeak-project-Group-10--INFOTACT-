@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import mongoose from "mongoose";
 import { Player } from "../src/models/Player.js";
 import {
@@ -11,9 +12,14 @@ import {
   persistPlayerDisconnect,
   getNearbyUsers,
   clusterUsers,
-  clusterUsersIntoGroups
+  clusterUsersIntoGroups,
+  userNearbyMap,
+  updateProximity,
+  cleanupProximityOnDisconnect,
+  resetNearbyMap
 } from "../src/services/persistenceManager.js";
-import { clampCoordinate, sanitizeUsername, addUser, removeUser } from "../src/services/userManager.js";
+import { clampCoordinate, sanitizeUsername, addUser, removeUser, getAllUsers } from "../src/services/userManager.js";
+import { setupSocketHandlers, resetProximityQueues } from "../src/sockets/socketHandler.js";
 
 test("UserManager - clamps coordinates and sanitizes username", () => {
   assert.equal(clampCoordinate(-50, 0, 2000, 100), 0);
@@ -353,4 +359,469 @@ test("clusterUsers - Supports custom maxDistance threshold and clusterUsersIntoG
   // At maxDistance = 70, dist(60) is inside -> 1 cluster
   const clustersLarge = clusterUsersIntoGroups(users, 70);
   assert.equal(clustersLarge.length, 1);
+});
+
+// ---------------------------------------------------------------------
+// DAY 10: Proximity Diff Events (nearby:enter, nearby:leave) Tests
+// ---------------------------------------------------------------------
+
+test("updateProximity - Calculates enter diff and updates proximity tracking symmetrically", () => {
+  resetNearbyMap();
+
+  const userA = { socketId: "user-A", username: "Alice", x: 100, y: 100 };
+  const userB = { socketId: "user-B", username: "Bob", x: 150, y: 100 }; // dist = 50px <= 100px
+
+  // User A detects User B nearby
+  const diffA = updateProximity("user-A", userA, [userB]);
+  assert.equal(diffA.entered.length, 1);
+  assert.equal(diffA.entered[0].socketId, "user-B");
+  assert.equal(diffA.left.length, 0);
+
+  // Assert symmetric tracking
+  assert.ok(userNearbyMap.get("user-A").has("user-B"));
+  assert.ok(userNearbyMap.get("user-B").has("user-A"));
+
+  resetNearbyMap();
+});
+
+test("updateProximity - Calculates leave diff and updates proximity tracking symmetrically", () => {
+  resetNearbyMap();
+
+  const userA = { socketId: "user-A", username: "Alice", x: 100, y: 100 };
+  const userB = { socketId: "user-B", username: "Bob", x: 150, y: 100 };
+
+  // Initial enter
+  updateProximity("user-A", userA, [userB]);
+
+  // User A moves far away: current nearby list is empty
+  const diffLeave = updateProximity("user-A", userA, []);
+  assert.equal(diffLeave.entered.length, 0);
+  assert.equal(diffLeave.left.length, 1);
+  assert.equal(diffLeave.left[0], "user-B");
+
+  // Assert symmetric removal
+  assert.equal(userNearbyMap.get("user-A").has("user-B"), false);
+  assert.equal(userNearbyMap.get("user-B").has("user-A"), false);
+
+  resetNearbyMap();
+});
+
+test("updateProximity - Does not emit diffs when proximity has not changed", () => {
+  resetNearbyMap();
+
+  const userA = { socketId: "user-A", username: "Alice", x: 100, y: 100 };
+  const userB = { socketId: "user-B", username: "Bob", x: 150, y: 100 };
+
+  // First check: enters
+  updateProximity("user-A", userA, [userB]);
+
+  // Second check: user A moved 5px, still near B
+  const diffUnchanged = updateProximity("user-A", { ...userA, x: 105 }, [userB]);
+  assert.equal(diffUnchanged.entered.length, 0, "No duplicate enter event");
+  assert.equal(diffUnchanged.left.length, 0, "No false leave event");
+
+  resetNearbyMap();
+});
+
+test("cleanupProximityOnDisconnect - Cleans up user and notifies affected peers without notifying disconnected socket", () => {
+  resetNearbyMap();
+
+  const userA = { socketId: "user-A", username: "Alice", x: 100, y: 100 };
+  const userB = { socketId: "user-B", username: "Bob", x: 150, y: 100 };
+  const userC = { socketId: "user-C", username: "Charlie", x: 120, y: 100 };
+
+  // Connect A with B and C
+  updateProximity("user-A", userA, [userB, userC]);
+
+  // A disconnects
+  const affected = cleanupProximityOnDisconnect("user-A");
+
+  // Peers B and C are returned so they can receive nearby:leave
+  assert.deepEqual(affected.sort(), ["user-B", "user-C"]);
+
+  // A is purged from map and removed from peer sets
+  assert.equal(userNearbyMap.has("user-A"), false);
+  assert.equal(userNearbyMap.get("user-B").has("user-A"), false);
+  assert.equal(userNearbyMap.get("user-C").has("user-A"), false);
+
+  resetNearbyMap();
+});
+
+// Shared helper mocks for socket and io
+function createMockSocket(id) {
+  const socket = new EventEmitter();
+  socket.id = id;
+  socket.connected = true;
+  socket.emitted = [];
+  socket.broadcastEmitted = [];
+  socket.emit = (event, ...args) => {
+    socket.emitted.push({ event, data: args[0] });
+    return true;
+  };
+  socket.broadcast = {
+    emit: (event, ...args) => {
+      socket.broadcastEmitted.push({ event, data: args[0] });
+      return true;
+    }
+  };
+  return socket;
+}
+
+function createMockIO() {
+  const io = new EventEmitter();
+  const rooms = new Map();
+  io.to = (targetId) => ({
+    emit: (event, data) => {
+      let list = rooms.get(targetId);
+      if (!list) {
+        list = [];
+        rooms.set(targetId, list);
+      }
+      list.push({ event, data });
+    }
+  });
+  io.getEmittedTo = (targetId) => rooms.get(targetId) || [];
+  return io;
+}
+
+test("getNearbyUsers - Normalizes socketId from MongoDB playerId and fallback user objects", async () => {
+  const origFind = Player.find;
+  const origReadyState = mongoose.connection.readyState;
+
+  try {
+    Object.defineProperty(mongoose.connection, "readyState", {
+      value: 1,
+      configurable: true,
+      writable: true
+    });
+
+    Player.find = () => ({
+      lean: () => ({
+        exec: async () => [
+          { playerId: "mongo-peer-1", username: "MongoUser", position: [110, 100] }
+        ]
+      })
+    });
+
+    // 1. MongoDB query path
+    const dbResults = await getNearbyUsers([100, 100], { maxDistance: 100 });
+    assert.equal(dbResults.length, 1);
+    assert.equal(dbResults[0].playerId, "mongo-peer-1");
+    assert.equal(dbResults[0].socketId, "mongo-peer-1", "Must populate socketId from playerId");
+
+    // 2. Fallback path with playerId
+    Object.defineProperty(mongoose.connection, "readyState", {
+      value: 0,
+      configurable: true,
+      writable: true
+    });
+
+    const fbResults = await getNearbyUsers([100, 100], {
+      fallbackUsers: [{ playerId: "fb-peer-2", username: "FbUser", x: 120, y: 100 }]
+    });
+    assert.equal(fbResults.length, 1);
+    assert.equal(fbResults[0].socketId, "fb-peer-2", "Fallback must normalize socketId from playerId");
+  } finally {
+    Player.find = origFind;
+    Object.defineProperty(mongoose.connection, "readyState", {
+      value: origReadyState,
+      configurable: true,
+      writable: true
+    });
+  }
+});
+
+test("SocketHandler - Full proximity lifecycle: nearby:enter, nearby:leave, unchanged proximity, and disconnect", async () => {
+  resetNearbyMap();
+  resetProximityQueues();
+
+  const io = createMockIO();
+  setupSocketHandlers(io);
+
+  const socketA = createMockSocket("socket-alice");
+  const socketB = createMockSocket("socket-bob");
+
+  try {
+    io.emit("connection", socketA);
+    io.emit("connection", socketB);
+
+    // 1. Join far apart: Alice at (100, 100), Bob at (500, 100) -> distance = 400px (> 100px)
+    const [joinHandlerA] = socketA.listeners("join");
+    const [joinHandlerB] = socketB.listeners("join");
+
+    await joinHandlerA({ username: "Alice", x: 100, y: 100 });
+    await joinHandlerB({ username: "Bob", x: 500, y: 100 });
+
+    // Verify neither received nearby:enter
+    assert.equal(socketA.emitted.filter((e) => e.event === "nearby:enter").length, 0);
+    assert.equal(socketB.emitted.filter((e) => e.event === "nearby:enter").length, 0);
+
+    // 2. Bob moves into range: Bob moves to (160, 100) -> distance = 60px (<= 100px)
+    const [moveHandlerB] = socketB.listeners("move");
+    await moveHandlerB({ x: 160, y: 100 });
+
+    // Both should receive nearby:enter!
+    const bEnterEvents = socketB.emitted.filter((e) => e.event === "nearby:enter");
+    assert.equal(bEnterEvents.length, 1, "Bob must receive nearby:enter for Alice");
+    assert.equal(bEnterEvents[0].data.socketId, "socket-alice");
+
+    const aReceivedFromIO = io.getEmittedTo("socket-alice").filter((e) => e.event === "nearby:enter");
+    assert.equal(aReceivedFromIO.length, 1, "Alice must receive nearby:enter for Bob via io.to");
+    assert.equal(aReceivedFromIO[0].data.socketId, "socket-bob");
+
+    // 3. Unchanged proximity: Bob moves slightly to (165, 100) -> distance = 65px (<= 100px)
+    await moveHandlerB({ x: 165, y: 100 });
+
+    // Count of nearby:enter should NOT increase; no nearby:leave should be emitted
+    assert.equal(socketB.emitted.filter((e) => e.event === "nearby:enter").length, 1, "No duplicate nearby:enter");
+    assert.equal(socketB.emitted.filter((e) => e.event === "nearby:leave").length, 0, "No unexpected nearby:leave");
+    assert.equal(io.getEmittedTo("socket-alice").filter((e) => e.event === "nearby:enter").length, 1);
+    assert.equal(io.getEmittedTo("socket-alice").filter((e) => e.event === "nearby:leave").length, 0);
+
+    // 4. Bob moves away: Bob moves to (600, 100) -> distance = 500px (> 100px)
+    await moveHandlerB({ x: 600, y: 100 });
+
+    // Both should receive nearby:leave!
+    const bLeaveEvents = socketB.emitted.filter((e) => e.event === "nearby:leave");
+    assert.equal(bLeaveEvents.length, 1, "Bob must receive nearby:leave for Alice");
+    assert.equal(bLeaveEvents[0].data.socketId, "socket-alice");
+
+    const aLeaveFromIO = io.getEmittedTo("socket-alice").filter((e) => e.event === "nearby:leave");
+    assert.equal(aLeaveFromIO.length, 1, "Alice must receive nearby:leave for Bob via io.to");
+    assert.equal(aLeaveFromIO[0].data.socketId, "socket-bob");
+
+    // 5. Bob moves back into range: (150, 100)
+    await moveHandlerB({ x: 150, y: 100 });
+    assert.equal(socketB.emitted.filter((e) => e.event === "nearby:enter").length, 2);
+
+    // 6. Bob disconnects: Bob's socket must not be notified, Alice must receive nearby:leave
+    const [disconnectHandlerB] = socketB.listeners("disconnect");
+    await disconnectHandlerB("client namespace disconnect");
+
+    const aFinalLeaves = io.getEmittedTo("socket-alice").filter((e) => e.event === "nearby:leave");
+    assert.equal(aFinalLeaves.length, 2, "Alice must receive nearby:leave when Bob disconnects");
+    assert.equal(aFinalLeaves[1].data.socketId, "socket-bob");
+
+    // Disconnected socketB was NOT notified
+    const bDisconnectLeaves = socketB.emitted.filter((e) => e.event === "nearby:leave");
+    assert.equal(bDisconnectLeaves.length, 1, "Bob must not be notified of leave on own disconnect");
+  } finally {
+    removeUser("socket-alice");
+    removeUser("socket-bob");
+    resetNearbyMap();
+    resetProximityQueues();
+  }
+});
+
+test("SocketHandler - Discards stale/disconnected MongoDB records without active Socket.IO socket", async () => {
+  resetNearbyMap();
+  resetProximityQueues();
+
+  const origFind = Player.find;
+  const origFindOneAndUpdate = Player.findOneAndUpdate;
+  const origReadyState = mongoose.connection.readyState;
+
+  const io = createMockIO();
+  setupSocketHandlers(io);
+
+  const socketA = createMockSocket("socket-alice");
+  const socketB = createMockSocket("socket-bob");
+
+  try {
+    Object.defineProperty(mongoose.connection, "readyState", {
+      value: 1,
+      configurable: true,
+      writable: true
+    });
+
+    Player.findOneAndUpdate = () => Promise.resolve();
+
+    // Mock Player.find to return an active socket (Alice) AND a stale offline record
+    Player.find = () => ({
+      lean: () => ({
+        exec: async () => [
+          { playerId: "socket-alice", username: "Alice", position: [100, 100] },
+          { playerId: "stale-offline-zombie", username: "Ghost", position: [110, 100] }
+        ]
+      })
+    });
+
+    io.emit("connection", socketA);
+    io.emit("connection", socketB);
+
+    const [joinHandlerA] = socketA.listeners("join");
+    const [joinHandlerB] = socketB.listeners("join");
+
+    await joinHandlerA({ username: "Alice", x: 100, y: 100 });
+    // Bob joins within 40px of Alice
+    await joinHandlerB({ username: "Bob", x: 140, y: 100 });
+
+    // Bob should receive nearby:enter for active Alice
+    const bobEnters = socketB.emitted.filter((e) => e.event === "nearby:enter");
+    assert.ok(bobEnters.some((e) => e.data.socketId === "socket-alice"), "Bob must enter with active peer Alice");
+
+    // Alice should also receive nearby:enter for Bob via io.to
+    const aliceReceived = io.getEmittedTo("socket-alice").filter((e) => e.event === "nearby:enter");
+    assert.ok(aliceReceived.some((e) => e.data.socketId === "socket-bob"), "Alice must receive nearby:enter for Bob");
+
+    // Neither Bob nor Alice should receive nearby:enter for stale-offline-zombie!
+    assert.equal(
+      bobEnters.some((e) => e.data.socketId === "stale-offline-zombie"),
+      false,
+      "Bob must not receive nearby:enter for stale offline record"
+    );
+    assert.equal(
+      aliceReceived.some((e) => e.data.socketId === "stale-offline-zombie"),
+      false,
+      "Alice must not receive nearby:enter for stale offline record"
+    );
+  } finally {
+    Player.find = origFind;
+    Player.findOneAndUpdate = origFindOneAndUpdate;
+    Object.defineProperty(mongoose.connection, "readyState", {
+      value: origReadyState,
+      configurable: true,
+      writable: true
+    });
+    removeUser("socket-alice");
+    removeUser("socket-bob");
+    resetNearbyMap();
+    resetProximityQueues();
+  }
+});
+
+test("SocketHandler - Bypasses proximity queries when user is alone in the room or position is unchanged", async () => {
+  resetNearbyMap();
+  resetProximityQueues();
+
+  let queryCallCount = 0;
+  const origFind = Player.find;
+  const origFindOneAndUpdate = Player.findOneAndUpdate;
+  const origReadyState = mongoose.connection.readyState;
+
+  const io = createMockIO();
+  setupSocketHandlers(io);
+
+  const socketSolo = createMockSocket("socket-solo");
+
+  try {
+    Object.defineProperty(mongoose.connection, "readyState", {
+      value: 1,
+      configurable: true,
+      writable: true
+    });
+
+    Player.findOneAndUpdate = () => Promise.resolve();
+
+    Player.find = () => {
+      queryCallCount++;
+      return {
+        lean: () => ({
+          exec: async () => []
+        })
+      };
+    };
+
+    io.emit("connection", socketSolo);
+    const [joinHandler] = socketSolo.listeners("join");
+    const [moveHandler] = socketSolo.listeners("move");
+
+    await joinHandler({ username: "Solo", x: 100, y: 100 });
+
+    // User is alone in the room: move should bypass query completely
+    await moveHandler({ x: 120, y: 100 });
+    await moveHandler({ x: 130, y: 100 });
+
+    assert.equal(queryCallCount, 0, "Must not query database when alone in the room");
+
+    // Now introduce a second user
+    const socketPeer = createMockSocket("socket-peer");
+    io.emit("connection", socketPeer);
+    const [peerJoinHandler] = socketPeer.listeners("join");
+    await peerJoinHandler({ username: "Peer", x: 500, y: 100 });
+
+    const countAfterPeerJoin = queryCallCount;
+
+    // Moving with identical coordinates must bypass query
+    const [peerMoveHandler] = socketPeer.listeners("move");
+    await peerMoveHandler({ x: 500, y: 100 });
+    assert.equal(queryCallCount, countAfterPeerJoin, "Unchanged coordinates must not trigger query");
+  } finally {
+    Player.find = origFind;
+    Player.findOneAndUpdate = origFindOneAndUpdate;
+    Object.defineProperty(mongoose.connection, "readyState", {
+      value: origReadyState,
+      configurable: true,
+      writable: true
+    });
+    removeUser("socket-solo");
+    removeUser("socket-peer");
+    resetNearbyMap();
+    resetProximityQueues();
+  }
+});
+
+test("SocketHandler - Serializes rapid movements and avoids race conditions via queue coalescing", async () => {
+  resetNearbyMap();
+  resetProximityQueues();
+
+  const io = createMockIO();
+  setupSocketHandlers(io);
+
+  const socketA = createMockSocket("socket-alice");
+  const socketB = createMockSocket("socket-bob");
+
+  try {
+    io.emit("connection", socketA);
+    io.emit("connection", socketB);
+
+    const [joinHandlerA] = socketA.listeners("join");
+    const [joinHandlerB] = socketB.listeners("join");
+
+    await joinHandlerA({ username: "Alice", x: 100, y: 100 });
+    await joinHandlerB({ username: "Bob", x: 500, y: 100 });
+
+    const [moveHandlerB] = socketB.listeners("move");
+
+    // Send 4 rapid consecutive movements without awaiting in-between
+    const p1 = moveHandlerB({ x: 450, y: 100 });
+    const p2 = moveHandlerB({ x: 400, y: 100 });
+    const p3 = moveHandlerB({ x: 300, y: 100 });
+    const p4 = moveHandlerB({ x: 150, y: 100 }); // Within 50px of Alice (100, 100)
+
+    await Promise.all([p1, p2, p3, p4]);
+
+    // Bob should have entered Alice's proximity
+    const bEnterEvents = socketB.emitted.filter((e) => e.event === "nearby:enter");
+    assert.equal(bEnterEvents.length, 1, "Bob must receive exactly one nearby:enter after rapid moves");
+    assert.equal(bEnterEvents[0].data.socketId, "socket-alice");
+
+    // Alice should also have received nearby:enter
+    const aReceivedFromIO = io.getEmittedTo("socket-alice").filter((e) => e.event === "nearby:enter");
+    assert.equal(aReceivedFromIO.length, 1, "Alice must receive exactly one nearby:enter");
+
+    // Now send 3 rapid movements moving far away
+    const p5 = moveHandlerB({ x: 140, y: 100 });
+    const p6 = moveHandlerB({ x: 300, y: 100 });
+    const p7 = moveHandlerB({ x: 600, y: 100 }); // Far away
+
+    await Promise.all([p5, p6, p7]);
+
+    // Both should have received nearby:leave
+    const bLeaveEvents = socketB.emitted.filter((e) => e.event === "nearby:leave");
+    assert.equal(bLeaveEvents.length, 1, "Bob must receive nearby:leave");
+    assert.equal(bLeaveEvents[0].data.socketId, "socket-alice");
+
+    const aLeaveEvents = io.getEmittedTo("socket-alice").filter((e) => e.event === "nearby:leave");
+    assert.equal(aLeaveEvents.length, 1, "Alice must receive nearby:leave");
+
+    // Assert proximity map is clean
+    assert.equal(userNearbyMap.get("socket-alice")?.has("socket-bob") || false, false);
+    assert.equal(userNearbyMap.get("socket-bob")?.has("socket-alice") || false, false);
+  } finally {
+    removeUser("socket-alice");
+    removeUser("socket-bob");
+    resetNearbyMap();
+    resetProximityQueues();
+  }
 });

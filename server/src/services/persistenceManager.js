@@ -212,7 +212,12 @@ export async function getNearbyUsers(origin, options = {}) {
         query.playerId = { $ne: String(excludePlayerId) };
       }
 
-      return await Player.find(query).lean().exec();
+      const docs = await Player.find(query).lean().exec();
+      return docs.map((doc) => ({
+        ...doc,
+        socketId: doc.playerId || doc.socketId,
+        id: doc.id || doc.socketId || doc.playerId
+      }));
     } catch (err) {
       console.warn("MongoDB $near query failed, using in-memory fallback:", err.message);
     }
@@ -257,7 +262,16 @@ export async function getNearbyUsers(origin, options = {}) {
 
     // Sort by ascending distance (closest first, matching MongoDB $near behavior)
     candidates.sort((a, b) => a.distance - b.distance);
-    return candidates.map((item) => item.user);
+    return candidates.map((item) => {
+      const u = item.user;
+      const sid = u.socketId || u.playerId || u.id;
+      return {
+        ...u,
+        socketId: sid,
+        id: u.id || sid,
+        playerId: u.playerId || sid
+      };
+    });
   }
 
   return [];
@@ -359,3 +373,90 @@ export function clusterUsers(users = [], maxDistance = 100) {
 
 // Alias for explicit naming matching team plan
 export const clusterUsersIntoGroups = clusterUsers;
+
+// Proximity tracking state: Map<socketId, Set<nearbySocketId>>
+export const userNearbyMap = new Map();
+
+/**
+ * Updates proximity tracking for a user and calculates enter/leave diffs.
+ * Updates peer sets symmetrically so proximity is mutual.
+ *
+ * @param {string} socketId - The active user's socket ID
+ * @param {object} user - The active user object ({ socketId, username, x, y })
+ * @param {Array<object>} currentNearby - Users currently within proximity radius
+ * @returns {{ entered: Array<object>, left: Array<string> }}
+ */
+export function updateProximity(socketId, user, currentNearby = []) {
+  const currentNearbyIds = new Set(
+    currentNearby.map((u) => u.socketId || u.playerId || u.id).filter(Boolean)
+  );
+
+  const prevNearbyIds = userNearbyMap.get(socketId) || new Set();
+
+  const entered = [];
+  const left = [];
+
+  // 1. Identify newly entered peers
+  for (const peer of currentNearby) {
+    const peerId = peer.socketId || peer.playerId || peer.id;
+    if (peerId && !prevNearbyIds.has(peerId)) {
+      entered.push(peer);
+      // Update peer's proximity set symmetrically
+      let peerSet = userNearbyMap.get(peerId);
+      if (!peerSet) {
+        peerSet = new Set();
+        userNearbyMap.set(peerId, peerSet);
+      }
+      peerSet.add(socketId);
+    }
+  }
+
+  // 2. Identify peers who left proximity
+  for (const peerId of prevNearbyIds) {
+    if (!currentNearbyIds.has(peerId)) {
+      left.push(peerId);
+      // Remove socketId from peer's proximity set symmetrically
+      const peerSet = userNearbyMap.get(peerId);
+      if (peerSet) {
+        peerSet.delete(socketId);
+      }
+    }
+  }
+
+  // 3. Update this user's proximity set
+  userNearbyMap.set(socketId, currentNearbyIds);
+
+  return { entered, left };
+}
+
+/**
+ * Cleans up proximity tracking when a user disconnects,
+ * removing them from all peers' proximity sets.
+ *
+ * @param {string} socketId - The disconnected user's socket ID
+ * @returns {Array<string>} Array of peer socket IDs that had this user in proximity
+ */
+export function cleanupProximityOnDisconnect(socketId) {
+  const prevNearbyIds = userNearbyMap.get(socketId);
+  const affectedPeers = [];
+
+  if (prevNearbyIds) {
+    for (const peerId of prevNearbyIds) {
+      affectedPeers.push(peerId);
+      const peerSet = userNearbyMap.get(peerId);
+      if (peerSet) {
+        peerSet.delete(socketId);
+      }
+    }
+  }
+
+  userNearbyMap.delete(socketId);
+  return affectedPeers;
+}
+
+/**
+ * Resets all proximity tracking state (useful for tests and restarts)
+ */
+export function resetNearbyMap() {
+  userNearbyMap.clear();
+}

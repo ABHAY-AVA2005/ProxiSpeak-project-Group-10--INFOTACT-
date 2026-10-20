@@ -246,6 +246,35 @@ Problems / fixes: Ensured zero circular imports by accepting users collection as
 
 Tomorrow (Day 10): feat: emit nearby:enter and nearby:leave diffs
 
+Day 10 - Mon 19 Oct 2026 (Kajal, kajal-backend)
+
+Planned: feat: emit nearby:enter and nearby:leave diffs
+
+Done:
+- Implemented stateful user proximity tracking in `server/src/services/persistenceManager.js` using `userNearbyMap` (socketId -> Set<peerSocketId>) to record previously known nearby peers within the 100px threshold.
+- Implemented `updateProximity(socketId, user, currentNearby)` to calculate `entered` (new peers within 100px) and `left` (peers no longer within 100px) diffs.
+- Maintained symmetric proximity relationships (A near B <=> B near A) so that movement of either player updates both peers' internal tracking sets, preventing duplicate `nearby:enter` emissions on subsequent moves.
+- Implemented `cleanupProximityOnDisconnect(socketId)` to purge disconnected sockets from internal state, clean up peer tracking sets, and return affected peers without emitting to the disconnected socket.
+- Normalized `socketId` and `playerId` in `getNearbyUsers()` so MongoDB query documents and fallback candidate objects provide uniform identifier access.
+- Validated candidate IDs returned by `getNearbyUsers()` against active in-memory sockets in `userManager` before emitting `nearby:enter` / `nearby:leave`, ensuring offline or stale database records are never treated as connected WebRTC peers.
+- Added query optimization in `queueProximityCheck`: bypassed queries when the user is alone in the room (`getUserCount() <= 1`) or when movement coordinates are unchanged, preserving database and compute resources.
+- Guarded against asynchronous race conditions on rapid movement using a per-socket FIFO queue with intermediate position coalescing, guaranteeing that queries execute sequentially and evaluate the latest position without out-of-order state corruption.
+- Integrated proximity diff detection into `server/src/sockets/socketHandler.js` on `join` and `move`/`player-move` events while keeping 60 FPS movement broadcast synchronous and instantaneous.
+- Emitted `nearby:enter` ({ socketId, id, username, x, y }) to both entering sockets and `nearby:leave` ({ socketId, id }) to both leaving sockets only when the proximity boundary is crossed.
+- Added 9 comprehensive automated tests in `server/test/persistence.test.js` covering enter diff, leave diff, unchanged proximity suppression, disconnect cleanup, active socket filtering against stale DB records, query bypassing for solo/unchanged positions, rapid movement queue serialization, and the full Socket.IO lifecycle with mock sockets. All 37 tests pass.
+
+Files changed:
+- server/src/services/persistenceManager.js
+- server/src/sockets/socketHandler.js
+- server/test/persistence.test.js
+- docs/context/06_PROGRESS_LOG.md
+
+Commit message(s): feat: emit nearby:enter and nearby:leave diffs
+
+Problems / fixes: Resolved asynchronous race conditions on rapid movement by implementing a per-socket promise queue that coalesces intermediate positions; eliminated phantom WebRTC peer attempts by validating candidate IDs from MongoDB against currently active connected sockets in userManager; avoided redundant queries when alone or stationary.
+
+Tomorrow (Day 11): perf: query timing logger
+
 <!-- Copy the block above for each new day. -->
 
 Viva notes (add as you go)
@@ -253,9 +282,9 @@ Viva notes (add as you go)
 What each file does in simple words:
 
 - server/src/server.js: Starts the Express HTTP and Socket.IO server, applies CORS, and parses JSON.
-- server/src/sockets/socketHandler.js: Central Socket.IO handler for connections, join events, movement broadcasts, and disconnect events.
+- server/src/sockets/socketHandler.js: Central Socket.IO handler for connections, join events, movement broadcasts, disconnect events, and `nearby:enter` / `nearby:leave` proximity diff emissions.
 - server/src/services/userManager.js: Maintains an in-memory Map of connected users, including socket ID, username, and position [x, y].
-- server/src/services/persistenceManager.js: Handles debounced MongoDB persistence, in-flight write tracking, and safe disconnect cleanup.
+- server/src/services/persistenceManager.js: Handles debounced MongoDB persistence, in-flight write tracking, safe disconnect cleanup, `getNearbyUsers()`, `clusterUsers()`, and proximity diff tracking (`updateProximity`, `cleanupProximityOnDisconnect`).
 - server/src/models/Player.js: Defines the Mongoose Player schema with Cartesian position: [x, y] and a 2d geospatial index.
 - server/models/Player.js: Legacy Player model used by the existing CommonJS backend.
 - server/utils/validation.js: Validates coordinates against the 1000x600 canvas boundaries and protects against invalid or out-of-range values.
@@ -264,7 +293,7 @@ What each file does in simple words:
 - server/src/scripts/migrate-indexes.js: ES-module migration script for inspecting, updating, and verifying MongoDB geospatial indexes.
 - server/scripts/fake-clients.js: Spawns configurable Socket.IO clients to test concurrent connections, movement broadcasts, and disconnect behavior.
 - server/test/debounce-index.test.js: Tests coordinate validation, debounced persistence, disconnect cleanup, and schema index definitions.
-- server/test/persistence.test.js: Tests schema indexes, coordinate clamping, defensive coordinate validation, and persistence/disconnect safeguards.
+- server/test/persistence.test.js: Tests schema indexes, coordinate clamping, defensive coordinate validation, getNearbyUsers, clusterUsers, and proximity diff tracking.
 - docs/database-schema.md: Comprehensive technical notes covering the database schema, 2D vs 2dsphere indexing, and persistence concurrency guards.
 
 Key decisions and why (2d index, debouncing, disconnect cleanup, in-memory map):
@@ -273,6 +302,7 @@ Key decisions and why (2d index, debouncing, disconnect cleanup, in-memory map):
 - 2D index vs. 2dsphere: The virtual office is a flat 1000x600 pixel grid. A 2d index is appropriate for Cartesian coordinates and direct Euclidean pixel distance ($near with $maxDistance: 100), while 2dsphere is designed for geographic spherical coordinates.
 - Debouncing: Movement updates are broadcast immediately over WebSockets (zero DB lag for 60 FPS), while MongoDB writes are delayed by 1000ms to reduce database I/O by >95%.
 - Disconnect safety: Pending timers are cleared, in-flight writes are awaited where necessary, and asynchronous operations are guarded with a tombstone set (disconnectedSockets) to prevent deleted player records from being resurrected.
+- Proximity Diffs (`nearby:enter` / `nearby:leave`): WebRTC peer connections are computationally and bandwidth intensive. Instead of spamming proximity lists or connecting all peers, the server calculates proximity diffs only when users enter or leave the 100px earshot. Symmetrically updating both peers prevents redundant offer/answer negotiations.
 - Movement interpolation: Remote avatar positions are interpolated between received updates to make movement appear smoother.
 - Socket.IO compatibility: The client listens for both legacy and newer event names to interoperate smoothly with both server implementations.
 
@@ -283,6 +313,8 @@ Questions I should be ready for:
 - Does changing a Mongoose schema automatically delete an old database index? No. Obsolete indexes must be removed explicitly through a migration script (collection.dropIndex) or database command.
 - Why use a 2d index instead of a 2dsphere index? The virtual office uses flat pixel coordinates rather than geographic spherical coordinates.
 - How do you prevent zombie records on disconnect? By registering the socket in a disconnectedSockets tombstone set and awaiting active in-flight writes before issuing deleteOne.
+- How do you detect when a user enters or leaves the 100px earshot without sending duplicate events? We maintain a set of previously nearby peer IDs for each socket in `userNearbyMap`. When a user moves or joins, we query nearby users within 100px and compute the set difference (`entered = current \ previous`, `left = previous \ current`). If a user moves but stays within 100px of the same peers, both diff sets are empty, so no events are emitted.
+- What happens when a user disconnects? The server cleans up the user from `userNearbyMap` and iterates over all peers who had that user in their nearby set, emitting `nearby:leave` to those active peers so they can tear down their WebRTC connection, while never attempting to send events to the closed socket.
 
 Done checklist
 
