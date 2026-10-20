@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
+import { performance } from "node:perf_hooks";
 import mongoose from "mongoose";
 import { Player } from "../src/models/Player.js";
 import {
@@ -16,8 +17,15 @@ import {
   userNearbyMap,
   updateProximity,
   cleanupProximityOnDisconnect,
-  resetNearbyMap
+  resetNearbyMap,
+  measureQuery,
+  logQueryTiming,
+  getQueryStats,
+  resetQueryStats,
+  getLastQueryTiming,
+  TARGET_QUERY_TIME_MS
 } from "../src/services/persistenceManager.js";
+import { sanitizeLogData } from "../src/services/queryTimer.js";
 import { clampCoordinate, sanitizeUsername, addUser, removeUser, getAllUsers } from "../src/services/userManager.js";
 import { setupSocketHandlers, resetProximityQueues } from "../src/sockets/socketHandler.js";
 
@@ -824,4 +832,246 @@ test("SocketHandler - Serializes rapid movements and avoids race conditions via 
     resetNearbyMap();
     resetProximityQueues();
   }
+});
+
+// ---------------------------------------------------------------------
+// DAY 11: Query Timing Logger Tests (Target: <= 20 ms)
+// ---------------------------------------------------------------------
+
+test("QueryTimer - Sanitizes secrets, credentials, and connection strings from log outputs", () => {
+  const secretMongoUri = "mongodb://admin:secretpassword123@cluster0.abc.mongodb.net/proxispeak?retryWrites=true";
+  const sanitizedUri = sanitizeLogData(secretMongoUri);
+  assert.equal(sanitizedUri.includes("secretpassword123"), false, "Must redact passwords from Mongo URI");
+  assert.equal(sanitizedUri.includes("mongodb://[REDACTED]"), true);
+
+  const secretSrvUri = "mongodb+srv://root:supersecret@mycluster.mongodb.net";
+  assert.equal(sanitizeLogData(secretSrvUri).includes("supersecret"), false);
+
+  const queryWithToken = "type=search&token=abc12345secretToken&user=alice";
+  assert.equal(sanitizeLogData(queryWithToken).includes("abc12345secretToken"), false);
+
+  // Object with secret keys
+  const sensitiveObj = {
+    origin: [100, 100],
+    maxDistance: 100,
+    mongoUri: "mongodb://user:pass@localhost/db",
+    apiToken: "super-secret-key"
+  };
+  const cleanObj = sanitizeLogData(sensitiveObj);
+  assert.equal(cleanObj.mongoUri, "[REDACTED]");
+  assert.equal(cleanObj.apiToken, "[REDACTED]");
+  assert.deepEqual(cleanObj.origin, [100, 100]);
+});
+
+test("QueryTimer - Measures execution duration and computes performance statistics", async () => {
+  resetQueryStats();
+
+  const origNow = performance.now;
+  try {
+    let callCount = 0;
+    // Mock performance.now to simulate a deterministic 10ms execution, eliminating OS timer jitter
+    performance.now = () => {
+      callCount++;
+      return callCount === 1 ? 100 : 110;
+    };
+
+    const mockQuery = async () => {
+      return [{ id: "user-1" }, { id: "user-2" }];
+    };
+
+    const results = await measureQuery(mockQuery, {
+      source: "in-memory",
+      origin: [200, 200],
+      maxDistance: 100
+    });
+
+    assert.equal(results.length, 2);
+
+    const lastTiming = getLastQueryTiming();
+    assert.ok(lastTiming, "Must capture last query timing record");
+    assert.equal(lastTiming.source, "in-memory");
+    assert.equal(lastTiming.resultCount, 2);
+    assert.deepEqual(lastTiming.origin, [200, 200]);
+    assert.equal(lastTiming.maxDistance, 100);
+    assert.equal(lastTiming.durationMs, 10);
+    assert.equal(lastTiming.targetMet, true, "10ms query meets <20ms target");
+  } finally {
+    performance.now = origNow;
+    resetQueryStats();
+  }
+});
+
+test("QueryTimer - Enforces strict < 20ms performance target at the exact 20ms boundary", async () => {
+  resetQueryStats();
+
+  // 1. Strictly below boundary: 19.999ms -> targetMet must be true
+  const underRecord = logQueryTiming({
+    source: "in-memory",
+    durationMs: 19.999,
+    resultCount: 1
+  });
+  assert.equal(underRecord.targetMet, true, "19.999ms is strictly under 20ms and must meet target");
+
+  // 2. Exact boundary: 20.000ms -> targetMet must be false (strict < 20ms requirement)
+  const exactRecord = logQueryTiming({
+    source: "in-memory",
+    durationMs: 20.0,
+    resultCount: 1
+  });
+  assert.equal(exactRecord.targetMet, false, "Exact 20.0ms does not meet strict < 20ms target");
+
+  // 3. Strictly above boundary: 20.001ms -> targetMet must be false
+  const overRecord = logQueryTiming({
+    source: "in-memory",
+    durationMs: 20.001,
+    resultCount: 1
+  });
+  assert.equal(overRecord.targetMet, false, "20.001ms exceeds 20ms target");
+
+  // 4. Verify measureQuery at exact 20ms boundary using controlled performance.now
+  const origNow = performance.now;
+  try {
+    let callCount = 0;
+    performance.now = () => (callCount++ === 0 ? 0 : 20.0);
+    await measureQuery(async () => [{ id: "boundary-user" }], { source: "in-memory" });
+    const measuredBoundary = getLastQueryTiming();
+    assert.equal(measuredBoundary.durationMs, 20);
+    assert.equal(measuredBoundary.targetMet, false, "measureQuery at exact 20ms boundary must have targetMet = false");
+  } finally {
+    performance.now = origNow;
+    resetQueryStats();
+  }
+});
+
+test("QueryTimer - Tracks target compliance and alerts on queries exceeding 20ms", () => {
+  resetQueryStats();
+
+  // 1. Fast query (5ms <= 20ms target)
+  const fastRecord = logQueryTiming({
+    source: "mongodb",
+    durationMs: 5.25,
+    resultCount: 3,
+    origin: [100, 100],
+    maxDistance: 100
+  });
+  assert.equal(fastRecord.targetMet, true);
+  assert.equal(fastRecord.targetMs, 20);
+
+  // 2. Slow query (25.5ms > 20ms target)
+  const slowRecord = logQueryTiming({
+    source: "mongodb",
+    durationMs: 25.5,
+    resultCount: 10,
+    origin: [100, 100],
+    maxDistance: 100
+  });
+  assert.equal(slowRecord.targetMet, false, "Must flag query exceeding 20ms");
+
+  const stats = getQueryStats();
+  assert.equal(stats.totalQueries, 2);
+  assert.equal(stats.slowQueryCount, 1);
+  assert.equal(stats.targetMetRate, 50); // 1 out of 2 met target = 50%
+  assert.equal(stats.bySource.mongodb.count, 2);
+  assert.equal(stats.bySource.mongodb.slowCount, 1);
+
+  resetQueryStats();
+});
+
+test("QueryTimer - Maintains ring buffer history and aggregates multi-source statistics", () => {
+  resetQueryStats();
+
+  // Log queries from multiple sources
+  logQueryTiming({ source: "in-memory", durationMs: 1.5, resultCount: 2 });
+  logQueryTiming({ source: "in-memory", durationMs: 2.5, resultCount: 4 });
+  logQueryTiming({ source: "mongodb", durationMs: 8.0, resultCount: 5 });
+
+  const stats = getQueryStats();
+  assert.equal(stats.totalQueries, 3);
+  assert.equal(stats.slowQueryCount, 0);
+  assert.equal(stats.targetMetRate, 100);
+  assert.equal(stats.minDurationMs, 1.5);
+  assert.equal(stats.maxDurationMs, 8.0);
+  assert.equal(stats.bySource["in-memory"].count, 2);
+  assert.equal(stats.bySource.mongodb.count, 1);
+
+  resetQueryStats();
+});
+
+test("getNearbyUsers - Automatically records query timing for in-memory and MongoDB queries", async () => {
+  resetQueryStats();
+
+  // 1. In-memory fallback query timing
+  const fallbackUsers = [
+    { socketId: "peer-a", x: 120, y: 100 },
+    { socketId: "peer-b", x: 140, y: 100 }
+  ];
+
+  const results = await getNearbyUsers([100, 100], {
+    fallbackUsers,
+    maxDistance: 100
+  });
+
+  assert.equal(results.length, 2);
+  const memTiming = getLastQueryTiming();
+  assert.ok(memTiming);
+  assert.equal(memTiming.source, "in-memory");
+  assert.equal(memTiming.resultCount, 2);
+  assert.deepEqual(memTiming.origin, [100, 100]);
+  assert.equal(memTiming.targetMet, true);
+
+  // 2. MongoDB query timing
+  const origFind = Player.find;
+  const origReadyState = mongoose.connection.readyState;
+
+  try {
+    Object.defineProperty(mongoose.connection, "readyState", {
+      value: 1,
+      configurable: true,
+      writable: true
+    });
+
+    Player.find = () => ({
+      lean: () => ({
+        exec: async () => [
+          { playerId: "db-peer-1", position: [110, 100] }
+        ]
+      })
+    });
+
+    const dbResults = await getNearbyUsers([100, 100], { maxDistance: 100 });
+    assert.equal(dbResults.length, 1);
+
+    const dbTiming = getLastQueryTiming();
+    assert.ok(dbTiming);
+    assert.equal(dbTiming.source, "mongodb");
+    assert.equal(dbTiming.resultCount, 1);
+    assert.equal(dbTiming.targetMet, true);
+
+    const stats = getQueryStats();
+    assert.equal(stats.totalQueries, 2);
+    assert.equal(stats.bySource["in-memory"].count, 1);
+    assert.equal(stats.bySource.mongodb.count, 1);
+  } finally {
+    Player.find = origFind;
+    Object.defineProperty(mongoose.connection, "readyState", {
+      value: origReadyState,
+      configurable: true,
+      writable: true
+    });
+    resetQueryStats();
+  }
+});
+
+test("QueryTimer - resetQueryStats clears metrics and history cleanly", () => {
+  logQueryTiming({ source: "in-memory", durationMs: 4.0, resultCount: 1 });
+  assert.ok(getLastQueryTiming());
+  assert.equal(getQueryStats().totalQueries, 1);
+
+  resetQueryStats();
+
+  assert.equal(getLastQueryTiming(), null);
+  const cleanStats = getQueryStats();
+  assert.equal(cleanStats.totalQueries, 0);
+  assert.equal(cleanStats.slowQueryCount, 0);
+  assert.equal(cleanStats.targetMetRate, 100);
 });

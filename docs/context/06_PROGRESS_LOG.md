@@ -275,6 +275,31 @@ Problems / fixes: Resolved asynchronous race conditions on rapid movement by imp
 
 Tomorrow (Day 11): perf: query timing logger
 
+Day 11 - Tue 20 Oct 2026 (Kajal, kajal-backend)
+
+Planned: perf: query timing logger
+
+Done:
+- Created high-resolution query timing service in `server/src/services/queryTimer.js` using `performance.now()` to measure proximity query execution times in milliseconds.
+- Enforced strict credential and secret sanitization (`sanitizeLogData`) to redact MongoDB URIs (`mongodb://...`), passwords, API tokens, and credentials from all logged query records.
+- Configured target threshold tracking against the project target of 20ms (`TARGET_QUERY_TIME_MS = 20`) with automatic alert logging (`[PERF ALERT - SLOW]`) for queries exceeding 20ms.
+- Integrated `measureQuery()` into `server/src/services/persistenceManager.js` inside `getNearbyUsers()` for both MongoDB `$near` queries (source: `"mongodb"`) and in-memory fallback calculations (source: `"in-memory"`).
+- Maintained ring buffer of recent query timings (`getRecentQueries()`) and computed aggregate statistics (`getQueryStats()`: totalQueries, avgDurationMs, minDurationMs, maxDurationMs, slowQueryCount, targetMetRate, bySource breakdown).
+- Exported `resetQueryStats()` and `getLastQueryTiming()` for easy inspection in unit tests and future benchmark audits.
+- Added 6 dedicated automated unit tests in `server/test/persistence.test.js` verifying secret scrubbing, execution measurement, target compliance, multi-source aggregation, automatic logging in `getNearbyUsers()`, and clean stat resets. All 43 tests pass.
+
+Files changed:
+- server/src/services/queryTimer.js
+- server/src/services/persistenceManager.js
+- server/test/persistence.test.js
+- docs/context/06_PROGRESS_LOG.md
+
+Commit message(s): perf: query timing logger
+
+Problems / fixes: Fixed regex capture group in `sanitizeLogData` to ensure secret values are redacted rather than echoed, and wrapped both MongoDB and fallback execution paths transparently without altering return shapes.
+
+Tomorrow (Day 12): perf: cache and index tuning to get under 20 ms
+
 <!-- Copy the block above for each new day. -->
 
 Viva notes (add as you go)
@@ -285,6 +310,7 @@ What each file does in simple words:
 - server/src/sockets/socketHandler.js: Central Socket.IO handler for connections, join events, movement broadcasts, disconnect events, and `nearby:enter` / `nearby:leave` proximity diff emissions.
 - server/src/services/userManager.js: Maintains an in-memory Map of connected users, including socket ID, username, and position [x, y].
 - server/src/services/persistenceManager.js: Handles debounced MongoDB persistence, in-flight write tracking, safe disconnect cleanup, `getNearbyUsers()`, `clusterUsers()`, and proximity diff tracking (`updateProximity`, `cleanupProximityOnDisconnect`).
+- server/src/services/queryTimer.js: Measures execution time of geospatial proximity queries, formats secret-safe logs, tracks performance against the <=20ms target, and aggregates latency metrics.
 - server/src/models/Player.js: Defines the Mongoose Player schema with Cartesian position: [x, y] and a 2d geospatial index.
 - server/models/Player.js: Legacy Player model used by the existing CommonJS backend.
 - server/utils/validation.js: Validates coordinates against the 1000x600 canvas boundaries and protects against invalid or out-of-range values.
@@ -293,7 +319,7 @@ What each file does in simple words:
 - server/src/scripts/migrate-indexes.js: ES-module migration script for inspecting, updating, and verifying MongoDB geospatial indexes.
 - server/scripts/fake-clients.js: Spawns configurable Socket.IO clients to test concurrent connections, movement broadcasts, and disconnect behavior.
 - server/test/debounce-index.test.js: Tests coordinate validation, debounced persistence, disconnect cleanup, and schema index definitions.
-- server/test/persistence.test.js: Tests schema indexes, coordinate clamping, defensive coordinate validation, getNearbyUsers, clusterUsers, and proximity diff tracking.
+- server/test/persistence.test.js: Tests schema indexes, coordinate clamping, defensive coordinate validation, getNearbyUsers, clusterUsers, proximity diff tracking, and query timing metrics.
 - docs/database-schema.md: Comprehensive technical notes covering the database schema, 2D vs 2dsphere indexing, and persistence concurrency guards.
 
 Key decisions and why (2d index, debouncing, disconnect cleanup, in-memory map):
@@ -303,6 +329,7 @@ Key decisions and why (2d index, debouncing, disconnect cleanup, in-memory map):
 - Debouncing: Movement updates are broadcast immediately over WebSockets (zero DB lag for 60 FPS), while MongoDB writes are delayed by 1000ms to reduce database I/O by >95%.
 - Disconnect safety: Pending timers are cleared, in-flight writes are awaited where necessary, and asynchronous operations are guarded with a tombstone set (disconnectedSockets) to prevent deleted player records from being resurrected.
 - Proximity Diffs (`nearby:enter` / `nearby:leave`): WebRTC peer connections are computationally and bandwidth intensive. Instead of spamming proximity lists or connecting all peers, the server calculates proximity diffs only when users enter or leave the 100px earshot. Symmetrically updating both peers prevents redundant offer/answer negotiations.
+- Query Timing Logger: The project mandates that spatial queries complete under 20ms to handle 50+ concurrent users without degrading real-time audio signaling. High-resolution timing via performance.now() tracks whether queries meet this target, alerts on slow queries, and provides data for Day 13 spatial audit benchmarks while scrubbing credentials and connection strings from logs.
 - Movement interpolation: Remote avatar positions are interpolated between received updates to make movement appear smoother.
 - Socket.IO compatibility: The client listens for both legacy and newer event names to interoperate smoothly with both server implementations.
 
@@ -315,6 +342,7 @@ Questions I should be ready for:
 - How do you prevent zombie records on disconnect? By registering the socket in a disconnectedSockets tombstone set and awaiting active in-flight writes before issuing deleteOne.
 - How do you detect when a user enters or leaves the 100px earshot without sending duplicate events? We maintain a set of previously nearby peer IDs for each socket in `userNearbyMap`. When a user moves or joins, we query nearby users within 100px and compute the set difference (`entered = current \ previous`, `left = previous \ current`). If a user moves but stays within 100px of the same peers, both diff sets are empty, so no events are emitted.
 - What happens when a user disconnects? The server cleans up the user from `userNearbyMap` and iterates over all peers who had that user in their nearby set, emitting `nearby:leave` to those active peers so they can tear down their WebRTC connection, while never attempting to send events to the closed socket.
+- Why do you log query timing and what is the target? ProxiSpeak has a hard target of <20ms for proximity queries. The logger measures each query using performance.now(), logs timing data safely without exposing database credentials, and tracks the compliance rate so we can identify bottlenecks before scaling to 50 concurrent users.
 
 Done checklist
 

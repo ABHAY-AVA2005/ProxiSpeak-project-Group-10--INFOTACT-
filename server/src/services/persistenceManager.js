@@ -1,5 +1,22 @@
 import { Player } from "../models/Player.js";
 import { isDbConnected } from "../config/db.js";
+import {
+  measureQuery,
+  logQueryTiming,
+  getQueryStats,
+  resetQueryStats,
+  getLastQueryTiming,
+  TARGET_QUERY_TIME_MS
+} from "./queryTimer.js";
+
+export {
+  measureQuery,
+  logQueryTiming,
+  getQueryStats,
+  resetQueryStats,
+  getLastQueryTiming,
+  TARGET_QUERY_TIME_MS
+};
 
 // Debounce timer duration: 1000ms after last movement
 export const DB_DEBOUNCE_MS = 1000;
@@ -198,6 +215,12 @@ export async function getNearbyUsers(origin, options = {}) {
     validMaxDistance = maxDistance;
   }
 
+  const queryContext = {
+    origin: [originX, originY],
+    maxDistance: validMaxDistance,
+    excludePlayerId
+  };
+
   // 3. Query MongoDB using 2d $near if database is connected
   if (isDbConnected()) {
     try {
@@ -212,12 +235,14 @@ export async function getNearbyUsers(origin, options = {}) {
         query.playerId = { $ne: String(excludePlayerId) };
       }
 
-      const docs = await Player.find(query).lean().exec();
-      return docs.map((doc) => ({
-        ...doc,
-        socketId: doc.playerId || doc.socketId,
-        id: doc.id || doc.socketId || doc.playerId
-      }));
+      return await measureQuery(async () => {
+        const docs = await Player.find(query).lean().exec();
+        return docs.map((doc) => ({
+          ...doc,
+          socketId: doc.playerId || doc.socketId,
+          id: doc.id || doc.socketId || doc.playerId
+        }));
+      }, { ...queryContext, source: "mongodb" });
     } catch (err) {
       console.warn("MongoDB $near query failed, using in-memory fallback:", err.message);
     }
@@ -229,49 +254,51 @@ export async function getNearbyUsers(origin, options = {}) {
       return [];
     }
 
-    const maxDistSq = validMaxDistance * validMaxDistance;
-    const candidates = [];
+    return await measureQuery(async () => {
+      const maxDistSq = validMaxDistance * validMaxDistance;
+      const candidates = [];
 
-    for (const u of fallbackUsers) {
-      if (!u || typeof u !== "object") continue;
+      for (const u of fallbackUsers) {
+        if (!u || typeof u !== "object") continue;
 
-      // Match against both database playerId and in-memory socketId/id
-      const id = u.playerId ?? u.socketId ?? u.id;
-      if (excludePlayerId && id !== undefined && id !== null && String(id) === String(excludePlayerId)) {
-        continue;
+        // Match against both database playerId and in-memory socketId/id
+        const id = u.playerId ?? u.socketId ?? u.id;
+        if (excludePlayerId && id !== undefined && id !== null && String(id) === String(excludePlayerId)) {
+          continue;
+        }
+
+        // Validate candidate user coordinates
+        const ux = u.x ?? u.position?.[0];
+        const uy = u.y ?? u.position?.[1];
+        if (!Number.isFinite(ux) || !Number.isFinite(uy)) {
+          continue;
+        }
+
+        const dx = ux - originX;
+        const dy = uy - originY;
+        const distSq = dx * dx + dy * dy;
+
+        if (distSq <= maxDistSq) {
+          candidates.push({
+            user: u,
+            distance: Math.sqrt(distSq)
+          });
+        }
       }
 
-      // Validate candidate user coordinates
-      const ux = u.x ?? u.position?.[0];
-      const uy = u.y ?? u.position?.[1];
-      if (!Number.isFinite(ux) || !Number.isFinite(uy)) {
-        continue;
-      }
-
-      const dx = ux - originX;
-      const dy = uy - originY;
-      const distSq = dx * dx + dy * dy;
-
-      if (distSq <= maxDistSq) {
-        candidates.push({
-          user: u,
-          distance: Math.sqrt(distSq)
-        });
-      }
-    }
-
-    // Sort by ascending distance (closest first, matching MongoDB $near behavior)
-    candidates.sort((a, b) => a.distance - b.distance);
-    return candidates.map((item) => {
-      const u = item.user;
-      const sid = u.socketId || u.playerId || u.id;
-      return {
-        ...u,
-        socketId: sid,
-        id: u.id || sid,
-        playerId: u.playerId || sid
-      };
-    });
+      // Sort by ascending distance (closest first, matching MongoDB $near behavior)
+      candidates.sort((a, b) => a.distance - b.distance);
+      return candidates.map((item) => {
+        const u = item.user;
+        const sid = u.socketId || u.playerId || u.id;
+        return {
+          ...u,
+          socketId: sid,
+          id: u.id || sid,
+          playerId: u.playerId || sid
+        };
+      });
+    }, { ...queryContext, source: "in-memory" });
   }
 
   return [];
