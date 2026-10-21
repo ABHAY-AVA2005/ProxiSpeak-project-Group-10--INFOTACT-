@@ -283,6 +283,15 @@ Validation is defined in `server/utils/validation.js` and enforced before any st
    - Awaits any in-flight database write for this socket to ensure sequential execution.
    - Deletes the document via `Player.deleteOne({ playerId: socket.id })`.
    - Unrefs a 5-second cleanup timer to prune the tombstone set without keeping the Node.js event loop alive.
+---
+
+## 🧪 Testing & Simulation Scripts
+
+From the `server/` directory:
+- `npm test`: Runs Node.js automated test suite (`persistence.test.js` validating Cartesian `2d` index, clamping, and debouncing).
+- `npm run test:clients`: Runs `fake-clients.js` multi-avatar simulation with customizable duration and client count.
+- `npm run migrate:indexes`: Audits and ensures the `position_2d` index in MongoDB.
+- `npm run audit:spatial`: Runs automated spatial audit and benchmarks across 10–200 users (`spatial-audit.js`).
 
 ## 🚀 Getting Started
 

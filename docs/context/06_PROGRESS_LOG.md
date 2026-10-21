@@ -2,15 +2,12 @@
 
 Update this every night before pushing. The AI reads it at the start of each session.
 
-Current status
+## Current status
+- Current day: Day 12 (Wed 21 Oct 2026) - synchronized with origin/main
+- Current task (from 02_TEAM_PLAN.md): test: spatial audit script, results to docs/benchmarks.md
+- Blockers: none
 
-Current day: Day 3 (Mon 12 Oct 2026)
-
-Current task (from 02_TEAM_PLAN.md): feat: join event, in-memory users, broadcast users
-
-Blockers: none
-
-Daily entries
+## Daily entries
 
 Day 1 - Sat 10 Oct 2026
 
@@ -388,16 +385,10 @@ Questions I should be ready for:
 - What happens when a user disconnects? The server cleans up the user from `userNearbyMap` and iterates over all peers who had that user in their nearby set, emitting `nearby:leave` to those active peers so they can tear down their WebRTC connection, while never attempting to send events to the closed socket.
 - Why do you log query timing and what is the target? ProxiSpeak has a hard target of <20ms for proximity queries. The logger measures each query using performance.now(), logs timing data safely without exposing database credentials, and tracks the compliance rate so we can identify bottlenecks before scaling to 50 concurrent users.
 
-Done checklist
-
-Week 1 merged to main
-
-Week 2 merged, tag v0.2-mid
-
-Mid review ready (docs, benchmarks, video)
-
-Week 3 merged, tag v0.3
-
-Week 4 merged, deployed, tag v1.0
-
-Final review ready (report, PPT, video)
+## Done checklist
+- [x] Week 1 merged to main
+- [ ] Week 2 merged, tag v0.2-mid
+- [ ] Mid review ready (docs, benchmarks, video)
+- [ ] Week 3 merged, tag v0.3
+- [ ] Week 4 merged, deployed, tag v1.0
+- [ ] Final review ready (report, PPT, video)

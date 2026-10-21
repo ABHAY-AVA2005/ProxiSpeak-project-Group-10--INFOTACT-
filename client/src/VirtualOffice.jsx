@@ -1,504 +1,398 @@
 import { useEffect, useRef } from "react";
 import { io } from "socket.io-client";
 
-// Office obstacles for collision detection
-const OBSTACLES = [
-    // Desk (solid obstacle)
-    { x: 150, y: 150, width: 180, height: 80 },
-    // Meeting room walls (6px thickness)
-    { x: 500, y: 97, width: 300, height: 6 }, // North wall
-    { x: 497, y: 100, width: 6, height: 200 }, // West wall
-    { x: 797, y: 100, width: 6, height: 200 }, // East wall
-    { x: 497, y: 297, width: 113, height: 6 }, // South wall left section
-    { x: 690, y: 297, width: 113, height: 6 }, // South wall right section
+const SERVER_URL = import.meta.env.VITE_SERVER_URL || "http://localhost:5000";
+
+// ─── World constants (match server WORLD_BOUNDS) ─────────────────────────────
+const WORLD_W = 1000;
+const WORLD_H = 600;
+const GRID_SIZE = 40; // floor tile size in px
+const AVATAR_RADIUS = 18;
+
+// ─── Wall / obstacle definitions ─────────────────────────────────────────────
+// Each rect: { x, y, width, height, label? }
+const WALLS = [
+  // Outer boundary walls (inset 10px)
+  { x: 10, y: 10, width: WORLD_W - 20, height: 6, label: null },   // top
+  { x: 10, y: WORLD_H - 16, width: WORLD_W - 20, height: 6, label: null }, // bottom
+  { x: 10, y: 10, width: 6, height: WORLD_H - 20, label: null },  // left
+  { x: WORLD_W - 16, y: 10, width: 6, height: WORLD_H - 20, label: null }, // right
+
+  // Meeting room walls (with doorway gap on south side)
+  { x: 500, y: 80, width: 300, height: 6, label: null },  // north
+  { x: 500, y: 80, width: 6, height: 220, label: null },  // west
+  { x: 794, y: 80, width: 6, height: 220, label: null },  // east
+  { x: 500, y: 294, width: 110, height: 6, label: null }, // south-left
+  { x: 690, y: 294, width: 110, height: 6, label: null }, // south-right
 ];
 
-function checkObstacleCollision(circleX, circleY, radius = 20) {
-    for (let i = 0; i < OBSTACLES.length; i++) {
-        const obs = OBSTACLES[i];
-        const closestX = Math.max(obs.x, Math.min(circleX, obs.x + obs.width));
-        const closestY = Math.max(obs.y, Math.min(circleY, obs.y + obs.height));
-        const distX = circleX - closestX;
-        const distY = circleY - closestY;
-        if (distX * distX + distY * distY < radius * radius) {
-            return true;
-        }
-    }
-    return false;
+// Solid obstacles (desk, etc.)
+const OBSTACLES = [
+  { x: 150, y: 150, width: 180, height: 70, label: "Desk" },
+  { x: 380, y: 420, width: 160, height: 70, label: "Desk" },
+  { x: 560, y: 120, width: 220, height: 60, label: "Table" },
+];
+
+// Combined for collision
+const ALL_SOLID = [...WALLS, ...OBSTACLES];
+
+function checkCollision(cx, cy, radius = AVATAR_RADIUS) {
+  for (const rect of ALL_SOLID) {
+    const nearX = Math.max(rect.x, Math.min(cx, rect.x + rect.width));
+    const nearY = Math.max(rect.y, Math.min(cy, rect.y + rect.height));
+    if ((cx - nearX) ** 2 + (cy - nearY) ** 2 < radius * radius) return true;
+  }
+  return false;
 }
 
-function VirtualOffice({ earshotRadius = 200 }) {
-    const canvasRef = useRef(null);
-    const earshotRadiusRef = useRef(earshotRadius);
+// ─── Colour helpers ───────────────────────────────────────────────────────────
+const REMOTE_COLOURS = [
+  "#f97316", "#a855f7", "#ec4899", "#14b8a6",
+  "#f59e0b", "#64748b", "#06b6d4", "#84cc16",
+];
+const colourCache = {};
+function colourForId(id) {
+  if (!colourCache[id]) {
+    colourCache[id] = REMOTE_COLOURS[Object.keys(colourCache).length % REMOTE_COLOURS.length];
+  }
+  return colourCache[id];
+}
 
-    useEffect(() => {
-        earshotRadiusRef.current = earshotRadius;
-    }, [earshotRadius]);
+// ─── Component ────────────────────────────────────────────────────────────────
+function VirtualOffice({ username = "You", earshotRadius = 200 }) {
+  const canvasRef = useRef(null);
+  const earshotRef = useRef(earshotRadius);
 
-    // Our player's position
-    const player = useRef({
-        x: 400,
-        y: 400,
+  useEffect(() => { earshotRef.current = earshotRadius; }, [earshotRadius]);
+
+  const player = useRef({ x: 400, y: 400, username });
+  const keys = useRef({});
+  const clickTarget = useRef(null);    // { x, y } for click-to-move
+  const remotePlayers = useRef({});    // id -> { x, y, targetX, targetY, username }
+
+  useEffect(() => {
+    player.current.username = username;
+  }, [username]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext("2d");
+    canvas.width = WORLD_W;
+    canvas.height = WORLD_H;
+
+    // ── Socket.IO ──────────────────────────────────────────────────────────
+    const socket = io(SERVER_URL, { transports: ["websocket"], reconnectionAttempts: 5 });
+
+    socket.on("connect", () => {
+      console.log("[ProxiSpeak] Connected:", socket.id);
+      socket.emit("join", { username, x: player.current.x, y: player.current.y });
     });
 
-    // Keyboard keys
-    const keys = useRef({});
+    socket.on("users:list", (list) => {
+      remotePlayers.current = {};
+      (Array.isArray(list) ? list : Object.values(list || {})).forEach((u) => {
+        const id = u.socketId || u.id;
+        if (id && id !== socket.id) {
+          remotePlayers.current[id] = { x: u.x, y: u.y, targetX: u.x, targetY: u.y, username: u.username };
+        }
+      });
+    });
 
-    // Other players
-    const remotePlayers = useRef({});
+    socket.on("user:joined", (u) => {
+      const id = u.socketId || u.id;
+      if (id && id !== socket.id) {
+        remotePlayers.current[id] = { x: u.x, y: u.y, targetX: u.x, targetY: u.y, username: u.username };
+      }
+    });
 
-    useEffect(() => {
-        const socket = io("http://localhost:5000");
+    socket.on("user:moved", (data) => {
+      const id = data.socketId || data.id;
+      if (!id || id === socket.id) return;
+      const p = remotePlayers.current[id];
+      if (p) { p.targetX = data.x; p.targetY = data.y; }
+      else remotePlayers.current[id] = { x: data.x, y: data.y, targetX: data.x, targetY: data.y, username: "" };
+    });
 
-        socket.on("connect", () => {
-            console.log("Connected to ProxiSpeak server:", socket.id);
-            // Announce this player after the socket connects.
-            socket.emit("join", {
-                username: "You",
-                x: player.current.x,
-                y: player.current.y,
-            });
-        });
+    socket.on("user:left", (data) => {
+      const id = data?.socketId || data?.id;
+      if (id) {
+        delete remotePlayers.current[id];
+        delete colourCache[id];
+      }
+    });
 
-        // Receive the current player list from either server event format.
-        const handlePlayerList = (players) => {
-            remotePlayers.current = {};
-            const list = Array.isArray(players) ? players : Object.values(players);
+    // ── Keyboard ───────────────────────────────────────────────────────────
+    const onKeyDown = (e) => {
+      const k = e.key.toLowerCase();
+      if (["arrowup","arrowdown","arrowleft","arrowright","w","a","s","d"].includes(k)) {
+        e.preventDefault();
+        clickTarget.current = null; // cancel click-to-move when key pressed
+      }
+      keys.current[k] = true;
+    };
+    const onKeyUp = (e) => { keys.current[e.key.toLowerCase()] = false; };
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
 
-            list.forEach((other) => {
-                const id = other.socketId || other.id;
+    // ── Click-to-move ──────────────────────────────────────────────────────
+    const onCanvasClick = (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = WORLD_W / rect.width;
+      const scaleY = WORLD_H / rect.height;
+      const tx = Math.round((e.clientX - rect.left) * scaleX);
+      const ty = Math.round((e.clientY - rect.top) * scaleY);
+      if (!checkCollision(tx, ty)) {
+        clickTarget.current = { x: tx, y: ty };
+      }
+    };
+    canvas.addEventListener("click", onCanvasClick);
 
-                if (id && id !== socket.id) {
-                    remotePlayers.current[id] = {
-                        x: other.x,
-                        y: other.y,
-                        targetX: other.x,
-                        targetY: other.y,
-                    };
-                }
-            });
-        };
+    // ── Game loop ──────────────────────────────────────────────────────────
+    let rafId;
+    let isRunning = true;
+    let lastEmitTime = 0;
+    let lastSentX = player.current.x;
+    let lastSentY = player.current.y;
+    const SPEED = 3;
+    const LERP = 0.2;
+    const CLICK_SPEED = 3;
 
-        socket.on("users:list", handlePlayerList);
+    function gameLoop() {
+      if (!isRunning) return;
 
-        // Handle newly joined players.
-        const handlePlayerJoined = (other) => {
-            const id = other.socketId || other.id;
+      // ─── Movement ─────────────────────────────────────────────────────
+      let dx = 0;
+      let dy = 0;
 
-            if (id && id !== socket.id) {
-                remotePlayers.current[id] = {
-                    x: other.x,
-                    y: other.y,
-                    targetX: other.x,
-                    targetY: other.y,
-                };
-            }
-        };
+      const k = keys.current;
+      if (k["arrowup"]    || k["w"]) dy -= SPEED;
+      if (k["arrowdown"]  || k["s"]) dy += SPEED;
+      if (k["arrowleft"]  || k["a"]) dx -= SPEED;
+      if (k["arrowright"] || k["d"]) dx += SPEED;
 
-        socket.on("user:joined", handlePlayerJoined);
+      // Click-to-move (only when no key held)
+      if (dx === 0 && dy === 0 && clickTarget.current) {
+        const tdx = clickTarget.current.x - player.current.x;
+        const tdy = clickTarget.current.y - player.current.y;
+        const dist = Math.hypot(tdx, tdy);
+        if (dist < CLICK_SPEED) {
+          player.current.x = clickTarget.current.x;
+          player.current.y = clickTarget.current.y;
+          clickTarget.current = null;
+        } else {
+          dx = (tdx / dist) * CLICK_SPEED;
+          dy = (tdy / dist) * CLICK_SPEED;
+        }
+      }
 
-        // Update remote-player targets; the animation loop interpolates movement.
-        const handlePlayerMoved = (other) => {
-            const id = other.socketId || other.id;
+      if (dx !== 0) {
+        const nx = Math.max(20, Math.min(WORLD_W - 20, player.current.x + dx));
+        if (!checkCollision(nx, player.current.y)) player.current.x = nx;
+        else clickTarget.current = null;
+      }
+      if (dy !== 0) {
+        const ny = Math.max(20, Math.min(WORLD_H - 20, player.current.y + dy));
+        if (!checkCollision(player.current.x, ny)) player.current.y = ny;
+        else clickTarget.current = null;
+      }
 
-            if (!id || id === socket.id) return;
+      // ─── Throttled emit (~30/sec) ─────────────────────────────────────
+      const now = performance.now();
+      if ((player.current.x !== lastSentX || player.current.y !== lastSentY) && now - lastEmitTime >= 33) {
+        lastSentX = player.current.x;
+        lastSentY = player.current.y;
+        lastEmitTime = now;
+        socket.emit("move", { x: player.current.x, y: player.current.y });
+      }
 
-            if (remotePlayers.current[id]) {
-                remotePlayers.current[id].targetX = other.x;
-                remotePlayers.current[id].targetY = other.y;
-            } else {
-                remotePlayers.current[id] = {
-                    x: other.x,
-                    y: other.y,
-                    targetX: other.x,
-                    targetY: other.y,
-                };
-            }
-        };
+      // ─── Lerp remote avatars ──────────────────────────────────────────
+      Object.values(remotePlayers.current).forEach((rp) => {
+        rp.x += (rp.targetX - rp.x) * LERP;
+        rp.y += (rp.targetY - rp.y) * LERP;
+        if (Math.abs(rp.targetX - rp.x) < 0.1) rp.x = rp.targetX;
+        if (Math.abs(rp.targetY - rp.y) < 0.1) rp.y = rp.targetY;
+      });
 
-        socket.on("user:moved", handlePlayerMoved);
+      // ─── Render ───────────────────────────────────────────────────────
+      ctx.clearRect(0, 0, WORLD_W, WORLD_H);
 
-        // Remove players when they leave.
-        socket.on("user:left", (data) => {
-            const id = data?.socketId || data?.id || data;
-            if (id) delete remotePlayers.current[id];
-        });
+      // 1. Floor grid (Tanvi Day 2)
+      ctx.fillStyle = "#1e2533";
+      ctx.fillRect(0, 0, WORLD_W, WORLD_H);
 
-        const canvas = canvasRef.current;
-        const ctx = canvas.getContext("2d");
+      ctx.strokeStyle = "rgba(255,255,255,0.045)";
+      ctx.lineWidth = 1;
+      for (let gx = 0; gx <= WORLD_W; gx += GRID_SIZE) {
+        ctx.beginPath(); ctx.moveTo(gx, 0); ctx.lineTo(gx, WORLD_H); ctx.stroke();
+      }
+      for (let gy = 0; gy <= WORLD_H; gy += GRID_SIZE) {
+        ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(WORLD_W, gy); ctx.stroke();
+      }
 
-        canvas.width = 1000;
-        canvas.height = 600;
-        // Keyboard
+      // 2. Obstacle fills (Tanvi Day 6 — world obstacles)
+      OBSTACLES.forEach((obs) => {
+        ctx.fillStyle = "#4b3f2a";
+        ctx.fillRect(obs.x, obs.y, obs.width, obs.height);
+        ctx.strokeStyle = "#78604a";
+        ctx.lineWidth = 2;
+        ctx.strokeRect(obs.x, obs.y, obs.width, obs.height);
+        if (obs.label) {
+          ctx.fillStyle = "#d4b896";
+          ctx.font = "bold 12px Inter, Arial";
+          ctx.textAlign = "center";
+          ctx.fillText(obs.label, obs.x + obs.width / 2, obs.y + obs.height / 2 + 5);
+        }
+      });
 
-        const handleKeyDown = (event) => {
-            if (
-                event.key === "ArrowUp" ||
-                event.key === "ArrowDown" ||
-                event.key === "ArrowLeft" ||
-                event.key === "ArrowRight"
-            ) {
-                event.preventDefault();
-            }
+      // 3. Wall rectangles (Tanvi Day 6)
+      ctx.fillStyle = "#334155";
+      WALLS.forEach((w) => {
+        ctx.fillRect(w.x, w.y, w.width, w.height);
+      });
 
-            keys.current[event.key] = true;
-        };
+      // Meeting room label
+      ctx.fillStyle = "#94a3b8";
+      ctx.font = "14px Inter, Arial";
+      ctx.textAlign = "center";
+      ctx.fillText("Meeting Room", 650, 105);
 
-        const handleKeyUp = (event) => {
-            keys.current[event.key] = false;
-        };
-        window.addEventListener("keydown", handleKeyDown);
-        window.addEventListener("keyup", handleKeyUp);
+      // Doorway dashed threshold
+      ctx.strokeStyle = "#64748b";
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([5, 4]);
+      ctx.beginPath(); ctx.moveTo(610, 300); ctx.lineTo(690, 300); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = "#64748b";
+      ctx.font = "10px Inter, Arial";
+      ctx.fillText("DOOR", 650, 316);
 
-        let animationFrameId;
-        let isRunning = true;
-        let lastSentPosition = {
-            x: player.current.x,
-            y: player.current.y,
-        };
-        let lastEmitTime = 0;
+      // 4. Click-to-move target indicator
+      if (clickTarget.current) {
+        ctx.beginPath();
+        ctx.arc(clickTarget.current.x, clickTarget.current.y, 8, 0, Math.PI * 2);
+        ctx.strokeStyle = "rgba(99,179,237,0.8)";
+        ctx.lineWidth = 2;
+        ctx.setLineDash([3, 3]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
 
-        // Game loop
-        function gameLoop() {
-            if (!isRunning) return;
-            const speed = 3;
-            let dx = 0;
-            let dy = 0;
+      // 5. Earshot circle (Tanvi Day 5 — visual feedback)
+      const earshot = earshotRef.current;
+      ctx.beginPath();
+      ctx.arc(player.current.x, player.current.y, earshot, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(59,130,246,0.06)";
+      ctx.fill();
+      ctx.strokeStyle = "rgba(59,130,246,0.3)";
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([6, 4]);
+      ctx.stroke();
+      ctx.setLineDash([]);
 
-            // UP
-            if (
-                keys.current["ArrowUp"] ||
-                keys.current["w"] ||
-                keys.current["W"]
-            ) {
-                dy -= speed;
-            }
+      // 6. Remote avatars with username (Tanvi Day 3 + Day 5)
+      Object.entries(remotePlayers.current).forEach(([id, rp]) => {
+        const dist = Math.hypot(rp.x - player.current.x, rp.y - player.current.y);
+        const inEarshot = dist <= earshot;
+        const colour = colourForId(id);
 
-            // DOWN
-            if (
-                keys.current["ArrowDown"] ||
-                keys.current["s"] ||
-                keys.current["S"]
-            ) {
-                dy += speed;
-            }
+        // Avatar circle
+        ctx.beginPath();
+        ctx.arc(rp.x, rp.y, AVATAR_RADIUS, 0, Math.PI * 2);
+        ctx.fillStyle = inEarshot ? colour : "rgba(100,100,100,0.4)";
+        ctx.fill();
+        ctx.strokeStyle = inEarshot ? "#fff" : "#555";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        ctx.closePath();
 
-            // LEFT
-            if (
-                keys.current["ArrowLeft"] ||
-                keys.current["a"] ||
-                keys.current["A"]
-            ) {
-                dx -= speed;
-            }
-
-            // RIGHT
-            if (
-                keys.current["ArrowRight"] ||
-                keys.current["d"] ||
-                keys.current["D"]
-            ) {
-                dx += speed;
-            }
-
-            // Move X with collision detection & boundary clamping
-            if (dx !== 0) {
-                const nextX = Math.max(30, Math.min(970, player.current.x + dx));
-                if (!checkObstacleCollision(nextX, player.current.y, 20)) {
-                    player.current.x = nextX;
-                }
-            }
-
-            // Move Y with collision detection & boundary clamping
-            if (dy !== 0) {
-                const nextY = Math.max(30, Math.min(570, player.current.y + dy));
-                if (!checkObstacleCollision(player.current.x, nextY, 20)) {
-                    player.current.y = nextY;
-                }
-            }
-
-            // Send our position only if player moved, throttled to ~30 updates/sec
-            const hasMoved =
-                player.current.x !== lastSentPosition.x ||
-                player.current.y !== lastSentPosition.y;
-            const now = performance.now();
-
-            if (hasMoved && now - lastEmitTime >= 33) {
-                lastSentPosition = {
-                    x: player.current.x,
-                    y: player.current.y,
-                };
-                lastEmitTime = now;
-
-                socket.emit("move", {
-                    x: player.current.x,
-                    y: player.current.y,
-                });
-            }
-
-            // Interpolate remote player positions (lerp) for smooth 60 FPS motion
-            const LERP_FACTOR = 0.25;
-            Object.values(remotePlayers.current).forEach((otherPlayer) => {
-                otherPlayer.x += (otherPlayer.targetX - otherPlayer.x) * LERP_FACTOR;
-                otherPlayer.y += (otherPlayer.targetY - otherPlayer.y) * LERP_FACTOR;
-
-                if (Math.abs(otherPlayer.targetX - otherPlayer.x) < 0.05) {
-                    otherPlayer.x = otherPlayer.targetX;
-                }
-                if (Math.abs(otherPlayer.targetY - otherPlayer.y) < 0.05) {
-                    otherPlayer.y = otherPlayer.targetY;
-                }
-            });
-
-            // Clear canvas
-            ctx.clearRect(
-                0,
-                0,
-                canvas.width,
-                canvas.height
-            );
-
-            // Background
-            ctx.fillStyle = "#f3f4f6";
-            ctx.fillRect(
-                0,
-                0,
-                canvas.width,
-                canvas.height
-            );
-
-            // Office boundary
-            ctx.strokeStyle = "#222";
-            ctx.lineWidth = 4;
-            ctx.strokeRect(
-                10,
-                10,
-                980,
-                580
-            );
-
-            // Desk
-            ctx.fillStyle = "#8b5a2b";
-            ctx.fillRect(
-                150,
-                150,
-                180,
-                80
-            );
-            ctx.strokeStyle = "#5c3a1e";
-            ctx.lineWidth = 2;
-            ctx.strokeRect(
-                150,
-                150,
-                180,
-                80
-            );
-
-            // Desk text
-            ctx.fillStyle = "#ffffff";
-            ctx.font = "14px Arial";
-            ctx.textAlign = "center";
-            ctx.fillText("Desk", 240, 195);
-            ctx.textAlign = "start";
-
-            // Meeting room walls with doorway
-            ctx.strokeStyle = "#555";
-            ctx.lineWidth = 4;
-            ctx.beginPath();
-            ctx.moveTo(610, 300);
-            ctx.lineTo(500, 300);
-            ctx.lineTo(500, 100);
-            ctx.lineTo(800, 100);
-            ctx.lineTo(800, 300);
-            ctx.lineTo(690, 300);
-            ctx.stroke();
-
-            // Doorway threshold
-            ctx.beginPath();
-            ctx.strokeStyle = "#9ca3af";
-            ctx.lineWidth = 2;
-            ctx.setLineDash([4, 4]);
-            ctx.moveTo(610, 300);
-            ctx.lineTo(690, 300);
-            ctx.stroke();
-            ctx.setLineDash([]);
-
-            // Doorway label
-            ctx.fillStyle = "#6b7280";
-            ctx.font = "11px Arial";
-            ctx.textAlign = "center";
-            ctx.fillText("DOOR", 650, 314);
-            ctx.textAlign = "start";
-
-            // Meeting room text
-            ctx.fillStyle = "#333";
-            ctx.font = "20px Arial";
-            ctx.fillText(
-                "Meeting Room",
-                580,
-                190
-            );
-
-            const currentEarshot = earshotRadiusRef.current;
-
-            // -------------------------
-            // DRAW EARSHOT RADIUS CIRCLE
-            // -------------------------
-            ctx.beginPath();
-            ctx.arc(
-                player.current.x,
-                player.current.y,
-                currentEarshot,
-                0,
-                Math.PI * 2
-            );
-            ctx.fillStyle = "rgba(37, 99, 235, 0.08)";
-            ctx.fill();
-            ctx.strokeStyle = "rgba(37, 99, 235, 0.35)";
-            ctx.lineWidth = 1.5;
-            ctx.setLineDash([6, 4]);
-            ctx.stroke();
-            ctx.setLineDash([]);
-            ctx.closePath();
-
-            // -------------------------
-            // DRAW OTHER PLAYERS
-            // -------------------------
-            Object.values(remotePlayers.current).forEach(
-                (otherPlayer) => {
-                    const dx = otherPlayer.x - player.current.x;
-                    const dy = otherPlayer.y - player.current.y;
-                    const distance = Math.hypot(dx, dy);
-                    const isInsideEarshot = distance <= currentEarshot;
-
-                    if (isInsideEarshot) {
-                        // Inside earshot: active green indicator aura + vibrant avatar
-                        ctx.beginPath();
-                        ctx.arc(otherPlayer.x, otherPlayer.y, 25, 0, Math.PI * 2);
-                        ctx.strokeStyle = "rgba(34, 197, 94, 0.7)";
-                        ctx.lineWidth = 2.5;
-                        ctx.stroke();
-                        ctx.closePath();
-
-                        ctx.beginPath();
-                        ctx.arc(
-                            otherPlayer.x,
-                            otherPlayer.y,
-                            20,
-                            0,
-                            Math.PI * 2
-                        );
-                        ctx.fillStyle = "#16a34a";
-                        ctx.fill();
-                        ctx.strokeStyle = "#14532d";
-                        ctx.lineWidth = 2;
-                        ctx.stroke();
-                        ctx.closePath();
-
-                        // Status tag
-                        ctx.fillStyle = "#15803d";
-                        ctx.font = "bold 11px Arial";
-                        ctx.textAlign = "center";
-                        ctx.fillText(
-                            `In Earshot (${Math.round(distance)}px)`,
-                            otherPlayer.x,
-                            otherPlayer.y - 30
-                        );
-                        ctx.textAlign = "start";
-                    } else {
-                        // Outside earshot: muted / out of range
-                        ctx.beginPath();
-                        ctx.arc(
-                            otherPlayer.x,
-                            otherPlayer.y,
-                            20,
-                            0,
-                            Math.PI * 2
-                        );
-                        ctx.fillStyle = "rgba(220, 38, 38, 0.35)";
-                        ctx.fill();
-                        ctx.strokeStyle = "rgba(185, 28, 28, 0.4)";
-                        ctx.lineWidth = 1.5;
-                        ctx.stroke();
-                        ctx.closePath();
-
-                        // Status tag
-                        ctx.fillStyle = "#9ca3af";
-                        ctx.font = "11px Arial";
-                        ctx.textAlign = "center";
-                        ctx.fillText(
-                            `Out of Range (${Math.round(distance)}px)`,
-                            otherPlayer.x,
-                            otherPlayer.y - 26
-                        );
-                        ctx.textAlign = "start";
-                    }
-                }
-            );
-
-            // -------------------------
-            // DRAW OUR PLAYER
-            // -------------------------
-            ctx.beginPath();
-            ctx.arc(
-                player.current.x,
-                player.current.y,
-                20,
-                0,
-                Math.PI * 2
-            );
-            ctx.fillStyle = "#2563eb";
-            ctx.fill();
-            ctx.strokeStyle = "#1d4ed8";
-            ctx.lineWidth = 2;
-            ctx.stroke();
-            ctx.closePath();
-
-            // Local player label
-            ctx.fillStyle = "#1e40af";
-            ctx.font = "bold 11px Arial";
-            ctx.textAlign = "center";
-            ctx.fillText("You", player.current.x, player.current.y - 26);
-            ctx.textAlign = "start";
-
-            // Earshot HUD info in corner
-            ctx.fillStyle = "#4b5563";
-            ctx.font = "12px Arial";
-            ctx.fillText(`Earshot Radius: ${currentEarshot}px`, 25, 35);
-
-            // Continue animation
-            animationFrameId = requestAnimationFrame(gameLoop);
+        // Earshot ring
+        if (inEarshot) {
+          ctx.beginPath();
+          ctx.arc(rp.x, rp.y, AVATAR_RADIUS + 5, 0, Math.PI * 2);
+          ctx.strokeStyle = "rgba(34,197,94,0.6)";
+          ctx.lineWidth = 2;
+          ctx.stroke();
+          ctx.closePath();
         }
 
-        animationFrameId = requestAnimationFrame(gameLoop);
+        // Initial letter inside avatar
+        ctx.fillStyle = "#fff";
+        ctx.font = `bold 13px Inter, Arial`;
+        ctx.textAlign = "center";
+        ctx.fillText((rp.username || "?")[0].toUpperCase(), rp.x, rp.y + 5);
 
-        // Cleanup
-        return () => {
-            isRunning = false;
-            cancelAnimationFrame(animationFrameId);
+        // Username label above avatar
+        ctx.fillStyle = inEarshot ? "#e5e7eb" : "#6b7280";
+        ctx.font = "11px Inter, Arial";
+        ctx.textAlign = "center";
+        ctx.fillText(rp.username || id.slice(0, 6), rp.x, rp.y - AVATAR_RADIUS - 6);
 
-            window.removeEventListener(
-                "keydown",
-                handleKeyDown
-            );
+        // Earshot distance badge
+        if (inEarshot) {
+          ctx.fillStyle = "rgba(34,197,94,0.85)";
+          ctx.font = "9px Inter, Arial";
+          ctx.fillText(`${Math.round(dist)}px`, rp.x, rp.y + AVATAR_RADIUS + 12);
+        }
+      });
 
-            window.removeEventListener(
-                "keyup",
-                handleKeyUp
-            );
+      // 7. Local player avatar with username (Tanvi Day 3)
+      ctx.beginPath();
+      ctx.arc(player.current.x, player.current.y, AVATAR_RADIUS, 0, Math.PI * 2);
+      ctx.fillStyle = "#2563eb";
+      ctx.fill();
+      ctx.strokeStyle = "#93c5fd";
+      ctx.lineWidth = 2.5;
+      ctx.stroke();
+      ctx.closePath();
 
-            socket.disconnect();
-        };
-    }, []);
+      ctx.fillStyle = "#fff";
+      ctx.font = `bold 13px Inter, Arial`;
+      ctx.textAlign = "center";
+      ctx.fillText((username[0] || "Y").toUpperCase(), player.current.x, player.current.y + 5);
 
-    return (
-        <canvas
-            ref={canvasRef}
-            style={{
-                border: "1px solid #333",
-            }}
-        />
-    );
+      ctx.fillStyle = "#bfdbfe";
+      ctx.font = "bold 11px Inter, Arial";
+      ctx.textAlign = "center";
+      ctx.fillText(username, player.current.x, player.current.y - AVATAR_RADIUS - 6);
+
+      // 8. HUD overlay
+      ctx.textAlign = "left";
+      ctx.fillStyle = "rgba(0,0,0,0.45)";
+      ctx.fillRect(14, 14, 210, 50);
+      ctx.fillStyle = "#94a3b8";
+      ctx.font = "11px Inter, Arial";
+      ctx.fillText(`👤 ${username}`, 22, 32);
+      ctx.fillText(`📡 Earshot: ${earshot}px`, 22, 50);
+      ctx.fillText(`🧑 Online: ${Object.keys(remotePlayers.current).length + 1}`, 130, 32);
+      ctx.fillText(`📍 ${Math.round(player.current.x)}, ${Math.round(player.current.y)}`, 130, 50);
+
+      rafId = requestAnimationFrame(gameLoop);
+    }
+
+    rafId = requestAnimationFrame(gameLoop);
+
+    return () => {
+      isRunning = false;
+      cancelAnimationFrame(rafId);
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+      canvas.removeEventListener("click", onCanvasClick);
+      socket.disconnect();
+    };
+  }, [username]);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      style={{
+        border: "2px solid #334155",
+        borderRadius: "8px",
+        display: "block",
+        cursor: "crosshair",
+        maxWidth: "100%",
+      }}
+    />
+  );
 }
 
 export default VirtualOffice;
