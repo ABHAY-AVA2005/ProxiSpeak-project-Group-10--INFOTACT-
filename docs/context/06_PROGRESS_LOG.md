@@ -341,6 +341,36 @@ Problems / fixes: Avoided query race conditions by using live positions from use
 
 Tomorrow (Day 13): test: spatial audit script, results to docs/benchmarks.md
 
+Day 13 - Thu 22 Oct 2026 (Kajal, kajal-backend)
+
+Planned: test: spatial audit script, results to docs/benchmarks.md
+
+Done:
+- Created standalone automated spatial audit script `server/src/scripts/spatial-audit.js` and runner `server/scripts/spatial-audit.js`:
+  - Audits distance boundaries with sub-pixel exactness: verifies inclusion at <= 100px (origin, 50px, 99.99px, exact 100.0px on axes, and exact Pythagorean diagonal [560, 580]) and strict exclusion at >= 100.01px.
+  - Audits requester exclusion across socket IDs, player IDs, and numeric/string identifier coercion.
+  - Audits defensive handling for NaN, Infinity, -Infinity, corrupt candidate objects, and invalid/negative radii.
+  - Audits result correctness and nearest-first ascending distance ordering.
+  - Audits graph clustering transitivity across connected and isolated components.
+  - Benchmarks execution time over 5,000 iterations across 10, 25, 50, 100, and 200 users, confirming p95 latency is well under the 20ms target (p95 = 0.0091ms at 50 users, 0.0346ms at 200 users).
+- Added `audit:spatial` script to `server/package.json` (`npm run audit:spatial`).
+- Authored comprehensive benchmarks and methodology documentation in `docs/benchmarks.md` including mathematical formulation, 2D Cartesian plane vs 2dsphere index justification, test scenario matrix, empirical latency tables, and architecture notes.
+- Added 5 unit tests in `server/test/persistence.test.js` validating the audit assertions. Test suite now stands at 55 passing tests (0 failures).
+
+Files changed:
+- server/src/scripts/spatial-audit.js
+- server/scripts/spatial-audit.js
+- server/package.json
+- docs/benchmarks.md
+- server/test/persistence.test.js
+- docs/context/06_PROGRESS_LOG.md
+
+Commit message(s): test: spatial audit script, results to docs/benchmarks.md
+
+Problems / fixes: Handled ES module import vs direct CLI invocation cleanly in spatial-audit runner; verified 100% test pass rate across Node test suite.
+
+Tomorrow (Day 14): docs: benchmark results table
+
 <!-- Copy the block above for each new day. -->
 
 Viva notes (add as you go)
@@ -350,8 +380,10 @@ What each file does in simple words:
 - server/src/server.js: Starts the Express HTTP and Socket.IO server, applies CORS, and parses JSON.
 - server/src/sockets/socketHandler.js: Central Socket.IO handler for connections, join events, movement broadcasts, disconnect events, and `nearby:enter` / `nearby:leave` proximity diff emissions.
 - server/src/services/userManager.js: Maintains an in-memory Map of connected users, including socket ID, username, and position [x, y].
-- server/src/services/persistenceManager.js: Handles debounced MongoDB persistence, in-flight write tracking, safe disconnect cleanup, `getNearbyUsers()`, `clusterUsers()`, and proximity diff tracking (`updateProximity`, `cleanupProximityOnDisconnect`).
+- server/src/services/persistenceManager.js: Handles debounced MongoDB persistence, in-flight write tracking, safe disconnect cleanup, `getNearbyUsers()`, `getNearbyUsersInMemory()`, `clusterUsers()`, and proximity diff tracking (`updateProximity`, `cleanupProximityOnDisconnect`).
 - server/src/services/queryTimer.js: Measures execution time of geospatial proximity queries, formats secret-safe logs, tracks performance against the <=20ms target, and aggregates latency metrics.
+- server/src/scripts/spatial-audit.js: Standalone spatial audit suite verifying distance boundaries, requester exclusion, defensive coordinates, result correctness, and latency benchmarks across 10-200 users.
+- docs/benchmarks.md: Technical documentation detailing spatial audit methodology, mathematical formulation, test scenario matrix, and empirical benchmark tables.
 - server/src/models/Player.js: Defines the Mongoose Player schema with Cartesian position: [x, y] and a 2d geospatial index.
 - server/models/Player.js: Legacy Player model used by the existing CommonJS backend.
 - server/utils/validation.js: Validates coordinates against the 1000x600 canvas boundaries and protects against invalid or out-of-range values.

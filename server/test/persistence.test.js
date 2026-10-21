@@ -29,6 +29,13 @@ import {
 import { sanitizeLogData } from "../src/services/queryTimer.js";
 import { clampCoordinate, sanitizeUsername, addUser, removeUser, getAllUsers } from "../src/services/userManager.js";
 import { setupSocketHandlers, resetProximityQueues } from "../src/sockets/socketHandler.js";
+import {
+  auditDistanceBoundaries,
+  auditRequesterExclusion,
+  auditDefensiveCoordinates,
+  auditResultCorrectnessAndOrdering,
+  auditSpatialClustering
+} from "../src/scripts/spatial-audit.js";
 
 test("UserManager - clamps coordinates and sanitizes username", () => {
   assert.equal(clampCoordinate(-50, 0, 2000, 100), 0);
@@ -1320,4 +1327,30 @@ test("SocketHandler - Real-time proximity diffs use in-memory lookup without rel
     resetNearbyMap();
     resetProximityQueues();
   }
+});
+
+test("SpatialAudit - Distance boundary precision (dist < 100, exact 100px boundary, and 100.01px exclusion)", async () => {
+  const result = await auditDistanceBoundaries();
+  assert.equal(result.passed, 6, "Must verify exactly 6 boundary conditions (<= 100px included, > 100px excluded)");
+});
+
+test("SpatialAudit - Requester exclusion across socketId, playerId, and string/numeric types", async () => {
+  const result = await auditRequesterExclusion();
+  assert.equal(result.passed, 2, "Must exclude querying user across both socketId and numeric string coercion");
+});
+
+test("SpatialAudit - Defensive coordinate validation rejects NaN, Infinity, corrupt data, and invalid radius", async () => {
+  const result = await auditDefensiveCoordinates();
+  assert.equal(result.passed, 14, "Must pass all 14 defensive coordinate and parameter checks");
+});
+
+test("SpatialAudit - Result correctness, property normalization, and ascending nearest-first ordering", async () => {
+  const result = await auditResultCorrectnessAndOrdering();
+  assert.equal(result.passed, 4, "Must sort nearest-first and normalize properties on all returned results");
+});
+
+test("SpatialAudit - Graph clustering transitivity partitions components accurately", () => {
+  const result = auditSpatialClustering();
+  assert.equal(result.clustersFound, 2, "Must partition users into 2 transitive components");
+  assert.equal(result.totalUsers, 5, "Total audited users must equal 5");
 });

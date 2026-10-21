@@ -8,7 +8,8 @@
     "dev": "node --watch src/server.js",
     "test": "node --test test/**/*.test.js",
     "test:clients": "node scripts/fake-clients.js",
-    "migrate:indexes": "node scripts/migrate-indexes.js"
+    "migrate:indexes": "node scripts/migrate-indexes.js",
+    "audit:spatial": "node src/scripts/spatial-audit.js"
   },
   "keywords": [
     "webrtc",
