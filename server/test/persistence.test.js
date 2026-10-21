@@ -12,6 +12,7 @@ import {
   scheduleDebouncedMove,
   persistPlayerDisconnect,
   getNearbyUsers,
+  getNearbyUsersInMemory,
   clusterUsers,
   clusterUsersIntoGroups,
   userNearbyMap,
@@ -1142,4 +1143,181 @@ test("QueryTimer - resetQueryStats clears metrics and history cleanly", () => {
   assert.equal(cleanStats.totalQueries, 0);
   assert.equal(cleanStats.slowQueryCount, 0);
   assert.equal(cleanStats.targetMetRate, 100);
+});
+
+// ---------------------------------------------------------------------
+// DAY 12: In-Memory Proximity Query Performance Optimization (< 20 ms)
+// ---------------------------------------------------------------------
+
+test("getNearbyUsersInMemory - Filters by 100px boundary, excludes requester, orders nearest-first, and normalizes IDs", async () => {
+  const origin = [400, 400];
+  const requesterId = "socket-requester";
+
+  const users = [
+    { socketId: requesterId, username: "Self", x: 400, y: 400 }, // Distance 0 (self, must be excluded)
+    { socketId: "peer-far", username: "Far", x: 600, y: 400 }, // Distance 200px (outside > 100px, must be excluded)
+    { socketId: "peer-outside", username: "Outside", x: 501, y: 400 }, // Distance 101px (outside > 100px, must be excluded)
+    { socketId: "peer-exact", username: "ExactBoundary", x: 500, y: 400 }, // Distance exactly 100px (must be included)
+    { socketId: "peer-mid", username: "MidDistance", x: 460, y: 400 }, // Distance 60px (must be included)
+    { socketId: "peer-close", username: "Closest", x: 420, y: 400 }, // Distance 20px (must be included)
+    { socketId: "peer-invalid", username: "InvalidCoords", x: NaN, y: 400 } // Invalid coordinates (must be skipped)
+  ];
+
+  const results = await getNearbyUsersInMemory(origin, {
+    excludePlayerId: requesterId,
+    users
+  });
+
+  // Verify count: 3 matching users (Closest, MidDistance, ExactBoundary)
+  assert.equal(results.length, 3);
+
+  // Verify ordering: ascending distance (20px, then 60px, then 100px)
+  assert.equal(results[0].socketId, "peer-close");
+  assert.equal(results[1].socketId, "peer-mid");
+  assert.equal(results[2].socketId, "peer-exact");
+
+  // Verify requester and outside peers are excluded
+  assert.ok(!results.some((u) => u.socketId === requesterId));
+  assert.ok(!results.some((u) => u.socketId === "peer-far"));
+  assert.ok(!results.some((u) => u.socketId === "peer-outside"));
+  assert.ok(!results.some((u) => u.socketId === "peer-invalid"));
+
+  // Verify ID normalization
+  assert.equal(results[0].id, "peer-close");
+  assert.equal(results[0].playerId, "peer-close");
+});
+
+test("getNearbyUsersInMemory - Boundary behavior: includes users at exactly 100px and excludes users at 100.01px", async () => {
+  const origin = [500, 500];
+
+  const candidateUsers = [
+    { socketId: "exact-x", x: 600, y: 500 }, // Distance exactly 100px -> included
+    { socketId: "exact-y", x: 500, y: 400 }, // Distance exactly 100px -> included
+    { socketId: "just-over", x: 600.01, y: 500 }, // Distance 100.01px -> excluded
+    { socketId: "just-inside", x: 570, y: 570 } // Distance ~98.99px -> included
+  ];
+
+  const results = await getNearbyUsersInMemory(origin, { users: candidateUsers });
+
+  assert.equal(results.length, 3);
+  assert.ok(results.some((u) => u.socketId === "exact-x"));
+  assert.ok(results.some((u) => u.socketId === "exact-y"));
+  assert.ok(results.some((u) => u.socketId === "just-inside"));
+  assert.ok(!results.some((u) => u.socketId === "just-over"));
+});
+
+test("getNearbyUsersInMemory - Defensive validation: rejects non-finite origin, invalid maxDistance, and empty lists", async () => {
+  // Invalid origins
+  assert.deepEqual(await getNearbyUsersInMemory([NaN, 100]), []);
+  assert.deepEqual(await getNearbyUsersInMemory([100, Infinity]), []);
+  assert.deepEqual(await getNearbyUsersInMemory({ x: "invalid", y: 100 }), []);
+  assert.deepEqual(await getNearbyUsersInMemory(null), []);
+  assert.deepEqual(await getNearbyUsersInMemory(undefined), []);
+
+  // Invalid maxDistance
+  assert.deepEqual(await getNearbyUsersInMemory([100, 100], { maxDistance: -50 }), []);
+  assert.deepEqual(await getNearbyUsersInMemory([100, 100], { maxDistance: NaN }), []);
+  assert.deepEqual(await getNearbyUsersInMemory([100, 100], { maxDistance: Infinity }), []);
+
+  // Empty user list
+  assert.deepEqual(await getNearbyUsersInMemory([100, 100], { users: [] }), []);
+});
+
+test("getNearbyUsersInMemory - Automatically queries active users from userManager and records timing (< 20ms)", async () => {
+  resetQueryStats();
+
+  try {
+    addUser("active-1", "Alice", 120, 100);
+    addUser("active-2", "Bob", 150, 100);
+    addUser("active-far", "Charlie", 800, 800);
+
+    const results = await getNearbyUsersInMemory([100, 100], { excludePlayerId: "active-none" });
+
+    assert.equal(results.length, 2);
+    assert.equal(results[0].socketId, "active-1");
+    assert.equal(results[1].socketId, "active-2");
+
+    const timing = getLastQueryTiming();
+    assert.ok(timing);
+    assert.equal(timing.source, "in-memory");
+    assert.equal(timing.resultCount, 2);
+    assert.equal(timing.targetMet, true, "In-memory query latency must meet < 20ms target");
+    assert.ok(timing.durationMs < 20, `Latency was ${timing.durationMs}ms, strictly under 20ms`);
+  } finally {
+    removeUser("active-1");
+    removeUser("active-2");
+    removeUser("active-far");
+    resetQueryStats();
+  }
+});
+
+test("SocketHandler - Real-time proximity diffs use in-memory lookup without relying on debounced DB writes", async () => {
+  resetNearbyMap();
+  resetProximityQueues();
+
+  const origFind = Player.find;
+  const origFindOneAndUpdate = Player.findOneAndUpdate;
+  const origReadyState = mongoose.connection.readyState;
+  let mongoFindCalled = false;
+
+  const io = createMockIO();
+  setupSocketHandlers(io);
+
+  const socketA = createMockSocket("socket-alice-live");
+  const socketB = createMockSocket("socket-bob-live");
+
+  try {
+    Object.defineProperty(mongoose.connection, "readyState", {
+      value: 1,
+      configurable: true,
+      writable: true
+    });
+
+    Player.findOneAndUpdate = () => Promise.resolve();
+
+    // Mock Player.find to ensure runProximityDiff does NOT issue MongoDB query
+    Player.find = () => {
+      mongoFindCalled = true;
+      return {
+        lean: () => ({
+          exec: async () => []
+        })
+      };
+    };
+
+    io.emit("connection", socketA);
+    io.emit("connection", socketB);
+
+    const [joinHandlerA] = socketA.listeners("join");
+    const [joinHandlerB] = socketB.listeners("join");
+
+    await joinHandlerA({ username: "Alice", x: 100, y: 100 });
+    // Bob joins within 50px of Alice -> should trigger nearby:enter immediately
+    await joinHandlerB({ username: "Bob", x: 150, y: 100 });
+
+    // Verify Bob received nearby:enter for Alice
+    const bEnters = socketB.emitted.filter((e) => e.event === "nearby:enter");
+    assert.equal(bEnters.length, 1, "Bob must receive nearby:enter immediately");
+    assert.equal(bEnters[0].data.socketId, "socket-alice-live");
+
+    // Verify Alice received nearby:enter for Bob via io.to
+    const aEnters = io.getEmittedTo("socket-alice-live").filter((e) => e.event === "nearby:enter");
+    assert.equal(aEnters.length, 1, "Alice must receive nearby:enter immediately");
+    assert.equal(aEnters[0].data.socketId, "socket-bob-live");
+
+    // Verify Player.find was NOT called during proximity diff (pure in-memory execution)
+    assert.equal(mongoFindCalled, false, "Proximity diff must use live in-memory lookup, not MongoDB $near");
+  } finally {
+    Player.find = origFind;
+    Player.findOneAndUpdate = origFindOneAndUpdate;
+    Object.defineProperty(mongoose.connection, "readyState", {
+      value: origReadyState,
+      configurable: true,
+      writable: true
+    });
+    removeUser("socket-alice-live");
+    removeUser("socket-bob-live");
+    resetNearbyMap();
+    resetProximityQueues();
+  }
 });

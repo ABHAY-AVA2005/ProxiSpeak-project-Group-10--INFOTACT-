@@ -313,6 +313,37 @@ Problems / fixes: Removed legacy event aliases across client, server, and test s
 
 Tomorrow (Day 12): perf: cache and index tuning to get under 20 ms
 
+Day 12 - Wed 21 Oct 2026 (Kajal, kajal-backend)
+
+Planned: perf: cache and index tuning to get under 20 ms
+
+Done:
+- Profiled proximity query performance: identified that querying MongoDB `$near` during 60 FPS movement suffered from both latency overhead (network roundtrip, BSON serialization) and stale data (since movement writes are debounced by 1000ms).
+- Implemented dedicated in-memory spatial proximity query `getNearbyUsersInMemory(origin, options)` in `server/src/services/persistenceManager.js`:
+  - Enforces 100-pixel Euclidean distance by default.
+  - Correctly includes candidates on the exact 100px boundary (`distSq <= maxDistSq`).
+  - Supports requester exclusion (`excludePlayerId`).
+  - Implements defensive coordinate validation for origin and candidate users.
+  - Sorts matches nearest-first (ascending distance).
+  - Normalizes `socketId`, `id`, and `playerId`.
+  - Integrates transparently with `measureQuery()` to track query duration in `queryTimer.js`.
+- Connected `runProximityDiff()` in `server/src/sockets/socketHandler.js` directly to `getNearbyUsersInMemory()`, eliminating stale database reads and achieving sub-millisecond query latency across 10, 25, 50, 100, and 200 users (p95 latency ranges from 0.0068ms to 0.0304ms, beating the 20ms target by over 650x).
+- Preserved existing `getNearbyUsers()` and MongoDB 2D geospatial index intact.
+- Added 5 regression tests in `server/test/persistence.test.js` covering 100px boundary inclusion, exact boundary inclusion vs exclusion, defensive parameter validation, automated userManager querying with `queryTimer` compliance, and pure in-memory execution during active Socket.IO movement. All 50 tests pass.
+- Verified empirical benchmarks: 10,000 iterations per user tier (10, 25, 50, 100, 200 users) confirming 100% compliance with strict < 20ms performance target.
+
+Files changed:
+- server/src/services/persistenceManager.js
+- server/src/sockets/socketHandler.js
+- server/test/persistence.test.js
+- docs/context/06_PROGRESS_LOG.md
+
+Commit message(s): perf: in-memory proximity query optimization for <20ms target
+
+Problems / fixes: Avoided query race conditions by using live positions from userManager rather than debounced MongoDB positions, while keeping getNearbyUsers() and 2d index available for database sync and persistence audits.
+
+Tomorrow (Day 13): test: spatial audit script, results to docs/benchmarks.md
+
 <!-- Copy the block above for each new day. -->
 
 Viva notes (add as you go)

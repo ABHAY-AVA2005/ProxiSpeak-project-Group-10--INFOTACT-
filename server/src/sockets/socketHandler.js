@@ -11,6 +11,7 @@ import {
   scheduleDebouncedMove,
   persistPlayerDisconnect,
   getNearbyUsers,
+  getNearbyUsersInMemory,
   updateProximity,
   cleanupProximityOnDisconnect
 } from "../services/persistenceManager.js";
@@ -36,13 +37,12 @@ export function resetProximityQueues() {
 export function setupSocketHandlers(io) {
   /**
    * Executes proximity diff calculation and emits events.
-   * Verifies that IDs returned by getNearbyUsers() correspond to active Socket.IO sockets.
+   * Uses real-time in-memory spatial lookup for sub-millisecond latency.
    */
   const runProximityDiff = async (targetSocket, user) => {
-    // 1. Query nearby candidates from persistence layer
-    const currentNearby = await getNearbyUsers([user.x, user.y], {
-      excludePlayerId: targetSocket.id,
-      fallbackUsers: getAllUsers()
+    // 1. Query nearby candidates from live in-memory users (sub-millisecond, zero database lag)
+    const currentNearby = await getNearbyUsersInMemory([user.x, user.y], {
+      excludePlayerId: targetSocket.id
     });
 
     // 2. Filter & verify: IDs from MongoDB (or fallback) must identify active Socket.IO sockets
