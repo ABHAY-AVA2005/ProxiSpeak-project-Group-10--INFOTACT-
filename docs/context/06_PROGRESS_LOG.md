@@ -3,8 +3,8 @@
 > Update this every night before pushing. The AI reads it at the start of each session.
 
 ## Current status
-- Current day: Day 3 (Mon 12 Oct 2026)
-- Current task (from 02_TEAM_PLAN.md): feat: join event, in-memory users, broadcast users:list
+- Current day: Day 6 (Thu 15 Oct 2026)
+- Current task (from 02_TEAM_PLAN.md): chore: review and merge Week 1 branches into main
 - Blockers: none
 
 ## Daily entries
@@ -42,8 +42,38 @@
   - Added automated test suite in `server/test/persistence.test.js` verifying schema indexes, coordinate clamping, and debounce/disconnect guards.
 - Files changed: server/src/models/Player.js, server/src/services/persistenceManager.js, server/src/sockets/socketHandler.js, server/src/scripts/migrate-indexes.js, server/test/persistence.test.js
 - Commit message(s): feat: move event broadcast and debounced position save to MongoDB
-- Problems / fixes: Integrated Kajal's database persistence, debouncing logic, and migration tools into the modular ES Module server architecture.
-- Tomorrow (Day 5): feat: render remote avatars with interpolation, test: script spawning fake socket clients
+### Day 5 - Wed 14 Oct 2026
+- Planned: fix: server-side coordinate bounds validation
+- Done:
+  - Implemented server-side coordinate clamping (`clampCoordinate`) and sanitize username safeguards against XSS in `server/src/services/userManager.js`.
+  - Added world boundaries constants (`0` to `2000` px) with fallback defaults.
+  - Verified and integrated `server/src/scripts/fake-clients.js` simulation tool for concurrent Socket.io client stress testing.
+- Files changed: server/src/services/userManager.js, server/src/scripts/fake-clients.js
+- Commit message(s): fix: server-side coordinate bounds validation and fake client runner
+- Problems / fixes: None
+- Tomorrow (Day 6): chore: review and merge Week 1 branches into main
+
+### Day 6 - Thu 15 Oct 2026
+- Planned: chore: review and merge Week 1 branches into main
+- Done:
+  - Conducted Week 1 branch review and integration audits across `tanvi-frontend`, `abhishek-audio`, and `kajal-backend`.
+  - Verified node test suite runs cleanly (`npm test` 3/3 passing) verifying spatial index, position clamping, and debounced persistence.
+  - Documented server scripts, architecture, and Socket.IO protocol events in README.md.
+  - Synchronized and verified team lead branch against `origin/main`.
+- Files changed: docs/context/06_PROGRESS_LOG.md, README.md
+- Commit message(s): chore: review Week 1 branches and update documentation
+- Problems / fixes: None
+### Day 7 - Fri 16 Oct 2026
+- Planned: docs: Week 1 write-up draft, tag v0.1
+- Done:
+  - Validated full test suite (server 3/3 passing, client build passing).
+  - Merged integrated Week 1 frontend, backend, movement, and audio scaffolding into main.
+  - Tagged release v0.1 marking completion of Week 1 milestones.
+  - Synced main back into member branches (`tanvi-frontend`, `abhishek-audio`, `kajal-backend`).
+- Files changed: docs/context/06_PROGRESS_LOG.md
+- Commit message(s): chore: merge Week 1 branches into main, tag v0.1, sync member branches
+- Problems / fixes: None
+- Tomorrow (Day 8): feat: signaling event names and relay skeleton (offer, answer, ice)
 
 <!-- Copy the block above for each new day. -->
 
@@ -65,7 +95,7 @@
   - Does changing Mongoose schema delete old indexes in MongoDB? No, Mongoose only creates indexes; obsolete database indexes must be dropped explicitly using a migration script or mongosh.
 
 ## Done checklist
-- [ ] Week 1 merged to main
+- [x] Week 1 merged to main
 - [ ] Week 2 merged, tag v0.2-mid
 - [ ] Mid review ready (docs, benchmarks, video)
 - [ ] Week 3 merged, tag v0.3

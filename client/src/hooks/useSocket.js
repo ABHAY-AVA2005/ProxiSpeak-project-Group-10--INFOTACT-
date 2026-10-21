@@ -31,20 +31,65 @@ export function useSocket(username) {
       setUsers(new Map());
     });
 
-    s.on('users:list', (list) => {
+    // 1. Snapshot of players on join
+    s.on('users:list', (players) => {
       const map = new Map();
-      list.forEach((u) => map.set(u.socketId, u));
+      const list = Array.isArray(players) ? players : Object.values(players || {});
+      list.forEach((u) => {
+        const id = u.socketId || u.id;
+        if (id && id !== s.id) {
+          map.set(id, {
+            socketId: id,
+            username: u.username || `User_${id.slice(0, 4)}`,
+            x: u.x,
+            y: u.y,
+          });
+        }
+      });
       setUsers(map);
     });
 
+    // 2. New player joined
     s.on('user:joined', (user) => {
-      setUsers((prev) => new Map(prev).set(user.socketId, user));
+      const id = user.socketId || user.id;
+      if (id && id !== s.id) {
+        setUsers((prev) => {
+          const next = new Map(prev);
+          next.set(id, {
+            socketId: id,
+            username: user.username || `User_${id.slice(0, 4)}`,
+            x: user.x,
+            y: user.y,
+          });
+          return next;
+        });
+      }
     });
 
-    s.on('user:left', ({ socketId }) => {
+    // 3. Player moved
+    s.on('user:moved', (coords) => {
+      const id = coords.socketId || coords.id;
+      if (!id || id === s.id) return;
+      setUsers((prev) => {
+        const current = prev.get(id);
+        if (!current) return prev;
+        const next = new Map(prev);
+        next.set(id, {
+          ...current,
+          x: coords.x,
+          y: coords.y,
+        });
+        return next;
+      });
+    });
+
+    // 4. Player disconnected
+    s.on('user:left', (data) => {
+      const id = typeof data === 'object' && data !== null ? (data.socketId || data.id) : data;
+      if (!id) return;
       setUsers((prev) => {
         const next = new Map(prev);
-        next.delete(socketId);
+        next.delete(id);
         return next;
       });
     });

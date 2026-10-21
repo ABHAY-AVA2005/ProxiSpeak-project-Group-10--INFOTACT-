@@ -146,7 +146,6 @@ export function runFakeClients(options = parseArgs()) {
       socket.on("users:list", () => { stats.usersListReceived++; });
       socket.on("user:joined", () => { stats.userJoinedReceived++; });
       socket.on("user:moved", () => { stats.moveReceived++; });
-      socket.on("player-moved", () => { stats.moveReceived++; });
       socket.on("user:left", () => { stats.userLeftReceived++; });
 
       socket.on("connect_error", (err) => {
