@@ -77,10 +77,10 @@ function handleConnection(socket) {
     };
 
     // Send all existing players to the new player
-    socket.emit("current-players", players);
+    socket.emit("users:list", players);
 
     // Tell all other players that a new player joined
-    socket.broadcast.emit("player-joined", players[socket.id]);
+    socket.broadcast.emit("user:joined", players[socket.id]);
 
     // Synchronize player join with MongoDB (create/upsert with flat position [x, y])
     // Track promise in inFlightWrites to ensure disconnect awaits it before deleteOne runs
@@ -112,8 +112,8 @@ function handleConnection(socket) {
         }
     });
 
-    // When a player moves
-    socket.on("player-move", (position) => {
+    // When a player moves (listens to 'move' only)
+    socket.on("move", (position) => {
         // Defensive check: ensure player exists, is connected, and coordinates are valid finite numbers within canvas bounds
         if (
             !players[socket.id] ||
@@ -129,8 +129,9 @@ function handleConnection(socket) {
         players[socket.id].y = position.y;
 
         // Broadcast real-time movement to all other players immediately (zero DB delay for smooth 60 FPS motion)
-        socket.broadcast.emit("player-moved", {
+        socket.broadcast.emit("user:moved", {
             id: socket.id,
+            socketId: socket.id,
             x: position.x,
             y: position.y,
         });
@@ -214,10 +215,10 @@ function handleConnection(socket) {
         }
 
         // 4. Notify remaining players
-        socket.broadcast.emit(
-            "player-disconnected",
-            socket.id
-        );
+        socket.broadcast.emit("user:left", {
+            socketId: socket.id,
+            id: socket.id
+        });
 
         // 5. Await any in-flight write currently running against MongoDB for this socket
         // This guarantees that earlier updateOne or findOneAndUpdate finishes BEFORE deleteOne runs

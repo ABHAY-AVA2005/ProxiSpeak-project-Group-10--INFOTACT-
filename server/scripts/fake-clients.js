@@ -189,7 +189,7 @@ async function runFakeClients(opts = {}) {
                         clientState.x = newX;
                         clientState.y = newY;
 
-                        socket.emit("player-move", {
+                        socket.emit("move", {
                             x: clientState.x,
                             y: clientState.y,
                         });
@@ -210,19 +210,19 @@ async function runFakeClients(opts = {}) {
                 }
             });
 
-            socket.on("current-players", () => {
+            socket.on("users:list", () => {
                 stats.currentPlayersReceived++;
             });
 
-            socket.on("player-joined", () => {
+            socket.on("user:joined", () => {
                 stats.playerJoinedReceived++;
             });
 
-            socket.on("player-moved", () => {
+            socket.on("user:moved", () => {
                 stats.playerMovedReceived++;
             });
 
-            socket.on("player-disconnected", () => {
+            socket.on("user:left", () => {
                 stats.playerDisconnectedReceived++;
             });
 

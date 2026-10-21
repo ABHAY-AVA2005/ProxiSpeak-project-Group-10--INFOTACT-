@@ -834,6 +834,74 @@ test("SocketHandler - Serializes rapid movements and avoids race conditions via 
   }
 });
 
+test("SocketHandler - Modern socket event protocol (users:list, user:joined, move, user:moved, user:left) and rejection of legacy events", async () => {
+  resetNearbyMap();
+  resetProximityQueues();
+
+  const io = createMockIO();
+  setupSocketHandlers(io);
+
+  const socketUser = createMockSocket("socket-modern-test");
+
+  try {
+    io.emit("connection", socketUser);
+
+    // 1. Movement listener must be 'move' only, NOT 'player-move'
+    assert.equal(socketUser.listenerCount("move"), 1, "Must register listener for 'move'");
+    assert.equal(socketUser.listenerCount("player-move"), 0, "Must NOT register listener for legacy 'player-move'");
+
+    // 2. Join must emit 'users:list' and broadcast 'user:joined'
+    const [joinHandler] = socketUser.listeners("join");
+    await joinHandler({ username: "ModernUser", x: 200, y: 300 });
+
+    const usersListEmit = socketUser.emitted.find((e) => e.event === "users:list");
+    assert.ok(usersListEmit, "Must emit 'users:list' to joining socket");
+    assert.equal(
+      socketUser.emitted.some((e) => e.event === "current-players"),
+      false,
+      "Must NOT emit legacy 'current-players'"
+    );
+
+    const userJoinedBroadcast = socketUser.broadcastEmitted.find((e) => e.event === "user:joined");
+    assert.ok(userJoinedBroadcast, "Must broadcast 'user:joined' to other clients");
+    assert.equal(
+      socketUser.broadcastEmitted.some((e) => e.event === "player-joined"),
+      false,
+      "Must NOT broadcast legacy 'player-joined'"
+    );
+
+    // 3. Move must broadcast 'user:moved' only
+    socketUser.broadcastEmitted = [];
+    const [moveHandler] = socketUser.listeners("move");
+    await moveHandler({ x: 220, y: 300 });
+
+    const userMovedBroadcast = socketUser.broadcastEmitted.find((e) => e.event === "user:moved");
+    assert.ok(userMovedBroadcast, "Must broadcast 'user:moved'");
+    assert.equal(
+      socketUser.broadcastEmitted.some((e) => e.event === "player-moved"),
+      false,
+      "Must NOT broadcast legacy 'player-moved'"
+    );
+
+    // 4. Disconnect must broadcast 'user:left' only
+    socketUser.broadcastEmitted = [];
+    const [disconnectHandler] = socketUser.listeners("disconnect");
+    await disconnectHandler("client disconnect");
+
+    const userLeftBroadcast = socketUser.broadcastEmitted.find((e) => e.event === "user:left");
+    assert.ok(userLeftBroadcast, "Must broadcast 'user:left'");
+    assert.equal(
+      socketUser.broadcastEmitted.some((e) => e.event === "player-disconnected"),
+      false,
+      "Must NOT broadcast legacy 'player-disconnected'"
+    );
+  } finally {
+    removeUser("socket-modern-test");
+    resetNearbyMap();
+    resetProximityQueues();
+  }
+});
+
 // ---------------------------------------------------------------------
 // DAY 11: Query Timing Logger Tests (Target: <= 20 ms)
 // ---------------------------------------------------------------------

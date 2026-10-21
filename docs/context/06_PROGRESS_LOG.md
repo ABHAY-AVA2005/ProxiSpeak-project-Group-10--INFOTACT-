@@ -286,17 +286,30 @@ Done:
 - Integrated `measureQuery()` into `server/src/services/persistenceManager.js` inside `getNearbyUsers()` for both MongoDB `$near` queries (source: `"mongodb"`) and in-memory fallback calculations (source: `"in-memory"`).
 - Maintained ring buffer of recent query timings (`getRecentQueries()`) and computed aggregate statistics (`getQueryStats()`: totalQueries, avgDurationMs, minDurationMs, maxDurationMs, slowQueryCount, targetMetRate, bySource breakdown).
 - Exported `resetQueryStats()` and `getLastQueryTiming()` for easy inspection in unit tests and future benchmark audits.
-- Added 6 dedicated automated unit tests in `server/test/persistence.test.js` verifying secret scrubbing, execution measurement, target compliance, multi-source aggregation, automatic logging in `getNearbyUsers()`, and clean stat resets. All 43 tests pass.
+- Added 7 dedicated automated unit tests in `server/test/persistence.test.js` verifying secret scrubbing, execution measurement, target compliance, multi-source aggregation, automatic logging in `getNearbyUsers()`, clean stat resets, exact 20ms boundary enforcement, and modern socket event protocol compliance. All 45 tests pass.
+- Aligned active client (`client/src/VirtualOffice.jsx`) and server (`server/src/sockets/socketHandler.js`, `server/server.js`) to the modern socket event protocol:
+  - Client emits `move` (replaced legacy `player-move`).
+  - Removed legacy client listeners for `current-players`, `player-joined`, `player-moved`, and `player-disconnected`.
+  - Server movement listener now listens to `move` only.
+  - Server broadcasts use modern events exclusively: `users:list`, `user:joined`, `user:moved`, and `user:left`.
+  - Updated `server/scripts/fake-clients.js` and `server/src/scripts/fake-clients.js` to emit `move` and listen to modern events.
+  - Updated test assertions in `server/test/debounce-index.test.js` and added dedicated modern event assertion test in `server/test/persistence.test.js`.
+  - Preserved all Day 8–11 functionality (getNearbyUsers 100px threshold, clusterUsers, nearby:enter/leave, queryTimer, and debounced 2d index persistence).
 
 Files changed:
-- server/src/services/queryTimer.js
-- server/src/services/persistenceManager.js
+- client/src/VirtualOffice.jsx
+- server/src/sockets/socketHandler.js
+- server/server.js
+- server/scripts/fake-clients.js
+- server/src/scripts/fake-clients.js
+- server/test/debounce-index.test.js
 - server/test/persistence.test.js
+- README.md
 - docs/context/06_PROGRESS_LOG.md
 
-Commit message(s): perf: query timing logger
+Commit message(s): refactor: align client and server with modern socket event protocol
 
-Problems / fixes: Fixed regex capture group in `sanitizeLogData` to ensure secret values are redacted rather than echoed, and wrapped both MongoDB and fallback execution paths transparently without altering return shapes.
+Problems / fixes: Removed legacy event aliases across client, server, and test suites after confirming all components use modern events (users:list, user:joined, move, user:moved, user:left), maintaining full compatibility with WebRTC proximity diffs and 60 FPS interpolation.
 
 Tomorrow (Day 12): perf: cache and index tuning to get under 20 ms
 

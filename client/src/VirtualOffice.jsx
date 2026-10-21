@@ -80,9 +80,8 @@ function VirtualOffice({ earshotRadius = 200 }) {
         };
 
         socket.on("users:list", handlePlayerList);
-        socket.on("current-players", handlePlayerList);
 
-        // Handle newly joined players using either event format.
+        // Handle newly joined players.
         const handlePlayerJoined = (other) => {
             const id = other.socketId || other.id;
 
@@ -97,7 +96,6 @@ function VirtualOffice({ earshotRadius = 200 }) {
         };
 
         socket.on("user:joined", handlePlayerJoined);
-        socket.on("player-joined", handlePlayerJoined);
 
         // Update remote-player targets; the animation loop interpolates movement.
         const handlePlayerMoved = (other) => {
@@ -119,16 +117,11 @@ function VirtualOffice({ earshotRadius = 200 }) {
         };
 
         socket.on("user:moved", handlePlayerMoved);
-        socket.on("player-moved", handlePlayerMoved);
 
-        // Remove players when they leave or disconnect.
+        // Remove players when they leave.
         socket.on("user:left", (data) => {
             const id = data?.socketId || data?.id || data;
             if (id) delete remotePlayers.current[id];
-        });
-
-        socket.on("player-disconnected", (playerId) => {
-            if (playerId) delete remotePlayers.current[playerId];
         });
 
         const canvas = canvasRef.current;
@@ -237,7 +230,7 @@ function VirtualOffice({ earshotRadius = 200 }) {
                 };
                 lastEmitTime = now;
 
-                socket.emit("player-move", {
+                socket.emit("move", {
                     x: player.current.x,
                     y: player.current.y,
                 });

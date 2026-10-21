@@ -212,7 +212,7 @@ export function setupSocketHandlers(io) {
     });
 
     /**
-     * Movement handler (supports both 'move' and legacy 'player-move')
+     * Movement handler (listens to 'move' only)
      * Payload: { x: number, y: number }
      */
     const handleMove = async (coords) => {
@@ -229,12 +229,6 @@ export function setupSocketHandlers(io) {
         x: updatedUser.x,
         y: updatedUser.y
       });
-      // Backward compatibility event
-      socket.broadcast.emit("player-moved", {
-        id: socket.id,
-        x: updatedUser.x,
-        y: updatedUser.y
-      });
 
       // Schedule debounced write to MongoDB
       scheduleDebouncedMove(socket.id, updatedUser.x, updatedUser.y);
@@ -244,7 +238,6 @@ export function setupSocketHandlers(io) {
     };
 
     socket.on("move", handleMove);
-    socket.on("player-move", handleMove);
 
     /**
      * Disconnect cleanup
@@ -256,7 +249,6 @@ export function setupSocketHandlers(io) {
       if (removedUser) {
         // Broadcast user departure so all clients remove the avatar immediately
         socket.broadcast.emit("user:left", { socketId: socket.id });
-        socket.broadcast.emit("player-disconnected", socket.id);
       }
 
       // Safe DB disconnect cleanup (cancels timer, saves final state, deletes record)

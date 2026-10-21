@@ -102,14 +102,14 @@ test("Actual Server Handler - Connection initializes memory, emits events, and c
 
         // Verify initial socket emits
         const currentPlayersEmit = socket.emitted.find(
-            (e) => e.event === "current-players"
+            (e) => e.event === "users:list"
         );
-        assert.ok(currentPlayersEmit, "Must emit current-players to joining socket");
+        assert.ok(currentPlayersEmit, "Must emit users:list to joining socket");
 
         const playerJoinedBroadcast = socket.broadcastEmitted.find(
-            (e) => e.event === "player-joined"
+            (e) => e.event === "user:joined"
         );
-        assert.ok(playerJoinedBroadcast, "Must broadcast player-joined to other clients");
+        assert.ok(playerJoinedBroadcast, "Must broadcast user:joined to other clients");
         assert.deepEqual(playerJoinedBroadcast.args[0], players[socket.id]);
 
         // Verify MongoDB join upsert was initiated with position: [400, 400]
@@ -148,17 +148,21 @@ test("Actual Server Handler - Rapid movements update memory & broadcast immediat
 
         // Simulate 20 rapid movements (e.g. avatar moving across canvas)
         for (let i = 0; i < 20; i++) {
-            socket.emit("player-move", { x: 400 + i, y: 400 + i });
+            socket.emit("move", { x: 400 + i, y: 400 + i });
             // Immediate verification: memory and broadcast happen on EVERY event without waiting for DB
             assert.equal(players[socket.id].x, 400 + i);
             assert.equal(players[socket.id].y, 400 + i);
         }
 
-        // Verify all 20 movements were broadcast in real-time
+        // Verify all 20 movements were broadcast in real-time as user:moved
         assert.equal(
             socket.broadcastEmitted.length,
             20,
             "Real-time movement must be broadcast immediately on every move event"
+        );
+        assert.ok(
+            socket.broadcastEmitted.every((e) => e.event === "user:moved"),
+            "All movement broadcasts must use user:moved event"
         );
 
         // Crucial debounce check: DURING rapid movement, zero database writes must have executed!
@@ -213,7 +217,7 @@ test("Actual Server Handler - Rejects out-of-bounds coordinates without updating
         socket.broadcastEmitted = [];
 
         // Attempt out-of-bounds move
-        socket.emit("player-move", { x: -100, y: 300 });
+        socket.emit("move", { x: -100, y: 300 });
 
         // In-memory position must remain unchanged at (400, 400)
         assert.equal(players[socket.id].x, 400);
@@ -255,7 +259,7 @@ test("Actual Server Handler - Disconnect cancels pending timer, persists final p
         handleConnection(socket);
 
         // Player moves to (480, 520) - starts a debounce timer
-        socket.emit("player-move", { x: 480, y: 520 });
+        socket.emit("move", { x: 480, y: 520 });
         assert.ok(moveDebounceTimers.has(socket.id), "Debounce timer must be pending");
 
         // Player disconnects BEFORE debounce timer fires: invoke and await actual disconnect handler
@@ -278,9 +282,9 @@ test("Actual Server Handler - Disconnect cancels pending timer, persists final p
 
         // 3. Disconnect must be broadcast
         const discBroadcast = socket.broadcastEmitted.find(
-            (e) => e.event === "player-disconnected"
+            (e) => e.event === "user:left"
         );
-        assert.ok(discBroadcast, "Must broadcast player-disconnected");
+        assert.ok(discBroadcast, "Must broadcast user:left");
 
         // 4. Verify call order: UPDATE final position [480, 520] must happen BEFORE DELETE
         assert.equal(callLog.length, 2);

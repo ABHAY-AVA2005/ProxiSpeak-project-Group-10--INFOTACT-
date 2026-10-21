@@ -74,63 +74,70 @@ ProxiSpeak/
 
 ## 🔌 Socket.IO Events
 
-The real-time layer is managed by Node.js and Socket.IO in `server/server.js`. Below are the verified Socket.IO events currently implemented in the backend, along with their direction, payload structure, and server-side handling logic:
+The real-time layer is managed by Node.js and Socket.IO in `server/src/sockets/socketHandler.js` (and `server/server.js`). Below are the verified Socket.IO events currently implemented in the backend, along with their direction, payload structure, and server-side handling logic:
 
 ### Implemented Events Summary
 
 | Event Name | Direction | Payload Type | Trigger / Description |
 |---|---|---|---|
 | `connection` | Client → Server | Standard handshake | Established when a client connects to the server |
-| `current-players` | Server → Client | `Object` (Player Map) | Sent exclusively to the connecting client with all active players |
-| `player-joined` | Server → Client | `Object` (Player) | Broadcast to all other clients when a newcomer joins |
-| `player-move` | Client → Server | `Object` (`{ x, y }`) | Emitted by client on avatar movement (validated & debounced) |
-| `player-moved` | Server → Client | `Object` (`{ id, x, y }`) | Broadcast immediately to all other clients upon valid movement |
+| `join` | Client → Server | `Object` (`{ username?, x?, y? }`) | Emitted by client to join the world and register position |
+| `users:list` | Server → Client | `Array` (User Objects) | Sent exclusively to the connecting client with all active users |
+| `user:joined` | Server → Client | `Object` (User Object) | Broadcast to all other clients when a newcomer joins |
+| `move` | Client → Server | `Object` (`{ x, y }`) | Emitted by client on avatar movement (validated & debounced) |
+| `user:moved` | Server → Client | `Object` (`{ socketId, id, x, y }`) | Broadcast immediately to all other clients upon valid movement |
+| `user:left` | Server → Client | `Object` (`{ socketId }`) | Broadcast to remaining clients to remove the departed avatar |
+| `nearby:enter` | Server → Client | `Object` (`{ socketId, username, x, y }`) | Emitted when two avatars come within the 100px earshot distance |
+| `nearby:leave` | Server → Client | `Object` (`{ socketId }`) | Emitted when two avatars move outside the 100px earshot distance |
 | `disconnect` | Client → Server | Lifecycle event | Triggered when a socket connection terminates |
-| `player-disconnected` | Server → Client | `string` (`id`) | Broadcast to remaining clients to remove the departed avatar |
 
 ---
 
 ### Detailed Event Specifications
 
-#### 1. `connection` (Lifecycle)
+#### 1. `connection` & `join` (Lifecycle)
 - **Direction:** Client → Server
-- **When it occurs:** When a client opens a Socket.IO connection to `http://localhost:5000`.
+- **When it occurs:** When a client opens a Socket.IO connection and emits `join`.
 - **Server Behavior:**
-  - Assigns initial spawn state in memory: `players[socket.id] = { id: socket.id, x: 400, y: 400 }`.
-  - Emits `current-players` to the joining socket.
-  - Broadcasts `player-joined` to all other connected sockets.
-  - Triggers asynchronous MongoDB upsert via `Player.findOneAndUpdate({ playerId: socket.id }, ...)`.
-  - Tracks the database operation in `inFlightWrites` to prevent race conditions during early disconnection.
+  - Assigns initial spawn state in memory: registers user with `username`, `x`, and `y`.
+  - Emits `users:list` to the joining socket with the array of all active users.
+  - Broadcasts `user:joined` to all other connected sockets.
+  - Triggers debounced/initial MongoDB persistence.
+  - Runs proximity diff checks to evaluate `nearby:enter` candidates within 100px.
 
-#### 2. `current-players`
+#### 2. `users:list`
 - **Direction:** Server → Client (Unicast to connecting client)
 - **Payload Structure:**
   ```json
-  {
-    "<socketId>": {
+  [
+    {
+      "socketId": "8UiVQwcLOvzoPaQBAAAA",
       "id": "8UiVQwcLOvzoPaQBAAAA",
+      "username": "Alex",
       "x": 400,
       "y": 400
     }
-  }
+  ]
   ```
-- **When it occurs:** Immediately upon successful socket connection.
+- **When it occurs:** Immediately upon receiving `join` from the connected client.
 - **Server Behavior:** Delivers the complete snapshot of active players from in-memory state so the new client can render existing avatars.
 
-#### 3. `player-joined`
+#### 3. `user:joined`
 - **Direction:** Server → Client (Broadcast to all other clients: `socket.broadcast.emit`)
 - **Payload Structure:**
   ```json
   {
+    "socketId": "8UiVQwcLOvzoPaQBAAAA",
     "id": "8UiVQwcLOvzoPaQBAAAA",
+    "username": "Alex",
     "x": 400,
     "y": 400
   }
   ```
-- **When it occurs:** Immediately after a new player's initial memory record is registered.
+- **When it occurs:** Immediately after a newcomer's initial memory record is registered.
 - **Server Behavior:** Informs all other connected clients of the newcomer so their canvases render the new avatar.
 
-#### 4. `player-move`
+#### 4. `move`
 - **Direction:** Client → Server
 - **Payload Structure:**
   ```json
@@ -143,42 +150,48 @@ The real-time layer is managed by Node.js and Socket.IO in `server/server.js`. B
   - `y`: `number` — Canvas vertical coordinate
 - **When it occurs:** Emitted by the client when the user moves the avatar.
 - **Server Behavior:**
-  - **Validation:** Verifies the socket is registered and not marked disconnected. Validates coordinates via `isValidCoordinate(x, y)` (`0 <= x <= 1000`, `0 <= y <= 600`, finite numbers). Invalid inputs are discarded with no state mutation or broadcast.
-  - **In-Memory Update:** Updates `players[socket.id].x` and `players[socket.id].y` immediately (in-memory state is the single source of truth for real-time rendering).
-  - **Real-Time Broadcast:** Immediately broadcasts `player-moved` to all other clients (zero database lag for 60 FPS motion).
-  - **Debounced Persistence:** Resets a 1000ms debounce timer (`DB_DEBOUNCE_MS`). Writes to MongoDB via `Player.updateOne` only after 1 second of stillness, minimizing database write load.
+  - **Validation:** Verifies the socket is registered. Validates coordinates (`0 <= x <= 1000`, `0 <= y <= 600`, finite numbers). Invalid inputs are discarded with no state mutation or broadcast.
+  - **In-Memory Update:** Updates user coordinates in memory immediately (single source of truth for 60 FPS motion).
+  - **Real-Time Broadcast:** Immediately broadcasts `user:moved` to all other clients (zero database lag).
+  - **Debounced Persistence:** Resets 1000ms debounce timer (`DB_DEBOUNCE_MS`) before saving to MongoDB.
+  - **Proximity Evaluation:** Evaluates proximity diffs within 100px and emits `nearby:enter` or `nearby:leave` as needed.
 
-#### 5. `player-moved`
+#### 5. `user:moved`
 - **Direction:** Server → Client (Broadcast to all other clients: `socket.broadcast.emit`)
 - **Payload Structure:**
   ```json
   {
+    "socketId": "8UiVQwcLOvzoPaQBAAAA",
     "id": "8UiVQwcLOvzoPaQBAAAA",
     "x": 425,
     "y": 380
   }
   ```
-- **When it occurs:** Immediately upon receiving a valid `player-move` event.
+- **When it occurs:** Immediately upon receiving a valid `move` event.
 - **Server Behavior:** Propagates the new coordinates to all other clients in real time for smooth remote interpolation.
 
-#### 6. `disconnect` & `player-disconnected`
+#### 6. `disconnect` & `user:left`
 - **Direction:**
   - `disconnect`: Client → Server (Socket.IO standard event)
-  - `player-disconnected`: Server → Client (Broadcast to all other clients)
-- **`player-disconnected` Payload Structure:**
-  - Primitive `string` containing the disconnected socket ID (e.g., `"8UiVQwcLOvzoPaQBAAAA"`).
+  - `user:left`: Server → Client (Broadcast to all other clients)
+- **`user:left` Payload Structure:**
+  ```json
+  {
+    "socketId": "8UiVQwcLOvzoPaQBAAAA"
+  }
+  ```
 - **When it occurs:** When a client closes the tab, navigates away, or drops connection.
 - **Server Behavior:**
-  - Registers the socket in `disconnectedSockets` tombstone set to prevent delayed asynchronous operations from recreating the record.
   - Clears any pending movement debounce timer.
-  - Removes the player from in-memory `players` map.
-  - Broadcasts `player-disconnected` with the socket ID to remaining clients.
-  - Awaits any in-flight database write for this player (`inFlightWrites`).
-  - Persists the final position if a movement write was pending.
-  - Removes the player record from MongoDB via `Player.deleteOne({ playerId: socket.id })`.
-  - Clears the tombstone after an unreferenced 5-second buffer timer.
+  - Removes the user from in-memory state.
+  - Broadcasts `user:left` to remaining clients so avatars are removed immediately.
+  - Evaluates proximity cleanup and emits `nearby:leave` to all peers previously within earshot.
+  - Awaits active in-flight writes and safely deletes the player record from MongoDB.
 
-> **Note on Roadmap Events:** WebRTC signaling events (`webrtc:offer`, `webrtc:answer`, `webrtc:ice`) and proximity boundary events (`nearby:enter`, `nearby:leave`) mentioned in architectural specifications are scheduled for Week 2 (Proximity and WebRTC Audio) and are not yet implemented in `server/server.js`.
+#### 7. `nearby:enter` & `nearby:leave` (Proximity Diffs)
+- **Direction:** Server → Client (Targeted emit to affected peer pairs)
+- **When it occurs:** When the Euclidean distance between two players transitions across the 100px boundary.
+- **Server Behavior:** Calculates proximity set differences (`entered` and `left`), notifying only the affected pairs to establish or close WebRTC connections.
 
 ---
 
