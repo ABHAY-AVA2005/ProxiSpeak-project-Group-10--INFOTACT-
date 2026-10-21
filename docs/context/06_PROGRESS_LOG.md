@@ -3,8 +3,8 @@
 Update this every night before pushing. The AI reads it at the start of each session.
 
 ## Current status
-- Current day: Day 12 (Wed 21 Oct 2026) - synchronized with origin/main
-- Current task (from 02_TEAM_PLAN.md): test: spatial audit script, results to docs/benchmarks.md
+- Current day: Day 14 (Thu 22 Oct 2026)
+- Current task (from 02_TEAM_PLAN.md): docs: benchmark results table
 - Blockers: none
 
 ## Daily entries
@@ -371,6 +371,30 @@ Problems / fixes: Handled ES module import vs direct CLI invocation cleanly in s
 
 Tomorrow (Day 14): docs: benchmark results table
 
+Day 14 - Thu 22 Oct 2026 (Kajal, kajal-backend)
+
+Planned: docs: benchmark results table
+
+Done:
+- Finalized and published standardized spatial and clustering benchmark results tables in `README.md` and `docs/benchmarks.md` for the Week 2 / Mid-Project Review.
+- Documented verified empirical benchmark measurements across 10, 25, 50, 100, and 200 users for both `getNearbyUsersInMemory` (p95 = 0.0091 ms at 50 users, 0.0317 ms at 200 users) and `clusterUsers` (p95 = 0.0696 ms at 50 users, 1.3458 ms at 200 users).
+- Confirmed strict compliance with the project's `< 20.0 ms` performance target across all load tiers (averaging 570x–2,200x faster than required for proximity queries).
+- Explicitly documented execution environment metadata, labeling unrecorded hardware metrics as not recorded to prevent hallucination.
+- Documented clear reproduction commands (`cd server && npm run audit:spatial` and `cd server && npm test`).
+- Added comprehensive technical Viva Voce preparation notes to `docs/benchmarks.md` covering the distance formula with squared distance optimization, 2D Cartesian vs 2dsphere indexing, in-memory lookup vs MongoDB network/disk overhead, and the impact of 1000ms debounced database writes on position accuracy.
+- Ran full validation: all 55 automated unit/integration tests pass (`npm test`) and spatial audit script passes with 100% compliance.
+
+Files changed:
+- README.md
+- docs/benchmarks.md
+- docs/context/06_PROGRESS_LOG.md
+
+Commit message(s): docs: benchmark results table
+
+Problems / fixes: Captured actual reproducible benchmark metrics from live audit run; ensured clean git status and zero test regressions.
+
+Tomorrow (Day 15): fix: performance bugs (feature freeze and rehearsal prep)
+
 <!-- Copy the block above for each new day. -->
 
 Viva notes (add as you go)
@@ -414,8 +438,9 @@ Questions I should be ready for:
 - Why use a 2d index instead of a 2dsphere index? The virtual office uses flat pixel coordinates rather than geographic spherical coordinates.
 - How do you prevent zombie records on disconnect? By registering the socket in a disconnectedSockets tombstone set and awaiting active in-flight writes before issuing deleteOne.
 - How do you detect when a user enters or leaves the 100px earshot without sending duplicate events? We maintain a set of previously nearby peer IDs for each socket in `userNearbyMap`. When a user moves or joins, we query nearby users within 100px and compute the set difference (`entered = current \ previous`, `left = previous \ current`). If a user moves but stays within 100px of the same peers, both diff sets are empty, so no events are emitted.
-- What happens when a user disconnects? The server cleans up the user from `userNearbyMap` and iterates over all peers who had that user in their nearby set, emitting `nearby:leave` to those active peers so they can tear down their WebRTC connection, while never attempting to send events to the closed socket.
 - Why do you log query timing and what is the target? ProxiSpeak has a hard target of <20ms for proximity queries. The logger measures each query using performance.now(), logs timing data safely without exposing database credentials, and tracks the compliance rate so we can identify bottlenecks before scaling to 50 concurrent users.
+- How is the Euclidean distance formula optimized in code? Euclidean distance is $\sqrt{(x_i - x_0)^2 + (y_i - y_0)^2}$. Because computing square roots (`Math.sqrt`) is expensive at 60 FPS, the implementation compares squared distance $(x_i - x_0)^2 + (y_i - y_0)^2 \le 100^2 = 10,000$ during initial filtering, deferring square root calculations exclusively to the small subset of matching candidates for nearest-first sorting.
+- How does in-memory spatial lookup compare to MongoDB queries? In-memory lookup operates directly on the V8 JavaScript Map in the Node.js process heap (taking ~0.009 ms p95 at 50 users). MongoDB `$near` queries require TCP/TLS networking, BSON serialization, query planning, and document hydration, which takes 5–25 ms locally and 35–70 ms on cloud databases, exceeding the 20 ms budget. MongoDB is retained for debounced persistence, while in-memory lookup serves real-time signaling.
 
 ## Done checklist
 - [x] Week 1 merged to main
