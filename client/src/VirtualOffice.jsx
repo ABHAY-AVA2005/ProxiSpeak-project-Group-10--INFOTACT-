@@ -59,7 +59,7 @@ function colourForId(id) {
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
-function VirtualOffice({ username = "You", earshotRadius = 200 }) {
+function VirtualOffice({ username = "You", earshotRadius = 100 }) {
   const canvasRef = useRef(null);
   const earshotRef = useRef(earshotRadius);
 
@@ -124,7 +124,7 @@ function VirtualOffice({ username = "You", earshotRadius = 200 }) {
     // ── Keyboard ───────────────────────────────────────────────────────────
     const onKeyDown = (e) => {
       const k = e.key.toLowerCase();
-      if (["arrowup","arrowdown","arrowleft","arrowright","w","a","s","d"].includes(k)) {
+      if (["arrowup", "arrowdown", "arrowleft", "arrowright", "w", "a", "s", "d"].includes(k)) {
         e.preventDefault();
         clickTarget.current = null; // cancel click-to-move when key pressed
       }
@@ -165,9 +165,9 @@ function VirtualOffice({ username = "You", earshotRadius = 200 }) {
       let dy = 0;
 
       const k = keys.current;
-      if (k["arrowup"]    || k["w"]) dy -= SPEED;
-      if (k["arrowdown"]  || k["s"]) dy += SPEED;
-      if (k["arrowleft"]  || k["a"]) dx -= SPEED;
+      if (k["arrowup"] || k["w"]) dy -= SPEED;
+      if (k["arrowdown"] || k["s"]) dy += SPEED;
+      if (k["arrowleft"] || k["a"]) dx -= SPEED;
       if (k["arrowright"] || k["d"]) dx += SPEED;
 
       // Click-to-move (only when no key held)

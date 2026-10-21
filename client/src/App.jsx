@@ -19,7 +19,7 @@ function App() {
           Playing as <strong style={{ color: "#60a5fa" }}>{username}</strong>
         </span>
       </div>
-      <VirtualOffice username={username} earshotRadius={200} />
+      <VirtualOffice username={username} earshotRadius={100} />
       <p style={{ color: "#6b7280", fontSize: "12px", marginTop: "12px" }}>
         Move with <kbd style={{ background: "#374151", color: "#e5e7eb", padding: "1px 5px", borderRadius: "3px" }}>WASD</kbd> or Arrow keys · Click canvas to move there
       </p>
