@@ -63,7 +63,17 @@
 - Files changed: docs/context/06_PROGRESS_LOG.md, README.md
 - Commit message(s): chore: review Week 1 branches and update documentation
 - Problems / fixes: None
-- Tomorrow (Day 7): docs: Week 1 write-up draft, tag v0.1
+### Day 7 - Fri 16 Oct 2026
+- Planned: docs: Week 1 write-up draft, tag v0.1
+- Done:
+  - Validated full test suite (server 3/3 passing, client build passing).
+  - Merged integrated Week 1 frontend, backend, movement, and audio scaffolding into main.
+  - Tagged release v0.1 marking completion of Week 1 milestones.
+  - Synced main back into member branches (`tanvi-frontend`, `abhishek-audio`, `kajal-backend`).
+- Files changed: docs/context/06_PROGRESS_LOG.md
+- Commit message(s): chore: merge Week 1 branches into main, tag v0.1, sync member branches
+- Problems / fixes: None
+- Tomorrow (Day 8): feat: signaling event names and relay skeleton (offer, answer, ice)
 
 <!-- Copy the block above for each new day. -->
 
@@ -85,7 +95,7 @@
   - Does changing Mongoose schema delete old indexes in MongoDB? No, Mongoose only creates indexes; obsolete database indexes must be dropped explicitly using a migration script or mongosh.
 
 ## Done checklist
-- [ ] Week 1 merged to main
+- [x] Week 1 merged to main
 - [ ] Week 2 merged, tag v0.2-mid
 - [ ] Mid review ready (docs, benchmarks, video)
 - [ ] Week 3 merged, tag v0.3
