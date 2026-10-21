@@ -57,6 +57,36 @@ export function setupSocketHandlers(io) {
     });
 
     /**
+     * WebRTC Signaling Relay Skeleton (Day 8 & Day 9)
+     * Relays offer, answer, and ICE candidate between peers
+     */
+    socket.on("webrtc:offer", ({ targetId, offer }) => {
+      if (!targetId || !offer) return;
+      console.log(`[WebRTC] Relay offer: ${socket.id} -> ${targetId}`);
+      io.to(targetId).emit("webrtc:offer", {
+        senderId: socket.id,
+        offer
+      });
+    });
+
+    socket.on("webrtc:answer", ({ targetId, answer }) => {
+      if (!targetId || !answer) return;
+      console.log(`[WebRTC] Relay answer: ${socket.id} -> ${targetId}`);
+      io.to(targetId).emit("webrtc:answer", {
+        senderId: socket.id,
+        answer
+      });
+    });
+
+    socket.on("webrtc:ice-candidate", ({ targetId, candidate }) => {
+      if (!targetId || !candidate) return;
+      io.to(targetId).emit("webrtc:ice-candidate", {
+        senderId: socket.id,
+        candidate
+      });
+    });
+
+    /**
      * Disconnect cleanup
      */
     socket.on("disconnect", async (reason) => {
@@ -64,7 +94,7 @@ export function setupSocketHandlers(io) {
       console.log(`[Socket Disconnected] ID: ${socket.id} (Reason: ${reason})`);
 
       if (removedUser) {
-        // Broadcast user departure so all clients remove the avatar immediately
+        // Broadcast user departure so all clients remove the avatar and close peer connections
         socket.broadcast.emit("user:left", { socketId: socket.id });
       }
 

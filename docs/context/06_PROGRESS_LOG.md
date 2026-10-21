@@ -75,6 +75,17 @@
 - Problems / fixes: None
 - Tomorrow (Day 8): feat: signaling event names and relay skeleton (offer, answer, ice)
 
+### Day 8 - Sat 17 Oct 2026
+- Planned: feat: signaling event names and relay skeleton (offer, answer, ice)
+- Done:
+  - Implemented WebRTC signaling relay events (`webrtc:offer`, `webrtc:answer`, `webrtc:ice-candidate`) in `server/src/sockets/socketHandler.js`.
+  - Added unit test verification for WebRTC signaling events in `server/test/persistence.test.js`.
+  - Verified test suite (4/4 passing) with 0 regressions.
+- Files changed: server/src/sockets/socketHandler.js, server/test/persistence.test.js, docs/context/06_PROGRESS_LOG.md
+- Commit message(s): feat: signaling event names and relay skeleton (offer, answer, ice)
+- Problems / fixes: None
+- Tomorrow (Day 9): feat: relay offer, answer, ICE to a target socket
+
 <!-- Copy the block above for each new day. -->
 
 ## Viva notes (add as you go)

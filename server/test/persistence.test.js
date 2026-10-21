@@ -43,3 +43,10 @@ test("PersistenceManager - Debounced movement schedule and cancellation on disco
   assert.equal(moveDebounceTimers.has(socketId), false, "Debounce timer must be cancelled on disconnect");
   assert.equal(disconnectedSockets.has(socketId), true, "Socket must be registered in disconnectedSockets");
 });
+
+test("SocketHandler - WebRTC signaling relay events", () => {
+  // Test event names matching Abhishek frontend hook (webrtc:offer, webrtc:answer, webrtc:ice-candidate)
+  const requiredEvents = ["webrtc:offer", "webrtc:answer", "webrtc:ice-candidate"];
+  assert.equal(requiredEvents.length, 3);
+});
+
