@@ -22,7 +22,7 @@ function App() {
           Playing as <strong style={{ color: "#60a5fa" }}>{username}</strong>
         </span>
       </div>
-      <VirtualOffice username={username} earshotRadius={200} localStream={localStream} />
+      <VirtualOffice username={username} earshotRadius={100} localStream={localStream} />
       <AudioControls
         isMuted={isMuted}
         toggleMute={toggleMute}

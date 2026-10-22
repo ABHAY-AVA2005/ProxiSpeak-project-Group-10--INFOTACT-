@@ -59,7 +59,7 @@ function colourForId(id) {
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
-function VirtualOffice({ username = "You", earshotRadius = 200, localStream = null }) {
+function VirtualOffice({ username = "You", earshotRadius = 100, localStream = null }) {
   const canvasRef = useRef(null);
   const earshotRef = useRef(earshotRadius);
   const localStreamRef = useRef(localStream);
