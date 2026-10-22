@@ -1,117 +1,83 @@
-06 - Progress Log (Abhay, abhay-team-lead)
+# 06 - Progress Log (Kajal, kajal-backend)
 
 Update this every night before pushing. The AI reads it at the start of each session.
 
 ## Current status
-- Current day: Day 14 (Thu 22 Oct 2026)
+- Current day: Day 14 (Fri 23 Oct 2026)
 - Current task (from 02_TEAM_PLAN.md): docs: benchmark results table
 - Blockers: none
 
 ## Daily entries
 
-Day 1 - Sat 10 Oct 2026
+Day 1 - Sat 10 Oct 2026 (Kajal, kajal-backend)
 
-Planned: chore: create repo, folders client/server, .gitignore, verify 4 member branches, connect dashboard
+Planned: chore: Express server scaffold and MongoDB Atlas connection
 
-Done: Project structure initialized with client/server folders, context documentation, and gitignore.
+Done: Scaffolded initial Express and Socket.IO backend, configured MongoDB connection via Mongoose, and created initial Player database schema in server/models/Player.js. (An initial client prototype in commit 516de8e was used for immediate testing and later superseded by Tanvi's official frontend).
 
-Files changed: README.md, docs/context/*, .gitignore, .env.example
+Files changed:
+- server/server.js
+- server/models/Player.js
+- server/package.json
 
-Commit message(s): chore: add client and server structure with .gitkeep
+Commit message(s): feat: add ProxiSpeak frontend and backend (commit 516de8e)
 
-Problems / fixes: None
+Problems / fixes: Verified initial database connectivity and server setup.
 
-Tomorrow (Day 2): Socket.io server with connect and disconnect logs
+Tomorrow (Day 2): feat: User schema with 2d index on position [x, y]
 
-Day 2 - Sun 11 Oct 2026
+Day 2 - Sun 11 Oct 2026 (Kajal, kajal-backend)
 
-Planned: feat: Socket.io server with connect and disconnect logs
+Planned: feat: User schema with 2d index on position [x, y]
 
-Done: Scaffolded Express & Socket.io server with CORS, health check endpoint, and connection/disconnection logs.
+Done: Evaluated initial Player schema and tested avatar movement; fixed a browser issue where pressing arrow keys caused the page viewport to scroll during movement testing. (Refactoring from 2dsphere to the flat 2D Cartesian index was scheduled for Day 4).
 
-Files changed: server/package.json, server/src/server.js, server/.env
+Files changed:
+- client/src/VirtualOffice.jsx
 
-Commit message(s): feat: Socket.io server with connect and disconnect logs
+Commit message(s): fix: prevent page scrolling during avatar movement (commit 61ed494)
 
-Problems / fixes: None
+Problems / fixes: Added event.preventDefault() on arrow keys to prevent browser window scrolling during keyboard control.
 
-Tomorrow (Day 3): User join event, in-memory users tracking, broadcast users
+Tomorrow (Day 3): feat: upsert user on join, remove on disconnect
 
-Day 3 - Mon 12 Oct 2026
+Day 3 - Mon 12 Oct 2026 (Kajal, kajal-backend)
 
-Planned: feat: join event, in-memory users, broadcast users
+Planned: feat: upsert user on join, remove on disconnect
 
-Done: Created in-memory user manager service and wired join, users, user, and user events in Socket.io handler.
+Done: Researched and designed player persistence lifecycle (upsert on connect, update on movement, delete on disconnect) and prepared architectural transition from spherical 2dsphere indexing to Cartesian 2D indexing. (No implementation commit pushed on 12 Oct; merge commit 6b60b56 merged team lead docs on 13 Oct, and implementation was committed on Day 4 in commit 7d27860).
 
-Files changed: server/src/services/userManager.js, server/src/sockets/socketHandler.js
+Files changed: None committed on 12 Oct
 
-Commit message(s): feat: join event, in-memory users, broadcast users
+Commit message(s): None (work committed on Day 4 in commit 7d27860)
 
-Problems / fixes: None
+Problems / fixes: Identified that spherical 2dsphere coordinates were unsuitable for a flat canvas grid and that unthrottled writes would overwhelm database I/O; designed debouncing and Cartesian 2D indexing for Day 4 implementation.
 
-Day 4 - Tue 13 Oct 2026
-
-Planned: feat: move event broadcasts x/y to everyone; debounced position save to MongoDB, verify index
-
-Done:
-
-Replaced GeoJSON location field and 2dsphere index with flat Cartesian position: [x, y] and 2d geospatial index in Mongoose Player model.
-
-Implemented real-time position broadcast via WebSockets (move / player-move -> user / player-moved) with zero DB latency for 60 FPS movement.
-
-Debounced MongoDB writes (1000ms delay per player) in persistenceManager service to reduce write overhead by over 95%.
-
-Added race-condition guards on player disconnect: clears pending debounce timers, persists latest position if pending, awaits in-flight writes, and removes document.
-
-Added index migration script in server/src/scripts/migrate-indexes.js to ensure the position_2d index exists and remove legacy location_2dsphere.
-
-Added automated test suite in server/test/persistence.test.js verifying schema indexes, coordinate clamping, and debounce/disconnect guards.
-
-Files changed: server/src/models/Player.js, server/src/services/persistenceManager.js, server/src/sockets/socketHandler.js, server/src/scripts/migrate-indexes.js, server/test/persistence.test.js
-
-Commit message(s): feat: move event broadcast and debounced position save to MongoDB
-
-Problems / fixes: Integrated Kajal's database persistence, debouncing logic, and migration tools into the modular ES Module server architecture.
-
-Tomorrow (Day 5): feat: render remote avatars with interpolation, test: script spawning fake socket clients
+Tomorrow (Day 4): feat: debounced position save to MongoDB, verify index
 
 Day 4 - Tue 13 Oct 2026 (Kajal, kajal-backend)
 
 Planned: debounced position save to MongoDB, verify index
 
 Done:
-
-Replaced GeoJSON location field and 2dsphere index with flat position: [x, y] and 2d geospatial index in Player model.
-
-Created server/utils/validation.js with defensive coordinate validation for 1000x600 canvas boundaries.
-
-Updated server/server.js to broadcast movements in real-time while debouncing MongoDB writes by 1000ms per player.
-
-Handled disconnect safely: cancel pending debounce timer, persist latest position if pending, delete player record, and guard against delayed async operations recreating deleted records.
-
-Guarded database connection on server import to prevent test runner hanging and unreferenced disconnect cleanup timers.
-
-Added inFlightWrites tracking to guarantee in-flight operations complete before deleteOne runs on disconnect.
-
-Added automated test suite in server/test/debounce-index.test.js with 9 passing tests verifying actual server handlers and race-condition guards.
+- Replaced GeoJSON location field and 2dsphere index with flat position: [x, y] and 2d geospatial index in Player model.
+- Created server/utils/validation.js with defensive coordinate validation for 1000x600 canvas boundaries.
+- Updated server/server.js to broadcast movements in real-time while debouncing MongoDB writes by 1000ms per player.
+- Handled disconnect safely: cancel pending debounce timer, persist latest position if pending, delete player record, and guard against delayed async operations recreating deleted records.
+- Guarded database connection on server import to prevent test runner hanging and unreferenced disconnect cleanup timers.
+- Added inFlightWrites tracking to guarantee in-flight operations complete before deleteOne runs on disconnect.
+- Added automated test suite in server/test/debounce-index.test.js with 9 passing tests verifying actual server handlers and race-condition guards.
 
 Files changed:
+- server/models/Player.js
+- server/utils/validation.js
+- server/server.js
+- server/scripts/migrate-indexes.js
+- server/test/debounce-index.test.js
+- server/package.json
+- docs/context/06_PROGRESS_LOG.md
 
-server/models/Player.js
-
-server/utils/validation.js
-
-server/server.js
-
-server/scripts/migrate-indexes.js
-
-server/test/debounce-index.test.js
-
-server/package.json
-
-docs/context/06_PROGRESS_LOG.md
-
-Commit message(s): feat: debounced position save to MongoDB, verify index
+Commit message(s): feat: debounced position save to MongoDB, verify index (commit 7d27860)
 
 Problems / fixes: Resolved test hanging by modularizing validation into utils/validation.js, wrapping database connection inside connectDB() executed only on direct startup, and adding .unref() to disconnect timers. Eliminated race conditions between in-flight writes and deleteOne by tracking and awaiting in-flight promises.
 
@@ -285,7 +251,7 @@ Done:
 - Exported `resetQueryStats()` and `getLastQueryTiming()` for easy inspection in unit tests and future benchmark audits.
 - Added 7 dedicated automated unit tests in `server/test/persistence.test.js` verifying secret scrubbing, execution measurement, target compliance, multi-source aggregation, automatic logging in `getNearbyUsers()`, clean stat resets, exact 20ms boundary enforcement, and modern socket event protocol compliance. All 45 tests pass.
 - Aligned active client (`client/src/VirtualOffice.jsx`) and server (`server/src/sockets/socketHandler.js`, `server/server.js`) to the modern socket event protocol:
-  - Client emits `move` (replaced legacy `player-move`).
+  - Client emits `move` (backend-frontend integration update replacing legacy `player-move` in `VirtualOffice.jsx`, without modifying Tanvi's canvas UI or rendering logic).
   - Removed legacy client listeners for `current-players`, `player-joined`, `player-moved`, and `player-disconnected`.
   - Server movement listener now listens to `move` only.
   - Server broadcasts use modern events exclusively: `users:list`, `user:joined`, `user:moved`, and `user:left`.
@@ -304,9 +270,11 @@ Files changed:
 - README.md
 - docs/context/06_PROGRESS_LOG.md
 
-Commit message(s): refactor: align client and server with modern socket event protocol
+Commit message(s):
+- perf: add proximity query timing logger (commit 80cfd06)
+- refactor: align client and server with modern socket event protocol (commit 58d5e8d)
 
-Problems / fixes: Removed legacy event aliases across client, server, and test suites after confirming all components use modern events (users:list, user:joined, move, user:moved, user:left), maintaining full compatibility with WebRTC proximity diffs and 60 FPS interpolation.
+Problems / fixes: Removed legacy event aliases across client, server, and test suites after confirming all components use modern events (users:list, user:joined, move, user:moved, user:left), maintaining full protocol compatibility with WebRTC proximity diffs and 60 FPS interpolation.
 
 Tomorrow (Day 12): perf: cache and index tuning to get under 20 ms
 
@@ -371,7 +339,7 @@ Problems / fixes: Handled ES module import vs direct CLI invocation cleanly in s
 
 Tomorrow (Day 14): docs: benchmark results table
 
-Day 14 - Thu 22 Oct 2026 (Kajal, kajal-backend)
+Day 14 - Fri 23 Oct 2026 (Kajal, kajal-backend)
 
 Planned: docs: benchmark results table
 
@@ -382,14 +350,25 @@ Done:
 - Explicitly documented execution environment metadata, labeling unrecorded hardware metrics as not recorded to prevent hallucination.
 - Documented clear reproduction commands (`cd server && npm run audit:spatial` and `cd server && npm test`).
 - Added comprehensive technical Viva Voce preparation notes to `docs/benchmarks.md` covering the distance formula with squared distance optimization, 2D Cartesian vs 2dsphere indexing, in-memory lookup vs MongoDB network/disk overhead, and the impact of 1000ms debounced database writes on position accuracy.
-- Ran full validation: all 55 automated unit/integration tests pass (`npm test`) and spatial audit script passes with 100% compliance.
+- Performed backend-frontend integration adjustments: aligned default `earshotRadius` prop from 200 to 100 in `client/src/App.jsx` and `client/src/VirtualOffice.jsx` to reflect backend proximity threshold (integration alignment, without modifying canvas rendering).
+- Made benchmark spatial coordinates deterministic in `server/src/scripts/spatial-audit.js` for 100% reproducible results.
+- Added dedicated unit test suite for query timer metrics, slow-query detection, and secret redaction in `server/test/queryTimer.test.js`.
+- Ran full validation: all automated unit/integration tests pass (`npm test`) and spatial audit script passes with 100% compliance.
 
 Files changed:
 - README.md
 - docs/benchmarks.md
 - docs/context/06_PROGRESS_LOG.md
+- client/src/App.jsx
+- client/src/VirtualOffice.jsx
+- server/src/scripts/spatial-audit.js
+- server/test/queryTimer.test.js
 
-Commit message(s): docs: benchmark results table
+Commit message(s):
+- docs: benchmark results table (commit 12d2713)
+- fix: set proximity radius to 100px (commit fd5df48)
+- test: make spatial benchmarks deterministic (commit f56df10)
+- test: add query timer metrics and security tests (commit f4e0cd7)
 
 Problems / fixes: Captured actual reproducible benchmark metrics from live audit run; ensured clean git status and zero test regressions.
 
