@@ -1,9 +1,3 @@
-# Audio Check & WebRTC Verification Demo
-
-Date: Thu 22 Oct 2026  
-**Module:WebRTC P2P Audio Check  
-*Author:* Abhishek Bhalla (Frontend Audio)
-
 # Setup
 1. Two browser windows (Tab A on `localhost:5173`, Tab B on `localhost:5173` in Incognito).
 2. Users "Abhishek" and "PeerUser" joined into the office space.
