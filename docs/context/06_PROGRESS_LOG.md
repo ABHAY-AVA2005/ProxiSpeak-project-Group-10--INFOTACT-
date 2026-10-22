@@ -153,26 +153,76 @@
 
 <!-- Copy the block above for each new day. -->
 
-## Viva notes (add as you go)
-- What each file does in simple words:
-  - `server/src/server.js`: Starts Express HTTP and Socket.io server, applies CORS and parses JSON.
-  - `server/src/sockets/socketHandler.js`: Central Socket.io hub handling connection, movement, proximity diffing, and WebRTC signaling relay.
-  - `server/src/services/userManager.js`: Fast in-memory Map storing connected active users (socketId, username, position [x, y]).
-  - `server/src/services/persistenceManager.js`: Handles debounced persistence to MongoDB, in-flight promise tracking, safe disconnect cleanup, 100px `$near` proximity queries, and BFS group clustering.
-  - `server/src/services/queryTimer.js`: High-resolution performance timer measuring spatial queries, auditing the < 20ms requirement, and maintaining ring buffer query statistics.
-  - `server/src/models/Player.js`: Mongoose model with Cartesian `position: [x, y]` and a `2d` index.
-  - `server/src/scripts/migrate-indexes.js`: Standalone script to inspect and migrate MongoDB geospatial indexes.
-- Key decisions and why (2d index, throttling, mesh cap, lower-id offer rule):
-  - **2D index vs 2dsphere**: The office is a flat Cartesian 2D grid in pixels. `2dsphere` calculates spherical distance on earth coordinates, whereas legacy `2d` index works directly with Euclidean distance (`$near` with `$maxDistance: 100` pixels).
-  - **Debouncing**: Avatars move at 30-60 updates per second. Emitting real-time updates over WebSockets maintains 60 FPS, while debouncing MongoDB writes by 1 second reduces database I/O by over 95%.
-  - **Disconnect safety**: When a user leaves, debounce timers are cleared, active in-flight writes are awaited before `deleteOne` runs, and `disconnectedSockets` prevents async operations from resurrecting deleted records.
-  - **Lower-ID offer rule**: When two users enter 100px earshot (`nearby:enter`), both clients detect proximity simultaneously. If both created WebRTC offers at once, WebRTC glare occurs. Electing the user with lexicographically smaller socket ID (`socketA.id < socketB.id`) ensures exactly one peer creates the offer while the other awaits and answers.
-  - **Spatial Signaling Filter**: `webrtc:offer`, `webrtc:answer`, and `webrtc:ice-candidate` are guarded on the server by distance check (`<= 100px`). Sockets cannot bypass client logic to eavesdrop on peers outside their earshot.
-- Questions I should be ready for:
-  - Why keep live coordinates in memory instead of reading from DB? Database roundtrips add latency and high I/O overhead; in-memory lookup is sub-millisecond.
-  - Why not write to MongoDB on every move? Because real-time broadcast must happen immediately (zero latency, 60 FPS), but disk/network DB I/O would bottleneck the system under multi-user load.
-  - Does changing Mongoose schema delete old indexes in MongoDB? No, Mongoose only creates indexes; obsolete database indexes must be dropped explicitly using a migration script or mongosh.
-  - How do you prevent WebRTC glare when two users walk towards each other? The server attaches `shouldInitiateOffer = (targetId < peerId)` to the `nearby:enter` payload, guaranteeing deterministic peer negotiation.
+## Viva notes (Comprehensive & Simplified for Review)
+
+### 1. Breakdown of Every File & Technical Term
+
+- **`server/src/server.js`**: The front door of the backend server.
+  - **What it does:** Starts the Express HTTP web server and sets up the Socket.io WebSocket server so clients can connect.
+  - **Key terms explained simply:**
+    - **CORS (Cross-Origin Resource Sharing):** A web browser security rule. By default, browsers block a website running on one address (e.g. `http://localhost:5173` frontend) from talking to a server on another address (e.g. `http://localhost:3000` backend). CORS is like a guest list telling the browser: *"It's safe! Allow our React frontend to send requests to this server."*
+    - **JSON Parsing (`express.json({ limit: "10kb" })`):** When clients send data to the server, it arrives as raw text string format. Parsing JSON converts that text string into a native JavaScript object (`req.body`) so we can read fields like `req.body.username`. The `10kb` limit prevents malicious users from crashing the server with massive payloads (Denial of Service).
+    - **Health Check (`/health`):** A simple URL route that returns `{ status: "ok" }`. Monitoring tools ping this to know if the server is alive or has crashed.
+
+- **`server/src/sockets/socketHandler.js`**: The real-time communications center.
+  - **What it does:** Listens to WebSocket events when players connect, move their avatars, step near each other, or disconnect. It also relays WebRTC audio calls between players.
+  - **Key terms explained simply:**
+    - **WebSocket / Socket.io:** Unlike regular HTTP where you request a page and the connection closes, WebSockets keep an open, persistent phone line between the browser and server for two-way, instant message exchange with zero delay.
+    - **Proximity Diffing:** Comparing a player's previous list of nearby neighbors with their current list. If a neighbor wasn't there before, fire `nearby:enter` (start audio). If someone walked away, fire `nearby:leave` (stop audio).
+    - **WebRTC Relay (Signaling):** WebRTC lets browsers talk directly peer-to-peer. But to find each other, they need an introducer. The server acts as that introducer by passing connection offers, answers, and network paths (ICE candidates) between the two browsers.
+
+- **`server/src/services/userManager.js`**: Fast player state manager in memory.
+  - **What it does:** Stores all currently active players in a JavaScript `Map` in RAM for instantaneous (microsecond) reading and updating.
+  - **Key terms explained simply:**
+    - **In-Memory Map vs Database:** RAM memory lookups take ~0.001 ms, whereas reading from a database takes 5–20 ms over network/disk. We keep live positions in RAM so avatars move smoothly at 60 frames per second without lagging.
+    - **Coordinate Clamping:** Making sure a player's $(x, y)$ coordinates stay inside the map boundary (0 to 2000 pixels). If a hacked client sends $x = 999999$, the server forces (clamps) it back to $2000$.
+    - **Input Sanitization:** Stripping out dangerous HTML tags or script injection from usernames (e.g., `<script>alert()</script>`) so hackers cannot attack other players (Cross-Site Scripting or XSS).
+
+- **`server/src/services/persistenceManager.js`**: Database saving and spatial search engine.
+  - **What it does:** Periodically saves player positions to MongoDB, finds players within earshot, and cleans up when players leave.
+  - **Key terms explained simply:**
+    - **Debounced Persistence:** When an avatar moves, it triggers 30–60 updates every second. If we saved to MongoDB on every tiny move, the database would crash from overload. "Debouncing" means: *Wait until 1 second has passed since the player moved before doing 1 save to the database.* This cuts database write operations by over 95%.
+    - **In-Flight Promise Tracking:** "In-flight" means an asynchronous database save has started but hasn't finished yet. If a player abruptly closes their browser tab while a save is in-flight, our code tracks and waits for that pending save promise to finish before deleting the player document. This prevents data corruption or "ghost players" getting resurrected in the database.
+    - **$near 100px Proximity Query:** A MongoDB command using a 2D spatial index to search: *"Find all player documents located within 100 pixels radius of point (x, y)."*
+    - **BFS Group Clustering (Breadth-First Search):** When multiple people stand together (Alice is near Bob, Bob is near Charlie), BFS algorithm groups them into a conversational cluster/huddle so the system understands who is in the conversation group.
+
+- **`server/src/services/queryTimer.js`**: Performance stopwatch.
+  - **What it does:** Measures how long database spatial queries take using high-precision timers (`process.hrtime.bigint()`).
+  - **Key terms explained simply:**
+    - **< 20ms Target:** Our project requirement is that finding nearby users must take under 20 milliseconds to prevent audio and movement lag.
+    - **Ring Buffer:** A fixed-size memory array (e.g., last 100 query timings) where new records overwrite the oldest ones. It calculates average query speed without consuming infinite memory.
+
+- **`server/src/models/Player.js`**: The MongoDB data structure (Schema).
+  - **What it does:** Defines what a player document looks like in MongoDB: `socketId`, `username`, and `position: [x, y]`.
+  - **Key terms explained simply:**
+    - **Cartesian `2d` index:** A flat $(x, y)$ coordinate plane like a sheet of graph paper. (Unlike `2dsphere` which calculates curvature on a spherical Earth using latitude/longitude).
+
+---
+
+### 2. Key Architecture Decisions & Viva Answers (The "Why" Behind The Code)
+
+1. **Why `2d` index instead of `2dsphere`?**
+   - *Viva Answer:* Our virtual office is a flat 2D pixel grid on an HTML5 Canvas. `2dsphere` assumes coordinates are latitude/longitude in degrees and computes distance in meters over the Earth's curvature. MongoDB's legacy `2d` index uses pure Euclidean planar math ($d = \sqrt{\Delta x^2 + \Delta y^2}$) in raw pixels, which perfectly matches our 100-pixel earshot rule.
+
+2. **Why keep live positions in memory instead of reading from MongoDB?**
+   - *Viva Answer:* With 50 players moving, the server receives up to 1,500 position updates per second. Sending 1,500 read/write queries per second to a database creates extreme latency and network bottlenecks. Keeping coordinates in an in-memory `Map` provides instant sub-millisecond lookups for 60 FPS gameplay, while MongoDB is only updated in the background as a backup.
+
+3. **How does Debouncing work and why is it needed?**
+   - *Viva Answer:* When a user moves, we reset a 1000ms timer. We only write to MongoDB once the user pauses or stops moving for 1 second. This reduces database write load by 95% while keeping the client's live screen perfectly updated via WebSockets.
+
+4. **What is WebRTC Glare and how did you prevent it?**
+   - *Viva Answer:* When Player A and Player B walk towards each other, both enter 100px earshot simultaneously. If both browsers independently try to send a WebRTC connection "Offer" at the exact same moment, the requests collide—a race condition called "WebRTC Glare". We solved this using the **Lower Socket ID rule**: the server compares socket IDs lexicographically (`socketA.id < socketB.id`) and designates only the smaller ID to initiate the offer (`shouldInitiateOffer = true`), guaranteeing zero collision.
+
+5. **Why do you enforce a 100px proximity check on WebRTC signaling inside the server?**
+   - *Viva Answer:* Security and privacy. If the server blindly forwarded WebRTC offers, a rogue or modified client could connect to any player's audio across the entire building. The server verifies Euclidean distance ($\le 100$px) before relaying offers, answers, or ICE candidates, making eavesdropping impossible.
+
+6. **What happens during a disconnect to prevent ghost players?**
+   - *Viva Answer:* Disconnect cleanup is handled safely:
+     1. Cancels any pending debounced save timer.
+     2. Awaits any in-flight asynchronous database writes.
+     3. Adds the socket ID to a `disconnectedSockets` set so any delayed async task cannot re-save or resurrect the user.
+     4. Deletes the player from MongoDB and RAM.
+     5. Broadcasts `user:left` and `nearby:leave` to all peers so peers close their audio connections immediately.
 
 ## Done checklist
 - [x] Week 1 merged to main
