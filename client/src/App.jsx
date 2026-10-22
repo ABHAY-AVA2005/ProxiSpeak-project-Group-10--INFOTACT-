@@ -1,9 +1,12 @@
 import { useState } from "react";
 import { JoinScreen } from "./components/JoinScreen";
 import VirtualOffice from "./VirtualOffice";
+import { AudioControls } from "./components/AudioControls";
+import { useMediaStream } from "./hooks/useMediaStream";
 
 function App() {
   const [username, setUsername] = useState(null);
+  const { localStream, isMuted, permissionGranted, startAudio, toggleMute } = useMediaStream();
 
   if (!username) {
     return <JoinScreen onJoin={setUsername} />;
@@ -19,7 +22,13 @@ function App() {
           Playing as <strong style={{ color: "#60a5fa" }}>{username}</strong>
         </span>
       </div>
-      <VirtualOffice username={username} earshotRadius={200} />
+      <VirtualOffice username={username} earshotRadius={200} localStream={localStream} />
+      <AudioControls
+        isMuted={isMuted}
+        toggleMute={toggleMute}
+        permissionGranted={permissionGranted}
+        startAudio={startAudio}
+      />
       <p style={{ color: "#6b7280", fontSize: "12px", marginTop: "12px" }}>
         Move with <kbd style={{ background: "#374151", color: "#e5e7eb", padding: "1px 5px", borderRadius: "3px" }}>WASD</kbd> or Arrow keys · Click canvas to move there
       </p>
