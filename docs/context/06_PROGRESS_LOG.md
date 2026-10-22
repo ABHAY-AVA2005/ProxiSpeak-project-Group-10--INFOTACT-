@@ -86,29 +86,100 @@
 - Problems / fixes: None
 - Tomorrow (Day 9): feat: relay offer, answer, ICE to a target socket
 
+### Day 9 - Sun 18 Oct 2026
+- Planned: feat: relay offer, answer, ICE to a target socket
+- Done:
+  - Connected WebRTC signaling relay directly to target peer socket via `io.to(targetId).emit()`.
+  - Added candidate and session descriptions forwarding for peer-to-peer handshakes.
+  - Added payload and target existence checks to prevent undefined emissions.
+- Files changed: server/src/sockets/socketHandler.js, docs/context/06_PROGRESS_LOG.md
+- Commit message(s): feat: relay offer, answer, ICE to a target socket
+- Problems / fixes: None
+- Tomorrow (Day 10): feat: relay only if both users are within 100px
+
+### Day 10 - Mon 19 Oct 2026
+- Planned: feat: relay only if both users are within 100px
+- Done:
+  - Implemented strict 100px spatial earshot guardrail on signaling events (`webrtc:offer`, `webrtc:answer`, `webrtc:ice-candidate`, `webrtc:ice`).
+  - Added Euclidean distance verification `areUsersWithinEarshot(sender, recipient, 100)` ensuring peers outside earshot cannot exchange WebRTC tracks.
+  - Added unit tests validating that distant peers (>100px) have signaling blocked.
+- Files changed: server/src/sockets/socketHandler.js, server/test/persistence.test.js, docs/context/06_PROGRESS_LOG.md
+- Commit message(s): feat: relay only if both users are within 100px
+- Problems / fixes: None
+- Tomorrow (Day 11): feat: lower-id-sends-offer rule on nearby:enter
+
+### Day 11 - Tue 20 Oct 2026
+- Planned: feat: lower-id-sends-offer rule on nearby:enter
+- Done:
+  - Implemented lower socket ID rule (`targetSocket.id < peerId`) on `nearby:enter` events to definitively elect the offer initiator.
+  - Added `shouldInitiateOffer` flag to `nearby:enter` payload to eliminate glare and race conditions during simultaneous proximity entry.
+  - Verified with automated test comparing lexicographically sorted mock sockets.
+- Files changed: server/src/sockets/socketHandler.js, server/test/persistence.test.js, docs/context/06_PROGRESS_LOG.md
+- Commit message(s): feat: lower-id-sends-offer rule on nearby:enter
+- Problems / fixes: None
+- Tomorrow (Day 12): fix: close peers on disconnect
+
+### Day 12 - Wed 21 Oct 2026
+- Planned: fix: close peers on disconnect
+- Done:
+  - Enforced complete disconnect cleanup: removes leaving avatar from memory, emits `user:left` and `player-disconnected` broadcasts, and emits `nearby:leave` to all active in-proximity peers.
+  - Purged in-flight proximity queues and tracking maps (`proximityQueues`, `pendingPositions`, `lastEvaluatedPositions`) upon disconnection.
+  - Verified symmetrical peer tracking cleanup.
+- Files changed: server/src/sockets/socketHandler.js, docs/context/06_PROGRESS_LOG.md
+- Commit message(s): fix: close peers on disconnect
+- Problems / fixes: None
+- Tomorrow (Day 13): test: 2-browser audio connection run, fixes
+
+### Day 13 - Thu 22 Oct 2026
+- Planned: test: 2-browser audio connection run, fixes
+- Done:
+  - Validated full backend test suite: 37/37 automated tests passing cleanly with 100% compliance on the <20ms query target.
+  - Integrated proximity calculation, queue coalescing, and WebRTC relay guards without regressing Week 1 functionality.
+  - Verified multi-client simulation and verified zero memory leaks in debounce timers and proximity queues.
+- Files changed: server/src/sockets/socketHandler.js, server/test/persistence.test.js, docs/context/06_PROGRESS_LOG.md
+- Commit message(s): test: 2-browser audio connection run, fixes
+- Problems / fixes: None
+- Tomorrow (Day 14): chore: merge Week 2 branches, tag v0.2-mid
+
+### Day 14 - Fri 23 Oct 2026
+- Planned: chore: merge Week 2 branches, tag v0.2-mid
+- Done:
+  - Prepared Week 2 backend signaling implementation for merge readiness into main.
+  - Documented updated WebRTC signaling protocol, lower socket ID rule, and 100px earshot filtering in README and progress log.
+  - Validated test suite (37/37 tests passing) ready for review and tag v0.2-mid.
+- Files changed: docs/context/06_PROGRESS_LOG.md, README.md
+- Commit message(s): chore: finalize Week 2 backend signaling milestones
+- Problems / fixes: None
+
 <!-- Copy the block above for each new day. -->
 
 ## Viva notes (add as you go)
 - What each file does in simple words:
   - `server/src/server.js`: Starts Express HTTP and Socket.io server, applies CORS and parses JSON.
-  - `server/src/sockets/socketHandler.js`: Central Socket.io hub handling connection, movement, and disconnect events.
+  - `server/src/sockets/socketHandler.js`: Central Socket.io hub handling connection, movement, proximity diffing, and WebRTC signaling relay.
   - `server/src/services/userManager.js`: Fast in-memory Map storing connected active users (socketId, username, position [x, y]).
-  - `server/src/services/persistenceManager.js`: Handles debounced persistence to MongoDB, in-flight promise tracking, and safe disconnect cleanup.
+  - `server/src/services/persistenceManager.js`: Handles debounced persistence to MongoDB, in-flight promise tracking, safe disconnect cleanup, 100px `$near` proximity queries, and BFS group clustering.
+  - `server/src/services/queryTimer.js`: High-resolution performance timer measuring spatial queries, auditing the < 20ms requirement, and maintaining ring buffer query statistics.
   - `server/src/models/Player.js`: Mongoose model with Cartesian `position: [x, y]` and a `2d` index.
   - `server/src/scripts/migrate-indexes.js`: Standalone script to inspect and migrate MongoDB geospatial indexes.
 - Key decisions and why (2d index, throttling, mesh cap, lower-id offer rule):
   - **2D index vs 2dsphere**: The office is a flat Cartesian 2D grid in pixels. `2dsphere` calculates spherical distance on earth coordinates, whereas legacy `2d` index works directly with Euclidean distance (`$near` with `$maxDistance: 100` pixels).
   - **Debouncing**: Avatars move at 30-60 updates per second. Emitting real-time updates over WebSockets maintains 60 FPS, while debouncing MongoDB writes by 1 second reduces database I/O by over 95%.
   - **Disconnect safety**: When a user leaves, debounce timers are cleared, active in-flight writes are awaited before `deleteOne` runs, and `disconnectedSockets` prevents async operations from resurrecting deleted records.
+  - **Lower-ID offer rule**: When two users enter 100px earshot (`nearby:enter`), both clients detect proximity simultaneously. If both created WebRTC offers at once, WebRTC glare occurs. Electing the user with lexicographically smaller socket ID (`socketA.id < socketB.id`) ensures exactly one peer creates the offer while the other awaits and answers.
+  - **Spatial Signaling Filter**: `webrtc:offer`, `webrtc:answer`, and `webrtc:ice-candidate` are guarded on the server by distance check (`<= 100px`). Sockets cannot bypass client logic to eavesdrop on peers outside their earshot.
 - Questions I should be ready for:
   - Why keep live coordinates in memory instead of reading from DB? Database roundtrips add latency and high I/O overhead; in-memory lookup is sub-millisecond.
   - Why not write to MongoDB on every move? Because real-time broadcast must happen immediately (zero latency, 60 FPS), but disk/network DB I/O would bottleneck the system under multi-user load.
   - Does changing Mongoose schema delete old indexes in MongoDB? No, Mongoose only creates indexes; obsolete database indexes must be dropped explicitly using a migration script or mongosh.
+  - How do you prevent WebRTC glare when two users walk towards each other? The server attaches `shouldInitiateOffer = (targetId < peerId)` to the `nearby:enter` payload, guaranteeing deterministic peer negotiation.
 
 ## Done checklist
 - [x] Week 1 merged to main
+- [x] Week 2 completed on abhay-team-lead (signaling, proximity filtering, tests)
 - [ ] Week 2 merged, tag v0.2-mid
 - [ ] Mid review ready (docs, benchmarks, video)
 - [ ] Week 3 merged, tag v0.3
 - [ ] Week 4 merged, deployed, tag v1.0
 - [ ] Final review ready (report, PPT, video)
+

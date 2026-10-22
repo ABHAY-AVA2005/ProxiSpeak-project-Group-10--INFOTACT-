@@ -82,6 +82,12 @@ ProxiSpeak/
 | `move` | Client ➔ Server | `{ x: number, y: number }` | Sends client's updated coordinate position |
 | `user:moved` | Server ➔ Client (broadcast) | `{ socketId, x, y }` | Zero-lag WebSocket broadcast to all peers |
 | `user:left` | Server ➔ Client (broadcast) | `{ socketId }` | Clean disconnect cleanup and DB persistence flush |
+| `nearby:enter` | Server ➔ Client | `{ socketId, id, username, x, y, shouldInitiateOffer: boolean }` | Notifies when a peer enters 100px earshot (includes glare-free offer election) |
+| `nearby:leave` | Server ➔ Client | `{ socketId, id }` | Notifies when a peer leaves 100px earshot to close peer connection |
+| `webrtc:offer` | Client ⇄ Server (Relay) | `{ targetId, offer }` / `{ senderId, offer }` | Relays WebRTC SDP offer strictly within 100px proximity radius |
+| `webrtc:answer` | Client ⇄ Server (Relay) | `{ targetId, answer }` / `{ senderId, answer }` | Relays WebRTC SDP answer strictly within 100px proximity radius |
+| `webrtc:ice-candidate` | Client ⇄ Server (Relay) | `{ targetId, candidate }` / `{ senderId, candidate }` | Relays ICE candidate for P2P audio track establishment within 100px |
+
 
 ## 🧪 Testing & Simulation Scripts
 
