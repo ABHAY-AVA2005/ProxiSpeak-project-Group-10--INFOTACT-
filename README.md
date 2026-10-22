@@ -100,13 +100,16 @@ The real-time layer is managed by Node.js and Socket.IO in `server/src/sockets/s
 |---|---|---|---|
 | `connection` | Client → Server | Standard handshake | Established when a client connects to the server |
 | `join` | Client → Server | `Object` (`{ username?, x?, y? }`) | Emitted by client to join the world and register position |
-| `users:list` | Server → Client | `Array` (User Objects) | Sent exclusively to the connecting client with all active users |
+| `users:list` | Server → Client | `Array` (User Objects) | Sent exclusively to connecting client with all active users |
 | `user:joined` | Server → Client | `Object` (User Object) | Broadcast to all other clients when a newcomer joins |
 | `move` | Client → Server | `Object` (`{ x, y }`) | Emitted by client on avatar movement (validated & debounced) |
 | `user:moved` | Server → Client | `Object` (`{ socketId, id, x, y }`) | Broadcast immediately to all other clients upon valid movement |
 | `user:left` | Server → Client | `Object` (`{ socketId }`) | Broadcast to remaining clients to remove the departed avatar |
-| `nearby:enter` | Server → Client | `Object` (`{ socketId, username, x, y }`) | Emitted when two avatars come within the 100px earshot distance |
-| `nearby:leave` | Server → Client | `Object` (`{ socketId }`) | Emitted when two avatars move outside the 100px earshot distance |
+| `nearby:enter` | Server → Client | `Object` (`{ socketId, id, username, x, y, shouldInitiateOffer }`) | Emitted when two avatars enter 100px earshot (includes offer election) |
+| `nearby:leave` | Server → Client | `Object` (`{ socketId, id }`) | Emitted when two avatars move outside 100px earshot to close peer connection |
+| `webrtc:offer` | Client ⇄ Server | `Object` (`{ targetId, offer }`) | Relayed strictly between clients within 100px earshot |
+| `webrtc:answer` | Client ⇄ Server | `Object` (`{ targetId, answer }`) | Relayed strictly between clients within 100px earshot |
+| `webrtc:ice-candidate` | Client ⇄ Server | `Object` (`{ targetId, candidate }`) | Relayed strictly between clients within 100px earshot |
 | `disconnect` | Client → Server | Lifecycle event | Triggered when a socket connection terminates |
 
 ---
@@ -209,7 +212,15 @@ The real-time layer is managed by Node.js and Socket.IO in `server/src/sockets/s
 #### 7. `nearby:enter` & `nearby:leave` (Proximity Diffs)
 - **Direction:** Server → Client (Targeted emit to affected peer pairs)
 - **When it occurs:** When the Euclidean distance between two players transitions across the 100px boundary.
-- **Server Behavior:** Calculates proximity set differences (`entered` and `left`), notifying only the affected pairs to establish or close WebRTC connections.
+- **Server Behavior:** Calculates proximity set differences (`entered` and `left`), notifying only the affected pairs to establish or close WebRTC connections. Includes `shouldInitiateOffer` flag based on lexicographical socket ID comparison to prevent glare.
+
+#### 8. `webrtc:offer`, `webrtc:answer` & `webrtc:ice-candidate` (Signaling Relays)
+- **Direction:** Client ⇄ Server (Relayed to targeted peer)
+- **When it occurs:** When initiating, accepting, or negotiating P2P WebRTC audio streams between players within earshot.
+- **Server Behavior:**
+  - Enforces strict 100px proximity verification (`areUsersWithinEarshot`) before forwarding any signaling payload.
+  - Relays payload to `targetId` via `io.to(targetId).emit(...)`.
+  - Discards signaling payloads if either peer disconnected or walked outside 100px earshot.
 
 ---
 

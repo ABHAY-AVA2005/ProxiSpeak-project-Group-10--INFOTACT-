@@ -909,7 +909,6 @@ test("SocketHandler - Modern socket event protocol (users:list, user:joined, mov
     resetProximityQueues();
   }
 });
-
 // ---------------------------------------------------------------------
 // DAY 11: Query Timing Logger Tests (Target: <= 20 ms)
 // ---------------------------------------------------------------------
@@ -1324,6 +1323,106 @@ test("SocketHandler - Real-time proximity diffs use in-memory lookup without rel
     });
     removeUser("socket-alice-live");
     removeUser("socket-bob-live");
+    resetNearbyMap();
+    resetProximityQueues();
+  }
+});
+
+test("SocketHandler - WebRTC signaling relay respects 100px proximity guardrail", async () => {
+  resetNearbyMap();
+  resetProximityQueues();
+
+  const io = createMockIO();
+  setupSocketHandlers(io);
+
+  const socketA = createMockSocket("socket-alice");
+  const socketB = createMockSocket("socket-bob");
+  const socketC = createMockSocket("socket-charlie");
+
+  try {
+    io.emit("connection", socketA);
+    io.emit("connection", socketB);
+    io.emit("connection", socketC);
+
+    const [joinA] = socketA.listeners("join");
+    const [joinB] = socketB.listeners("join");
+    const [joinC] = socketC.listeners("join");
+
+    // Alice at (100, 100), Bob at (150, 100) [dist = 50px <= 100px], Charlie at (500, 100) [dist = 400px > 100px]
+    await joinA({ username: "Alice", x: 100, y: 100 });
+    await joinB({ username: "Bob", x: 150, y: 100 });
+    await joinC({ username: "Charlie", x: 500, y: 100 });
+
+    const [offerHandlerA] = socketA.listeners("webrtc:offer");
+    const [answerHandlerB] = socketB.listeners("webrtc:answer");
+    const [iceHandlerA] = socketA.listeners("webrtc:ice-candidate");
+
+    // 1. Valid relay within 100px: Alice -> Bob
+    offerHandlerA({ targetId: "socket-bob", offer: { type: "offer", sdp: "dummy-sdp-offer" } });
+    const bobOffers = io.getEmittedTo("socket-bob").filter((e) => e.event === "webrtc:offer");
+    assert.equal(bobOffers.length, 1, "Bob should receive offer from Alice within 100px");
+    assert.equal(bobOffers[0].data.senderId, "socket-alice");
+
+    answerHandlerB({ targetId: "socket-alice", answer: { type: "answer", sdp: "dummy-sdp-answer" } });
+    const aliceAnswers = io.getEmittedTo("socket-alice").filter((e) => e.event === "webrtc:answer");
+    assert.equal(aliceAnswers.length, 1, "Alice should receive answer from Bob within 100px");
+    assert.equal(aliceAnswers[0].data.senderId, "socket-bob");
+
+    iceHandlerA({ targetId: "socket-bob", candidate: { candidate: "candidate:1" } });
+    const bobCandidates = io.getEmittedTo("socket-bob").filter((e) => e.event === "webrtc:ice-candidate");
+    assert.equal(bobCandidates.length, 1, "Bob should receive ICE candidate within 100px");
+
+    // 2. Blocked relay outside 100px: Alice -> Charlie (400px apart)
+    offerHandlerA({ targetId: "socket-charlie", offer: { type: "offer", sdp: "distant-offer" } });
+    const charlieOffers = io.getEmittedTo("socket-charlie").filter((e) => e.event === "webrtc:offer");
+    assert.equal(charlieOffers.length, 0, "Charlie (>100px away) must NOT receive webrtc:offer");
+
+    iceHandlerA({ targetId: "socket-charlie", candidate: { candidate: "candidate:2" } });
+    const charlieCandidates = io.getEmittedTo("socket-charlie").filter((e) => e.event === "webrtc:ice-candidate");
+    assert.equal(charlieCandidates.length, 0, "Charlie (>100px away) must NOT receive webrtc:ice-candidate");
+  } finally {
+    removeUser("socket-alice");
+    removeUser("socket-bob");
+    removeUser("socket-charlie");
+    resetNearbyMap();
+    resetProximityQueues();
+  }
+});
+
+test("SocketHandler - Enforces lower socket ID offer rule on nearby:enter", async () => {
+  resetNearbyMap();
+  resetProximityQueues();
+
+  const io = createMockIO();
+  setupSocketHandlers(io);
+
+  // 'socket-01-low' is lexicographically lower than 'socket-02-high'
+  const socketLow = createMockSocket("socket-01-low");
+  const socketHigh = createMockSocket("socket-02-high");
+
+  try {
+    io.emit("connection", socketLow);
+    io.emit("connection", socketHigh);
+
+    const [joinLow] = socketLow.listeners("join");
+    const [joinHigh] = socketHigh.listeners("join");
+
+    await joinLow({ username: "LowID", x: 100, y: 100 });
+    // Join within 50px
+    await joinHigh({ username: "HighID", x: 150, y: 100 });
+
+    const lowEnters = io.getEmittedTo("socket-01-low").filter((e) => e.event === "nearby:enter");
+    const highEnters = socketHigh.emitted.filter((e) => e.event === "nearby:enter");
+
+    assert.equal(lowEnters.length, 1);
+    assert.equal(highEnters.length, 1);
+
+    // socket-01-low < socket-02-high -> lower ID must initiate offer
+    assert.equal(lowEnters[0].data.shouldInitiateOffer, true, "Lower socket ID must initiate offer");
+    assert.equal(highEnters[0].data.shouldInitiateOffer, false, "Higher socket ID must NOT initiate offer");
+  } finally {
+    removeUser("socket-01-low");
+    removeUser("socket-02-high");
     resetNearbyMap();
     resetProximityQueues();
   }

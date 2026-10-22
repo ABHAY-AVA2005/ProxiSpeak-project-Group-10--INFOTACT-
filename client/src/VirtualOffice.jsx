@@ -59,10 +59,12 @@ function colourForId(id) {
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
-function VirtualOffice({ username = "You", earshotRadius = 100 }) {
+function VirtualOffice({ username = "You", earshotRadius = 100, localStream = null }) {
   const canvasRef = useRef(null);
   const earshotRef = useRef(earshotRadius);
+  const localStreamRef = useRef(localStream);
 
+  useEffect(() => { localStreamRef.current = localStream; }, [localStream]);
   useEffect(() => { earshotRef.current = earshotRadius; }, [earshotRadius]);
 
   const player = useRef({ x: 400, y: 400, username });
@@ -118,6 +120,191 @@ function VirtualOffice({ username = "You", earshotRadius = 100 }) {
       if (id) {
         delete remotePlayers.current[id];
         delete colourCache[id];
+        const audioEl = document.getElementById(`audio-${id}`);
+        if (audioEl) audioEl.remove();
+      }
+    });
+
+    // ── WebRTC Signaling & Spatial Audio Handshake ────────────────────────
+    const peerConnections = {};
+
+    function getOrCreatePC(peerId) {
+      if (peerConnections[peerId]) return peerConnections[peerId];
+
+      const pc = new RTCPeerConnection({
+        iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+      });
+
+      // Send local audio track if mic is enabled
+      if (localStreamRef.current) {
+        localStreamRef.current.getTracks().forEach((track) => {
+          pc.addTrack(track, localStreamRef.current);
+        });
+      }
+
+      pc.onicecandidate = (event) => {
+        if (event.candidate) {
+          socket.emit("webrtc:ice-candidate", { targetId: peerId, candidate: event.candidate });
+        }
+      };
+
+      pc.ontrack = (event) => {
+        console.log("[WebRTC] Received audio stream from:", peerId);
+        const stream = event.streams[0] || new MediaStream([event.track]);
+
+        let audioEl = document.getElementById(`audio-${peerId}`);
+        if (!audioEl) {
+          audioEl = document.createElement("audio");
+          audioEl.id = `audio-${peerId}`;
+          audioEl.autoplay = true;
+          audioEl.style.display = "none";
+          document.body.appendChild(audioEl);
+        }
+        audioEl.srcObject = stream;
+        audioEl.play().catch((err) => console.log("Audio autoplay note:", err));
+
+        // Setup Web Audio spatial nodes if AudioContext is supported
+        try {
+          if (!window._proxAudioCtx) {
+            window._proxAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+          }
+          const ctx = window._proxAudioCtx;
+          if (ctx.state === "suspended") {
+            ctx.resume();
+          }
+          if (!audioNodes[peerId]) {
+            const source = ctx.createMediaStreamSource(stream);
+            const gainNode = ctx.createGain();
+            const pannerNode = ctx.createStereoPanner ? ctx.createStereoPanner() : null;
+
+            if (pannerNode) {
+              source.connect(gainNode);
+              gainNode.connect(pannerNode);
+              pannerNode.connect(ctx.destination);
+            } else {
+              source.connect(gainNode);
+              gainNode.connect(ctx.destination);
+            }
+            audioNodes[peerId] = { source, gainNode, pannerNode };
+            audioEl.muted = true; // Output through AudioContext to prevent duplicate echo
+          }
+        } catch (e) {
+          console.warn("[WebAudio] Spatial mixer fallback to HTML audio:", e);
+        }
+      };
+
+      peerConnections[peerId] = pc;
+      return pc;
+    }
+
+    const audioNodes = {};
+
+    // Helper to dynamically update volume and panning as avatars move
+    function updateAudioSpatialMixer() {
+      const myX = player.current.x;
+      const myY = player.current.y;
+
+      Object.entries(audioNodes).forEach(([peerId, nodes]) => {
+        const peer = remotePlayers.current[peerId];
+        if (!peer || !nodes.gainNode) return;
+
+        const dist = Math.hypot(peer.x - myX, peer.y - myY);
+        const maxDist = earshotRef.current || 200;
+
+        // Attenuation: 1 at 0 distance, 0 at maxDist
+        const gain = Math.max(0, Math.min(1, 1 - dist / maxDist));
+        nodes.gainNode.gain.setValueAtTime(gain, window._proxAudioCtx ? window._proxAudioCtx.currentTime : 0);
+
+        // Stereo panning: -1 (left) to +1 (right)
+        if (nodes.pannerNode) {
+          const pan = Math.max(-1, Math.min(1, (peer.x - myX) / maxDist));
+          nodes.pannerNode.pan.setValueAtTime(pan, window._proxAudioCtx ? window._proxAudioCtx.currentTime : 0);
+        }
+      });
+    }
+
+    // Update tracks on active peer connections when localStream changes
+    if (localStreamRef.current) {
+      Object.values(peerConnections).forEach((pc) => {
+        localStreamRef.current.getTracks().forEach((track) => {
+          const senders = pc.getSenders();
+          const exists = senders.some((s) => s.track && s.track.id === track.id);
+          if (!exists) {
+            pc.addTrack(track, localStreamRef.current);
+          }
+        });
+      });
+    }
+
+    socket.on("nearby:enter", async ({ socketId, id, shouldInitiateOffer }) => {
+      const peerId = socketId || id;
+      if (!peerId) return;
+      console.log(`[ProxiSpeak] nearby:enter from ${peerId}, initiateOffer=${shouldInitiateOffer}`);
+      const pc = getOrCreatePC(peerId);
+
+      if (shouldInitiateOffer) {
+        try {
+          const offer = await pc.createOffer();
+          await pc.setLocalDescription(offer);
+          socket.emit("webrtc:offer", { targetId: peerId, offer });
+        } catch (err) {
+          console.error("[WebRTC] Create offer error:", err);
+        }
+      }
+    });
+
+    socket.on("nearby:leave", ({ socketId, id }) => {
+      const peerId = socketId || id;
+      console.log(`[ProxiSpeak] nearby:leave from ${peerId}`);
+      if (peerConnections[peerId]) {
+        peerConnections[peerId].close();
+        delete peerConnections[peerId];
+      }
+      if (audioNodes[peerId]) {
+        try {
+          audioNodes[peerId].source.disconnect();
+          audioNodes[peerId].gainNode.disconnect();
+          if (audioNodes[peerId].pannerNode) audioNodes[peerId].pannerNode.disconnect();
+        } catch (_) {}
+        delete audioNodes[peerId];
+      }
+      const audioEl = document.getElementById(`audio-${peerId}`);
+      if (audioEl) audioEl.remove();
+    });
+
+    socket.on("webrtc:offer", async ({ senderId, offer }) => {
+      console.log("[WebRTC] Received offer from:", senderId);
+      const pc = getOrCreatePC(senderId);
+      try {
+        await pc.setRemoteDescription(new RTCSessionDescription(offer));
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        socket.emit("webrtc:answer", { targetId: senderId, answer });
+      } catch (err) {
+        console.error("[WebRTC] Error handling offer:", err);
+      }
+    });
+
+    socket.on("webrtc:answer", async ({ senderId, answer }) => {
+      console.log("[WebRTC] Received answer from:", senderId);
+      const pc = peerConnections[senderId];
+      if (pc) {
+        try {
+          await pc.setRemoteDescription(new RTCSessionDescription(answer));
+        } catch (err) {
+          console.error("[WebRTC] Error handling answer:", err);
+        }
+      }
+    });
+
+    socket.on("webrtc:ice-candidate", async ({ senderId, candidate }) => {
+      const pc = peerConnections[senderId];
+      if (pc && candidate) {
+        try {
+          await pc.addIceCandidate(new RTCIceCandidate(candidate));
+        } catch (err) {
+          console.error("[WebRTC] Error adding ICE candidate:", err);
+        }
       }
     });
 
@@ -212,6 +399,9 @@ function VirtualOffice({ username = "You", earshotRadius = 100 }) {
         if (Math.abs(rp.targetX - rp.x) < 0.1) rp.x = rp.targetX;
         if (Math.abs(rp.targetY - rp.y) < 0.1) rp.y = rp.targetY;
       });
+
+      // Update volume and panning in real time as players move
+      updateAudioSpatialMixer();
 
       // ─── Render ───────────────────────────────────────────────────────
       ctx.clearRect(0, 0, WORLD_W, WORLD_H);
@@ -379,7 +569,7 @@ function VirtualOffice({ username = "You", earshotRadius = 100 }) {
       canvas.removeEventListener("click", onCanvasClick);
       socket.disconnect();
     };
-  }, [username]);
+  }, [username, localStream]);
 
   return (
     <canvas

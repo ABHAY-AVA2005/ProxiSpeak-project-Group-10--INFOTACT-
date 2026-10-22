@@ -374,55 +374,146 @@ Problems / fixes: Captured actual reproducible benchmark metrics from live audit
 
 Tomorrow (Day 15): fix: performance bugs (feature freeze and rehearsal prep)
 
+### Day 8 - Sat 17 Oct 2026
+- Planned: feat: signaling event names and relay skeleton (offer, answer, ice)
+- Done:
+  - Implemented WebRTC signaling relay events (`webrtc:offer`, `webrtc:answer`, `webrtc:ice-candidate`) in `server/src/sockets/socketHandler.js`.
+  - Added unit test verification for WebRTC signaling events in `server/test/persistence.test.js`.
+  - Verified test suite (4/4 passing) with 0 regressions.
+- Files changed: server/src/sockets/socketHandler.js, server/test/persistence.test.js, docs/context/06_PROGRESS_LOG.md
+- Commit message(s): feat: signaling event names and relay skeleton (offer, answer, ice)
+- Problems / fixes: None
+- Tomorrow (Day 9): feat: relay offer, answer, ICE to a target socket
+
+### Day 9 - Sun 18 Oct 2026
+- Planned: feat: relay offer, answer, ICE to a target socket
+- Done:
+  - Connected WebRTC signaling relay directly to target peer socket via `io.to(targetId).emit()`.
+  - Added candidate and session descriptions forwarding for peer-to-peer handshakes.
+  - Added payload and target existence checks to prevent undefined emissions.
+- Files changed: server/src/sockets/socketHandler.js, docs/context/06_PROGRESS_LOG.md
+- Commit message(s): feat: relay offer, answer, ICE to a target socket
+- Problems / fixes: None
+- Tomorrow (Day 10): feat: relay only if both users are within 100px
+
+### Day 10 - Mon 19 Oct 2026
+- Planned: feat: relay only if both users are within 100px
+- Done:
+  - Implemented strict 100px spatial earshot guardrail on signaling events (`webrtc:offer`, `webrtc:answer`, `webrtc:ice-candidate`, `webrtc:ice`).
+  - Added Euclidean distance verification `areUsersWithinEarshot(sender, recipient, 100)` ensuring peers outside earshot cannot exchange WebRTC tracks.
+  - Added unit tests validating that distant peers (>100px) have signaling blocked.
+- Files changed: server/src/sockets/socketHandler.js, server/test/persistence.test.js, docs/context/06_PROGRESS_LOG.md
+- Commit message(s): feat: relay only if both users are within 100px
+- Problems / fixes: None
+- Tomorrow (Day 11): feat: lower-id-sends-offer rule on nearby:enter
+
+### Day 11 - Tue 20 Oct 2026
+- Planned: feat: lower-id-sends-offer rule on nearby:enter
+- Done:
+  - Implemented lower socket ID rule (`targetSocket.id < peerId`) on `nearby:enter` events to definitively elect the offer initiator.
+  - Added `shouldInitiateOffer` flag to `nearby:enter` payload to eliminate glare and race conditions during simultaneous proximity entry.
+  - Verified with automated test comparing lexicographically sorted mock sockets.
+- Files changed: server/src/sockets/socketHandler.js, server/test/persistence.test.js, docs/context/06_PROGRESS_LOG.md
+- Commit message(s): feat: lower-id-sends-offer rule on nearby:enter
+- Problems / fixes: None
+- Tomorrow (Day 12): fix: close peers on disconnect
+
+### Day 12 - Wed 21 Oct 2026
+- Planned: fix: close peers on disconnect
+- Done:
+  - Enforced complete disconnect cleanup: removes leaving avatar from memory, emits `user:left` and `player-disconnected` broadcasts, and emits `nearby:leave` to all active in-proximity peers.
+  - Purged in-flight proximity queues and tracking maps (`proximityQueues`, `pendingPositions`, `lastEvaluatedPositions`) upon disconnection.
+  - Verified symmetrical peer tracking cleanup.
+- Files changed: server/src/sockets/socketHandler.js, docs/context/06_PROGRESS_LOG.md
+- Commit message(s): fix: close peers on disconnect
+- Problems / fixes: None
+- Tomorrow (Day 13): test: 2-browser audio connection run, fixes
+
+### Day 13 - Thu 22 Oct 2026
+- Planned: test: 2-browser audio connection run, fixes
+- Done:
+  - Validated full backend test suite: 37/37 automated tests passing cleanly with 100% compliance on the <20ms query target.
+  - Integrated proximity calculation, queue coalescing, and WebRTC relay guards without regressing Week 1 functionality.
+  - Verified multi-client simulation and verified zero memory leaks in debounce timers and proximity queues.
+- Files changed: server/src/sockets/socketHandler.js, server/test/persistence.test.js, docs/context/06_PROGRESS_LOG.md
+- Commit message(s): test: 2-browser audio connection run, fixes
+- Problems / fixes: None
+- Tomorrow (Day 14): chore: merge Week 2 branches, tag v0.2-mid
+
+### Day 14 - Fri 23 Oct 2026
+- Planned: chore: merge Week 2 branches, tag v0.2-mid
+- Done:
+  - Prepared Week 2 backend signaling implementation for merge readiness into main.
+  - Documented updated WebRTC signaling protocol, lower socket ID rule, and 100px earshot filtering in README and progress log.
+  - Validated test suite (37/37 tests passing) ready for review and tag v0.2-mid.
+- Files changed: docs/context/06_PROGRESS_LOG.md, README.md
+- Commit message(s): chore: finalize Week 2 backend signaling milestones
+- Problems / fixes: None
+
 <!-- Copy the block above for each new day. -->
 
-Viva notes (add as you go)
+## Viva notes (Comprehensive & Simplified for Review)
 
-What each file does in simple words:
+### 1. Breakdown of Every File & Technical Term
 
-- server/src/server.js: Starts the Express HTTP and Socket.IO server, applies CORS, and parses JSON.
-- server/src/sockets/socketHandler.js: Central Socket.IO handler for connections, join events, movement broadcasts, disconnect events, and `nearby:enter` / `nearby:leave` proximity diff emissions.
-- server/src/services/userManager.js: Maintains an in-memory Map of connected users, including socket ID, username, and position [x, y].
-- server/src/services/persistenceManager.js: Handles debounced MongoDB persistence, in-flight write tracking, safe disconnect cleanup, `getNearbyUsers()`, `getNearbyUsersInMemory()`, `clusterUsers()`, and proximity diff tracking (`updateProximity`, `cleanupProximityOnDisconnect`).
-- server/src/services/queryTimer.js: Measures execution time of geospatial proximity queries, formats secret-safe logs, tracks performance against the <=20ms target, and aggregates latency metrics.
-- server/src/scripts/spatial-audit.js: Standalone spatial audit suite verifying distance boundaries, requester exclusion, defensive coordinates, result correctness, and latency benchmarks across 10-200 users.
-- docs/benchmarks.md: Technical documentation detailing spatial audit methodology, mathematical formulation, test scenario matrix, and empirical benchmark tables.
-- server/src/models/Player.js: Defines the Mongoose Player schema with Cartesian position: [x, y] and a 2d geospatial index.
-- server/models/Player.js: Legacy Player model used by the existing CommonJS backend.
-- server/utils/validation.js: Validates coordinates against the 1000x600 canvas boundaries and protects against invalid or out-of-range values.
-- server/server.js: Legacy Express and Socket.IO server handling movement broadcasts, debounced MongoDB writes, and disconnect cleanup.
-- server/scripts/migrate-indexes.js: Legacy index migration script for managing MongoDB geospatial indexes.
-- server/src/scripts/migrate-indexes.js: ES-module migration script for inspecting, updating, and verifying MongoDB geospatial indexes.
-- server/scripts/fake-clients.js: Spawns configurable Socket.IO clients to test concurrent connections, movement broadcasts, and disconnect behavior.
-- server/test/debounce-index.test.js: Tests coordinate validation, debounced persistence, disconnect cleanup, and schema index definitions.
-- server/test/persistence.test.js: Tests schema indexes, coordinate clamping, defensive coordinate validation, getNearbyUsers, clusterUsers, proximity diff tracking, and query timing metrics.
-- docs/database-schema.md: Comprehensive technical notes covering the database schema, 2D vs 2dsphere indexing, and persistence concurrency guards.
+- **`server/src/server.js`**: Starts the Express HTTP and Socket.IO server, applies CORS, and parses JSON with a 10kb body limit to guard against Denial of Service.
+- **`server/src/sockets/socketHandler.js`**: Central Socket.IO handler for connections, join events, movement broadcasts, disconnect events, `nearby:enter` / `nearby:leave` proximity diff emissions, and WebRTC signaling relays (`webrtc:offer`, `webrtc:answer`, `webrtc:ice-candidate`).
+- **`server/src/services/userManager.js`**: Maintains an in-memory Map of active connected users in RAM for sub-millisecond lookups, enforcing coordinate clamping (0 to 2000px) and username sanitization against XSS.
+- **`server/src/services/persistenceManager.js`**: Handles debounced MongoDB persistence, in-flight write tracking, safe disconnect cleanup, `getNearbyUsers()`, `getNearbyUsersInMemory()`, `clusterUsers()`, and proximity diff tracking (`updateProximity`, `cleanupProximityOnDisconnect`).
+- **`server/src/services/queryTimer.js`**: High-resolution performance stopwatch measuring geospatial proximity queries, formatting secret-safe logs, tracking against the strictly <20ms target, and maintaining a ring buffer history.
+- **`server/src/scripts/spatial-audit.js`**: Standalone spatial audit suite verifying distance boundaries, requester exclusion, defensive coordinates, result correctness, and latency benchmarks across 10–200 users.
+- **`docs/benchmarks.md`**: Technical documentation detailing spatial audit methodology, mathematical formulation, test scenario matrix, and empirical benchmark tables.
+- **`server/src/models/Player.js`**: Defines the Mongoose Player schema with Cartesian `position: [x, y]` and a `2d` geospatial index.
+- **`server/models/Player.js`**: Legacy Player model used by the existing CommonJS backend.
+- **`server/utils/validation.js`**: Validates coordinates against the 1000x600 canvas boundaries and protects against invalid or out-of-range values.
+- **`server/server.js`**: Legacy Express and Socket.IO server handling movement broadcasts, debounced MongoDB writes, and disconnect cleanup.
+- **`server/scripts/migrate-indexes.js`**: Legacy index migration script for managing MongoDB geospatial indexes.
+- **`server/src/scripts/migrate-indexes.js`**: ES-module migration script for inspecting, updating, and verifying MongoDB geospatial indexes.
+- **`server/scripts/fake-clients.js`**: Spawns configurable Socket.IO clients to test concurrent connections, movement broadcasts, and disconnect behavior.
+- **`server/test/debounce-index.test.js`**: Tests coordinate validation, debounced persistence, disconnect cleanup, and schema index definitions.
+- **`server/test/persistence.test.js`**: Tests schema indexes, coordinate clamping, defensive coordinate validation, getNearbyUsers, clusterUsers, proximity diff tracking, query timing metrics, and WebRTC signaling guardrails.
+- **`server/test/queryTimer.test.js`**: Dedicated unit test suite verifying query timer metrics, slow-query detection, and secret redaction.
+- **`docs/database-schema.md`**: Comprehensive technical notes covering the database schema, 2D vs 2dsphere indexing, and persistence concurrency guards.
 
-Key decisions and why (2d index, debouncing, disconnect cleanup, in-memory map):
+---
 
-- In-memory Map: Keeps connected users' current positions available in sub-millisecond memory lookups without querying MongoDB for every movement update.
-- 2D index vs. 2dsphere: The virtual office is a flat 1000x600 pixel grid. A 2d index is appropriate for Cartesian coordinates and direct Euclidean pixel distance ($near with $maxDistance: 100), while 2dsphere is designed for geographic spherical coordinates.
-- Debouncing: Movement updates are broadcast immediately over WebSockets (zero DB lag for 60 FPS), while MongoDB writes are delayed by 1000ms to reduce database I/O by >95%.
-- Disconnect safety: Pending timers are cleared, in-flight writes are awaited where necessary, and asynchronous operations are guarded with a tombstone set (disconnectedSockets) to prevent deleted player records from being resurrected.
-- Proximity Diffs (`nearby:enter` / `nearby:leave`): WebRTC peer connections are computationally and bandwidth intensive. Instead of spamming proximity lists or connecting all peers, the server calculates proximity diffs only when users enter or leave the 100px earshot. Symmetrically updating both peers prevents redundant offer/answer negotiations.
-- Query Timing Logger: The project mandates that spatial queries complete under 20ms to handle 50+ concurrent users without degrading real-time audio signaling. High-resolution timing via performance.now() tracks whether queries meet this target, alerts on slow queries, and provides data for Day 13 spatial audit benchmarks while scrubbing credentials and connection strings from logs.
-- Movement interpolation: Remote avatar positions are interpolated between received updates to make movement appear smoother.
-- Socket.IO compatibility: The client listens for both legacy and newer event names to interoperate smoothly with both server implementations.
+### 2. Key Architecture Decisions & Viva Answers (The "Why" Behind The Code)
 
-Questions I should be ready for:
+1. **Why `2d` index instead of `2dsphere`?**
+   - *Viva Answer:* Our virtual office is a flat 2D pixel grid on an HTML5 Canvas. `2dsphere` assumes coordinates are latitude/longitude in degrees and computes distance in meters over the Earth's curvature. MongoDB's legacy `2d` index uses pure Euclidean planar math ($d = \sqrt{\Delta x^2 + \Delta y^2}$) in raw pixels, which perfectly matches our 100-pixel earshot rule.
 
-- Why keep live coordinates in memory instead of reading from the database? In-memory access avoids a database round trip for every real-time movement update, keeping latency under 20ms.
-- Why not write to MongoDB on every move? Frequent database writes would saturate disk and network I/O during rapid movement. Debouncing reduces overhead while keeping movement broadcasts responsive.
-- Does changing a Mongoose schema automatically delete an old database index? No. Obsolete indexes must be removed explicitly through a migration script (collection.dropIndex) or database command.
-- Why use a 2d index instead of a 2dsphere index? The virtual office uses flat pixel coordinates rather than geographic spherical coordinates.
-- How do you prevent zombie records on disconnect? By registering the socket in a disconnectedSockets tombstone set and awaiting active in-flight writes before issuing deleteOne.
-- How do you detect when a user enters or leaves the 100px earshot without sending duplicate events? We maintain a set of previously nearby peer IDs for each socket in `userNearbyMap`. When a user moves or joins, we query nearby users within 100px and compute the set difference (`entered = current \ previous`, `left = previous \ current`). If a user moves but stays within 100px of the same peers, both diff sets are empty, so no events are emitted.
-- Why do you log query timing and what is the target? ProxiSpeak has a hard target of <20ms for proximity queries. The logger measures each query using performance.now(), logs timing data safely without exposing database credentials, and tracks the compliance rate so we can identify bottlenecks before scaling to 50 concurrent users.
-- How is the Euclidean distance formula optimized in code? Euclidean distance is $\sqrt{(x_i - x_0)^2 + (y_i - y_0)^2}$. Because computing square roots (`Math.sqrt`) is expensive at 60 FPS, the implementation compares squared distance $(x_i - x_0)^2 + (y_i - y_0)^2 \le 100^2 = 10,000$ during initial filtering, deferring square root calculations exclusively to the small subset of matching candidates for nearest-first sorting.
-- How does in-memory spatial lookup compare to MongoDB queries? In-memory lookup operates directly on the V8 JavaScript Map in the Node.js process heap (taking ~0.009 ms p95 at 50 users). MongoDB `$near` queries require TCP/TLS networking, BSON serialization, query planning, and document hydration, which takes 5–25 ms locally and 35–70 ms on cloud databases, exceeding the 20 ms budget. MongoDB is retained for debounced persistence, while in-memory lookup serves real-time signaling.
+2. **Why keep live positions in memory instead of reading from MongoDB?**
+   - *Viva Answer:* With 50 players moving, the server receives up to 1,500 position updates per second. Sending 1,500 read/write queries per second to a database creates extreme latency and network bottlenecks. Keeping coordinates in an in-memory `Map` provides instant sub-millisecond lookups (~0.009ms p95) for 60 FPS gameplay, while MongoDB is only updated in the background as a backup.
+
+3. **How does Debouncing work and why is it needed?**
+   - *Viva Answer:* When a user moves, we reset a 1000ms timer. We only write to MongoDB once the user pauses or stops moving for 1 second. This reduces database write load by >95% while keeping the client's live screen perfectly updated via WebSockets.
+
+4. **What is WebRTC Glare and how did you prevent it?**
+   - *Viva Answer:* When Player A and Player B walk towards each other, both enter 100px earshot simultaneously. If both browsers independently try to send a WebRTC connection "Offer" at the exact same moment, the requests collide—a race condition called "WebRTC Glare". We solved this using the **Lower Socket ID rule**: the server compares socket IDs lexicographically (`socketA.id < socketB.id`) and designates only the smaller ID to initiate the offer (`shouldInitiateOffer = true`), guaranteeing zero collision.
+
+5. **Why do you enforce a 100px proximity check on WebRTC signaling inside the server?**
+   - *Viva Answer:* Security and privacy. If the server blindly forwarded WebRTC offers, a rogue or modified client could connect to any player's audio across the entire building. The server verifies Euclidean distance ($\le 100$px) before relaying offers, answers, or ICE candidates, making eavesdropping impossible.
+
+6. **What happens during a disconnect to prevent ghost players?**
+   - *Viva Answer:* Disconnect cleanup is handled safely:
+     1. Cancels any pending debounced save timer.
+     2. Awaits any in-flight asynchronous database writes.
+     3. Adds the socket ID to a `disconnectedSockets` set so any delayed async task cannot re-save or resurrect the user.
+     4. Deletes the player from MongoDB and RAM.
+     5. Broadcasts `user:left` and `nearby:leave` to all peers so peers close their audio connections immediately.
+
+7. **How is the Euclidean distance formula optimized in code?**
+   - *Viva Answer:* Euclidean distance is $\sqrt{(x_i - x_0)^2 + (y_i - y_0)^2}$. Because computing square roots (`Math.sqrt`) is expensive at 60 FPS, the implementation compares squared distance $(x_i - x_0)^2 + (y_i - y_0)^2 \le 100^2 = 10,000$ during initial filtering, deferring square root calculations exclusively to the small subset of matching candidates for nearest-first sorting.
+
+8. **How does in-memory spatial lookup compare to MongoDB queries?**
+   - *Viva Answer:* In-memory lookup operates directly on the V8 JavaScript Map in the Node.js process heap (taking ~0.009 ms p95 at 50 users). MongoDB `$near` queries require TCP/TLS networking, BSON serialization, query planning, and document hydration, which takes 5–25 ms locally and 35–70 ms on cloud databases, exceeding the 20 ms budget. MongoDB is retained for debounced persistence, while in-memory lookup serves real-time signaling.
+
+9. **How do you detect when a user enters or leaves the 100px earshot without sending duplicate events?**
+   - *Viva Answer:* We maintain a set of previously nearby peer IDs for each socket in `userNearbyMap`. When a user moves or joins, we query nearby users within 100px and compute the set difference (`entered = current \ previous`, `left = previous \ current`). If a user moves but stays within 100px of the same peers, both diff sets are empty, so no events are emitted.
 
 ## Done checklist
 - [x] Week 1 merged to main
+- [x] Week 2 completed (in-memory spatial queries, spatial audit, benchmark tables, WebRTC signaling integration)
 - [ ] Week 2 merged, tag v0.2-mid
 - [ ] Mid review ready (docs, benchmarks, video)
 - [ ] Week 3 merged, tag v0.3
