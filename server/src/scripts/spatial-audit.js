@@ -281,8 +281,9 @@ export async function runBenchmarkSuite(tiers = [10, 25, 50, 100, 200]) {
         x = origin[0] + 100;
         y = origin[1];
       } else {
-        x = Math.floor(Math.random() * 2000);
-        y = Math.floor(Math.random() * 2000);
+        // Deterministic coordinates for reproducible benchmark results
+        x = (i * 7919) % 2000;
+        y = (i * 1049) % 2000;
       }
 
       addUser(socketId, username, x, y);
