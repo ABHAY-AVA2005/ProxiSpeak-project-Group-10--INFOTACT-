@@ -19,6 +19,8 @@ Day 13 and Day 14 introduce and formalize an automated, reproducible spatial aud
 5. **Spatial clustering & transitivity**: Graph components partitioned correctly so connected chains form cohesive audio groups.
 6. **Empirical latency benchmarks**: Verified across 10, 25, 50, 100, and 200 active users.
 
+All spatial audit checks and benchmarks completed with a **100% pass rate**. In addition, the full backend regression test suite passed cleanly: **63 tests passed, 0 failed, 0 skipped**.
+
 ### Environment & Audit Metadata
 - **Node.js Runtime**: `v24.19.0` (verified)
 - **OS Platform**: `win32 (x64)` (verified)
@@ -27,14 +29,16 @@ Day 13 and Day 14 introduce and formalize an automated, reproducible spatial aud
 - **Total System RAM**: Not recorded
 - **Timing Source**: `performance.now()` high-resolution timer (sub-millisecond precision)
 - **Measurement Sample**: 5,000 measured runs per user tier for proximity queries (after 1,000 warmups); 1,000 measured runs per tier for clustering (after 200 warmups)
+- **Spatial Audit Status**: 100% pass rate across all checks and benchmarks (verified)
+- **Backend Test Suite Status**: 63 tests passed, 0 failed, 0 skipped (verified)
 - **Performance Target**: Strictly `< 20.000 ms`
 
 ### Target Compliance Summary
 
 | Metric | Target Requirement | Measured Reality (50 Users) | Measured Reality (200 Users) | Compliance | Margin |
 |:---|:---:|:---:|:---:|:---:|:---:|
-| **Proximity Query Latency (p95)** | `< 20.00 ms` | **`0.0091 ms`** ($9.10\text{ µs}$) | **`0.0317 ms`** ($31.70\text{ µs}$) | **PASSED** | **~630x to ~2,197x faster** |
-| **Clustering Latency (p95)** | `< 20.00 ms` | **`0.0696 ms`** ($69.60\text{ µs}$) | **`1.3458 ms`** ($1,345.80\text{ µs}$) | **PASSED** | **~14.8x to ~287x faster** |
+| **Proximity Query Latency (p95)** | `< 20.00 ms` | **`0.0099 ms`** ($9.90\text{ µs}$) | **`0.0303 ms`** ($30.30\text{ µs}$) | **PASSED** | **~660x to ~2,020x faster** |
+| **Clustering Latency (p95)** | `< 20.00 ms` | **`0.0687 ms`** ($68.70\text{ µs}$) | **`1.2113 ms`** ($1,211.30\text{ µs}$) | **PASSED** | **~16.5x to ~291x faster** |
 | **Concurrent Users Tested** | `50+ users` | **`50 users`** | **`200 users`** | **PASSED** | **4x target scale** |
 | **Distance Boundary Precision** | `100 px exact` | Verified at $100.00\text{ px}$ | Excluded at $100.01\text{ px}$ | **PASSED** | Sub-pixel exact |
 
@@ -125,24 +129,24 @@ Measured over **5,000 iterations per user tier** after **1,000 warm-up runs** on
 
 | Active Users | Found in 100px | Average Latency (ms) | Average Latency (µs) | p95 Latency (ms) | p95 Latency (µs) | Max Latency (ms) | Target (< 20 ms) | Status |
 |:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| **10** | 4 | 0.0147 ms | 14.73 µs | **0.0097 ms** | **9.70 µs** | 28.9799 ms | < 20.0 ms | **PASS** |
-| **25** | 10 | 0.0063 ms | 6.32 µs | **0.0089 ms** | **8.90 µs** | 0.8626 ms | < 20.0 ms | **PASS** |
-| **50** | 14 | 0.0065 ms | 6.54 µs | **0.0091 ms** | **9.10 µs** | 0.4342 ms | < 20.0 ms | **PASS** |
-| **100** | 26 | 0.0106 ms | 10.55 µs | **0.0186 ms** | **18.60 µs** | 0.4852 ms | < 20.0 ms | **PASS** |
-| **200** | 52 | 0.0207 ms | 20.71 µs | **0.0317 ms** | **31.70 µs** | 0.5927 ms | < 20.0 ms | **PASS** |
+| **10** | 4 | 0.0085 ms | 8.46 µs | **0.0093 ms** | **9.30 µs** | 1.8810 ms | < 20.0 ms | **PASS** |
+| **25** | 8 | 0.0076 ms | 7.59 µs | **0.0083 ms** | **8.30 µs** | 0.6391 ms | < 20.0 ms | **PASS** |
+| **50** | 14 | 0.0098 ms | 9.76 µs | **0.0099 ms** | **9.90 µs** | 0.5557 ms | < 20.0 ms | **PASS** |
+| **100** | 27 | 0.0144 ms | 14.39 µs | **0.0148 ms** | **14.80 µs** | 0.5419 ms | < 20.0 ms | **PASS** |
+| **200** | 53 | 0.0202 ms | 20.23 µs | **0.0303 ms** | **30.30 µs** | 0.6498 ms | < 20.0 ms | **PASS** |
 
-*Note on Max Latency:* The single elevated maximum observed at 10 users (28.98 ms) corresponds to the very first cold execution run during V8 engine JIT bytecode compilation; all subsequent runs and p95 latencies stabilize strictly below 0.035 ms.
+*Note on Max Latency:* All proximity query tiers meet the `< 20.0 ms` target across average, P95, and maximum latencies. The highest maximum latency observed is 1.8810 ms (at 10 users during initial execution), while P95 latencies stabilize strictly below 0.031 ms (0.0303 ms at 200 users).
 
 ### 4.2 Spatial Clustering Latency (`clusterUsers`)
 Measured over **1,000 iterations per user tier** after **200 warm-up runs** (Breadth-First Search connected components):
 
 | Active Users | Average Latency (ms) | Average Latency (µs) | p95 Latency (ms) | p95 Latency (µs) | Max Latency (ms) | Target (< 20 ms) | Status |
 |:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| **10** | 0.0058 ms | 5.80 µs | **0.0079 ms** | **7.90 µs** | 0.4676 ms | < 20.0 ms | **PASS** |
-| **25** | 0.0106 ms | 10.59 µs | **0.0120 ms** | **12.00 µs** | 0.3257 ms | < 20.0 ms | **PASS** |
-| **50** | 0.0434 ms | 43.41 µs | **0.0696 ms** | **69.60 µs** | 0.3740 ms | < 20.0 ms | **PASS** |
-| **100** | 0.2378 ms | 237.82 µs | **0.3553 ms** | **355.30 µs** | 0.8011 ms | < 20.0 ms | **PASS** |
-| **200** | 0.9817 ms | 981.72 µs | **1.3458 ms** | **1,345.80 µs** | 2.4154 ms | < 20.0 ms | **PASS** |
+| **10** | 0.0058 ms | 5.84 µs | **0.0090 ms** | **9.00 µs** | 0.3232 ms | < 20.0 ms | **PASS** |
+| **25** | 0.0118 ms | 11.77 µs | **0.0168 ms** | **16.80 µs** | 0.3494 ms | < 20.0 ms | **PASS** |
+| **50** | 0.0594 ms | 59.45 µs | **0.0687 ms** | **68.70 µs** | 0.6998 ms | < 20.0 ms | **PASS** |
+| **100** | 0.2588 ms | 258.75 µs | **0.3475 ms** | **347.50 µs** | 0.7954 ms | < 20.0 ms | **PASS** |
+| **200** | 0.8866 ms | 886.57 µs | **1.2113 ms** | **1,211.30 µs** | 5.1894 ms | < 20.0 ms | **PASS** |
 
 ---
 
@@ -153,7 +157,7 @@ Measured over **1,000 iterations per user tier** after **200 warm-up runs** (Bre
 | **Underlying Data Structure** | Native V8 JavaScript `Map` + continuous array | WiredTiger B-tree / R-tree 2D index on disk |
 | **Algorithmic Complexity** | $O(N)$ linear filter + $O(M \log M)$ sort | $O(\log K + M)$ disk index traversal |
 | **Execution Realm** | In-process synchronous memory dereference | Inter-process TCP/TLS wire protocol |
-| **Observed Latency (50 Users)** | **0.0091 ms** ($9.1\text{ µs}$) | **12 ms – 28 ms** (local) / **35 ms – 70 ms** (Atlas) |
+| **Observed Latency (50 Users)** | **0.0099 ms** ($9.90\text{ µs}$) | **12 ms – 28 ms** (local) / **35 ms – 70 ms** (Atlas) |
 | **Position Accuracy** | 100% current (instant move update) | Up to 1000 ms delayed due to debouncing |
 | **Impact on Event Loop** | Immediate resolution; zero task starvation | Spawns Promise chains waiting on I/O completion |
 | **Failure Modes** | None (pure deterministic in-memory calculation) | Network timeouts, socket disconnections, pool exhaustion |
@@ -170,7 +174,7 @@ Measured over **1,000 iterations per user tier** after **200 warm-up runs** (Bre
    - While spatial queries easily scale to 200 users (< 0.04 ms), a full P2P WebRTC audio mesh scales at $O(M^2)$.
    - Per project guidelines (`docs/context/05_TECH_DECISIONS.md`), client mesh connections are capped at **6 to 8 nearest peers**. The nearest-first sorting verified in this audit provides the exact ordered list needed for mesh capping.
 3. **V8 Garbage Collection Latency**:
-   - Short-lived array allocations produce minor garbage collection overhead. Even during minor GC pauses, maximum latency remained below 1.35 ms, well beneath the 20 ms safety envelope.
+   - Short-lived array allocations produce minor garbage collection overhead. Even during minor GC pauses, maximum latency remained below 5.2 ms (with P95 strictly below 1.22 ms across all tiers), well beneath the 20 ms safety envelope.
 
 ---
 
@@ -193,7 +197,7 @@ node scripts/spatial-audit.js
 ```
 
 ### Option C: Run Full Automated Regression Suite
-Verify all 50+ unit and integration tests:
+Verify all 63 unit and integration tests (63 passed, 0 failed, 0 skipped):
 ```bash
 npm.cmd test
 ```
@@ -217,7 +221,7 @@ These questions and concise answers summarize the key engineering decisions for 
 - **Why not 2dsphere?** `2dsphere` indexes calculate spherical geodesics on earth coordinates (longitude/latitude in radians/meters). Using `2dsphere` on canvas pixels causes coordinate distortion, introduces unnecessary spherical trigonometry, and enforces strict boundary constraints ($[-180, 180]$ longitude) that reject canvas pixel coordinates.
 
 ### Q3: Why does in-memory spatial lookup outperform MongoDB geospatial queries?
-- **Memory vs. Network/Disk I/O:** `getNearbyUsersInMemory` reads directly from the V8 JavaScript `Map` in Node.js process heap. Memory dereferencing takes nanoseconds, yielding an average query time of ~0.006 ms to ~0.020 ms (p95 = 0.0091 ms at 50 users).
+- **Memory vs. Network/Disk I/O:** `getNearbyUsersInMemory` reads directly from the V8 JavaScript `Map` in Node.js process heap. Memory dereferencing takes nanoseconds, yielding an average query time of ~0.008 ms to ~0.020 ms (p95 = 0.0099 ms at 50 users).
 - **Database Overhead:** MongoDB `$near` queries incur inter-process TCP/TLS networking, BSON serialization, query planner execution, and Mongoose document hydration. Even local queries require 5 ms – 25 ms, while cloud Atlas queries take 35 ms – 70 ms+, directly violating the `< 20 ms` project target.
 - **Role of MongoDB:** MongoDB serves as the persistent system of record, while the in-memory map serves as the high-speed real-time spatial index for 60 FPS movement and WebRTC signaling.
 
