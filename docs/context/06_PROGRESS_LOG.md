@@ -4,8 +4,9 @@ Update this every night before pushing. The AI reads it at the start of each ses
 
 ## Current status
 - Current day: Day 14 (Fri 23 Oct 2026)
-- Current task (from 02_TEAM_PLAN.md): docs: benchmark results table
+- Current task (from 02_TEAM_PLAN.md): chore: merge Week 2 branches, tag v0.2-mid
 - Blockers: none
+- Week 2 status: ✅ COMPLETE — all Week 2 milestones merged into main, tagged v0.2-mid
 
 ## Daily entries
 
@@ -443,12 +444,18 @@ Tomorrow (Day 15): fix: performance bugs (feature freeze and rehearsal prep)
 ### Day 14 - Fri 23 Oct 2026
 - Planned: chore: merge Week 2 branches, tag v0.2-mid
 - Done:
-  - Prepared Week 2 backend signaling implementation for merge readiness into main.
-  - Documented updated WebRTC signaling protocol, lower socket ID rule, and 100px earshot filtering in README and progress log.
-  - Validated test suite (37/37 tests passing) ready for review and tag v0.2-mid.
-- Files changed: docs/context/06_PROGRESS_LOG.md, README.md
-- Commit message(s): chore: finalize Week 2 backend signaling milestones
-- Problems / fixes: None
+  - Merged `abhay-team-lead` (Week 2 backend: proximity diffs, WebRTC relay, earshot guardrails, lower-ID offer rule) into `main`.
+  - Merged `abhishek-audio` (Week 2 frontend audio: `getUserMedia`, `PeerConnection`, `useWebRTC`, `AudioControls`) into `abhay-team-lead`.
+  - Integrated full WebRTC audio pipeline into `VirtualOffice.jsx`: offer/answer/ICE handlers, `ontrack` audio playback via dynamic `<audio>` elements.
+  - Added Web Audio API `GainNode` (volume attenuation by pixel distance) and `StereoPannerNode` (left/right panning) updated every frame in the game loop.
+  - Fixed client visual earshot ring from 200px → 100px to match the server's 100px audio threshold.
+  - Added `localStorage` persistence for username so refresh no longer shows the join screen again.
+  - Tagged release `v0.2-mid` on `main` and pushed to GitHub.
+  - Synced all team branches (`abhishek-audio`, `tanvi-frontend`, `kajal-backend`) with `main`.
+  - Full backend test suite: 37/37 passing with 0 regressions.
+- Files changed: client/src/App.jsx, client/src/VirtualOffice.jsx, client/src/components/AudioControls.jsx, client/src/hooks/useMediaStream.js, client/src/hooks/useWebRTC.js, client/src/utils/peerConnection.js, docs/context/06_PROGRESS_LOG.md, README.md
+- Commit message(s): feat: integrate Abhishek Week 2 WebRTC audio, dynamic attenuation and stereo panning; fix: align client visual earshot ring to 100px; feat: remember username in localStorage across browser refreshes
+- Problems / fixes: Client earshot ring was 200px but server used 100px — fixed visual to match. Conflict in `useSocket.js` and `kajal-backend` resolved by accepting main version.
 
 <!-- Copy the block above for each new day. -->
 
@@ -514,7 +521,8 @@ Tomorrow (Day 15): fix: performance bugs (feature freeze and rehearsal prep)
 ## Done checklist
 - [x] Week 1 merged to main
 - [x] Week 2 completed (in-memory spatial queries, spatial audit, benchmark tables, WebRTC signaling integration)
-- [ ] Week 2 merged, tag v0.2-mid
+- [x] Week 2 merged, tag v0.2-mid ✅ (23 Oct 2026)
+- [x] Audio pipeline integrated (WebRTC, GainNode attenuation, StereoPanner)
 - [ ] Mid review ready (docs, benchmarks, video)
 - [ ] Week 3 merged, tag v0.3
 - [ ] Week 4 merged, deployed, tag v1.0
