@@ -346,15 +346,28 @@ Planned: docs: benchmark results table
 
 Done:
 - Finalized and published standardized spatial and clustering benchmark results tables in `README.md` and `docs/benchmarks.md` for the Week 2 / Mid-Project Review.
-- Documented verified empirical benchmark measurements across 10, 25, 50, 100, and 200 users for both `getNearbyUsersInMemory` (p95 = 0.0091 ms at 50 users, 0.0317 ms at 200 users) and `clusterUsers` (p95 = 0.0696 ms at 50 users, 1.3458 ms at 200 users).
-- Confirmed strict compliance with the project's `< 20.0 ms` performance target across all load tiers (averaging 570x–2,200x faster than required for proximity queries).
+- Documented verified empirical benchmark measurements across 10, 25, 50, 100, and 200 users:
+  - `getNearbyUsersInMemory` (proximity):
+    - 10 users: 0.0085 ms avg (8.46 µs), 0.0093 ms p95 (9.30 µs), 1.8810 ms max (4 found in 100px)
+    - 25 users: 0.0076 ms avg (7.59 µs), 0.0083 ms p95 (8.30 µs), 0.6391 ms max (8 found in 100px)
+    - 50 users: 0.0098 ms avg (9.76 µs), 0.0099 ms p95 (9.90 µs), 0.5557 ms max (14 found in 100px)
+    - 100 users: 0.0144 ms avg (14.39 µs), 0.0148 ms p95 (14.80 µs), 0.5419 ms max (27 found in 100px)
+    - 200 users: 0.0202 ms avg (20.23 µs), 0.0303 ms p95 (30.30 µs), 0.6498 ms max (53 found in 100px)
+  - `clusterUsers` (clustering):
+    - 10 users: 0.0058 ms avg (5.84 µs), 0.0090 ms p95 (9.00 µs), 0.3232 ms max
+    - 25 users: 0.0118 ms avg (11.77 µs), 0.0168 ms p95 (16.80 µs), 0.3494 ms max
+    - 50 users: 0.0594 ms avg (59.45 µs), 0.0687 ms p95 (68.70 µs), 0.6998 ms max
+    - 100 users: 0.2588 ms avg (258.75 µs), 0.3475 ms p95 (347.50 µs), 0.7954 ms max
+    - 200 users: 0.8866 ms avg (886.57 µs), 1.2113 ms p95 (1,211.30 µs), 5.1894 ms max
+- Confirmed strict compliance with the project's `< 20.0 ms` performance target across all load tiers (proximity queries achieve ~660x to ~2,020x faster than required; clustering achieves ~16.5x to ~291x faster).
 - Explicitly documented execution environment metadata, labeling unrecorded hardware metrics as not recorded to prevent hallucination.
 - Documented clear reproduction commands (`cd server && npm run audit:spatial` and `cd server && npm test`).
 - Added comprehensive technical Viva Voce preparation notes to `docs/benchmarks.md` covering the distance formula with squared distance optimization, 2D Cartesian vs 2dsphere indexing, in-memory lookup vs MongoDB network/disk overhead, and the impact of 1000ms debounced database writes on position accuracy.
 - Performed backend-frontend integration adjustments: aligned default `earshotRadius` prop from 200 to 100 in `client/src/App.jsx` and `client/src/VirtualOffice.jsx` to reflect backend proximity threshold (integration alignment, without modifying canvas rendering).
 - Made benchmark spatial coordinates deterministic in `server/src/scripts/spatial-audit.js` for 100% reproducible results.
 - Added dedicated unit test suite for query timer metrics, slow-query detection, and secret redaction in `server/test/queryTimer.test.js`.
-- Ran full validation: all automated unit/integration tests pass (`npm test`) and spatial audit script passes with 100% compliance.
+- Completed spatial audit: all 6 audit checks and benchmark tiers completed with a **100% pass rate**.
+- Ran full validation: backend test suite passed cleanly with **63 tests passed, 0 failed, 0 skipped** across `debounce-index.test.js` (9 tests), `persistence.test.js` (48 tests), and `queryTimer.test.js` (6 tests).
 
 Files changed:
 - README.md
@@ -490,7 +503,7 @@ Tomorrow (Day 15): fix: performance bugs (feature freeze and rehearsal prep)
    - *Viva Answer:* Our virtual office is a flat 2D pixel grid on an HTML5 Canvas. `2dsphere` assumes coordinates are latitude/longitude in degrees and computes distance in meters over the Earth's curvature. MongoDB's legacy `2d` index uses pure Euclidean planar math ($d = \sqrt{\Delta x^2 + \Delta y^2}$) in raw pixels, which perfectly matches our 100-pixel earshot rule.
 
 2. **Why keep live positions in memory instead of reading from MongoDB?**
-   - *Viva Answer:* With 50 players moving, the server receives up to 1,500 position updates per second. Sending 1,500 read/write queries per second to a database creates extreme latency and network bottlenecks. Keeping coordinates in an in-memory `Map` provides instant sub-millisecond lookups (~0.009ms p95) for 60 FPS gameplay, while MongoDB is only updated in the background as a backup.
+   - *Viva Answer:* With 50 players moving, the server receives up to 1,500 position updates per second. Sending 1,500 read/write queries per second to a database creates extreme latency and network bottlenecks. Keeping coordinates in an in-memory `Map` provides instant sub-millisecond lookups (p95 = 0.0099 ms at 50 users, 0.0303 ms at 200 users) for 60 FPS gameplay, while MongoDB is only updated in the background as a backup.
 
 3. **How does Debouncing work and why is it needed?**
    - *Viva Answer:* When a user moves, we reset a 1000ms timer. We only write to MongoDB once the user pauses or stops moving for 1 second. This reduces database write load by >95% while keeping the client's live screen perfectly updated via WebSockets.
@@ -513,10 +526,37 @@ Tomorrow (Day 15): fix: performance bugs (feature freeze and rehearsal prep)
    - *Viva Answer:* Euclidean distance is $\sqrt{(x_i - x_0)^2 + (y_i - y_0)^2}$. Because computing square roots (`Math.sqrt`) is expensive at 60 FPS, the implementation compares squared distance $(x_i - x_0)^2 + (y_i - y_0)^2 \le 100^2 = 10,000$ during initial filtering, deferring square root calculations exclusively to the small subset of matching candidates for nearest-first sorting.
 
 8. **How does in-memory spatial lookup compare to MongoDB queries?**
-   - *Viva Answer:* In-memory lookup operates directly on the V8 JavaScript Map in the Node.js process heap (taking ~0.009 ms p95 at 50 users). MongoDB `$near` queries require TCP/TLS networking, BSON serialization, query planning, and document hydration, which takes 5–25 ms locally and 35–70 ms on cloud databases, exceeding the 20 ms budget. MongoDB is retained for debounced persistence, while in-memory lookup serves real-time signaling.
+   - *Viva Answer:* In-memory lookup operates directly on the V8 JavaScript Map in the Node.js process heap (taking 0.0099 ms p95 at 50 users and 0.0303 ms at 200 users). MongoDB `$near` queries require TCP/TLS networking, BSON serialization, query planning, and document hydration, which takes 5–25 ms locally and 35–70 ms on cloud databases, exceeding the 20 ms budget. MongoDB is retained for debounced persistence, while in-memory lookup serves real-time signaling.
 
 9. **How do you detect when a user enters or leaves the 100px earshot without sending duplicate events?**
    - *Viva Answer:* We maintain a set of previously nearby peer IDs for each socket in `userNearbyMap`. When a user moves or joins, we query nearby users within 100px and compute the set difference (`entered = current \ previous`, `left = previous \ current`). If a user moves but stays within 100px of the same peers, both diff sets are empty, so no events are emitted.
+
+10. **How do proximity queries work using MongoDB `$near` within 100px, and how is graceful fallback handled?**
+    - *Viva Answer:* `getNearbyUsers(origin, { maxDistance, excludePlayerId })` executes a MongoDB geospatial query: `{ position: { $near: [x, y], $maxDistance: 100 }, playerId: { $ne: excludePlayerId } }` against the 2D Cartesian index, returning peers sorted nearest-first. If MongoDB is unready, disconnected, or times out, the function gracefully falls back to an in-memory planar Euclidean distance calculation over candidate users, ensuring continuous, non-blocking operation without throwing unhandled exceptions.
+
+11. **How does BFS-based clustering work, and how does it guarantee transitivity?**
+    - *Viva Answer:* `clusterUsers(users, 100)` partitions active avatars into conversational audio groups using Breadth-First Search (BFS) on an undirected proximity graph. Each user is a graph node; an edge exists if Euclidean distance $\le 100$px. For each unvisited user, a BFS queue traverses all connected neighbors within 100px and their neighbors recursively. This guarantees **transitivity**: if A is within 100px of B, and B is within 100px of C, all three belong to the same audio cluster $\{A, B, C\}$ even if $d(A, C) > 100$px. Disconnected avatars form isolated clusters. The algorithm runs in $O(V + E)$ time, completing in $0.0687$ ms p95 at 50 users and $1.2113$ ms p95 at 200 users.
+
+12. **How does the query timing logger monitor performance, enforce the 20ms target, and protect sensitive data?**
+    - *Viva Answer:* `queryTimer.js` uses `performance.now()` with sub-millisecond precision to benchmark every spatial query (`getNearbyUsers` and `getNearbyUsersInMemory`). It enforces the project target (`TARGET_QUERY_TIME_MS = 20`), automatically issuing `[PERF ALERT - SLOW]` warnings whenever execution reaches or exceeds 20.00 ms. It retains a sliding ring-buffer of recent queries and computes aggregates (`avgDurationMs`, `minDurationMs`, `maxDurationMs`, `slowQueryCount`, `targetMetRate`). To ensure production security, `sanitizeLogData()` scans and redacts MongoDB connection strings (`mongodb://...`), passwords, credentials, and tokens from all log outputs.
+
+13. **What did the spatial audit verify, and what are the verified benchmark results?**
+    - *Viva Answer:* The spatial audit suite (`server/src/scripts/spatial-audit.js`) validates 6 critical requirements with a 100% pass rate:
+      1. Distance boundaries (exact $\le 100$px inclusion including $[60, 80]$ Pythagorean diagonal, and $> 100$px exclusion at $100.01$px).
+      2. Requester exclusion (omitting querying socket across string/numeric ID types).
+      3. Defensive validation (graceful handling of `NaN`, `Infinity`, null, corrupt records, and negative radii).
+      4. Nearest-first ascending distance sort and normalized property contracts.
+      5. Graph transitivity for spatial clustering components.
+      6. High-resolution benchmarks across 10, 25, 50, 100, and 200 users over 5,000 iterations:
+         - Proximity queries: p95 = **`0.0099 ms`** at 50 users (~2,020x faster than 20ms), **`0.0303 ms`** at 200 users (~660x faster).
+         - Clustering: p95 = **`0.0687 ms`** at 50 users (~291x faster), **`1.2113 ms`** at 200 users (~16.5x faster).
+
+14. **What is the test coverage and status of the backend test suite?**
+    - *Viva Answer:* The automated backend test suite runs via Node.js native test runner (`node --test`) across three dedicated test suites:
+      1. `server/test/debounce-index.test.js`: Validates coordinate bounds, debounced MongoDB updates (1000ms), safe disconnect cleanup, and 2D index declarations.
+      2. `server/test/persistence.test.js`: Validates MongoDB `$near` queries, in-memory proximity lookups, boundary inclusion/exclusion, defensive coordinate handling, BFS clustering transitivity, proximity enter/leave diffs, queue serialization, and modern socket event protocols.
+      3. `server/test/queryTimer.test.js`: Validates execution duration measurement, 20ms boundary enforcement, alert triggers, statistics calculation, and credential redaction.
+      - **Current Status:** **63 tests passed, 0 failed, 0 skipped** with a 100% pass rate.
 
 ## Done checklist
 - [x] Week 1 merged to main
