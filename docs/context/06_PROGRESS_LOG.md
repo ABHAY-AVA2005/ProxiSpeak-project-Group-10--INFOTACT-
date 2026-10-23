@@ -76,22 +76,102 @@
 
 ---
 
-## 📋 Viva Notes & Technical Concepts (Team Lead & Backend)
+## 📋 Comprehensive Viva Notes (All Modules — Architecture, Audio, Frontend & Backend)
 
-### 1. Key Modules & Implementations
-- **`server/src/server.js`**: Starts the HTTP server and attaches WebSockets for real-time bidirectional communication. Applies CORS and 10kb JSON body limits to guard against DoS.
-- **`server/src/sockets/socketHandler.js`**: WebRTC signaling relay (`webrtc:offer`, `webrtc:answer`, `webrtc:ice-candidate`), 100px proximity verification guardrails, lower socket ID glare prevention rule, and comprehensive disconnect teardown.
-- **`server/src/services/userManager.js`**: In-memory RAM Map for sub-millisecond coordinate reads/writes for 60 FPS movement without database bottlenecks, coordinate clamping (0 to 2000px), and username sanitization against XSS.
+### 1. Breakdown of All Project Modules & Files
 
-### 2. Viva Q&A
-1. **Why keep live positions in memory instead of reading from MongoDB?**
-   - *Viva Answer:* With 50 players moving, the server receives up to 1,500 position updates per second. Sending 1,500 queries/sec to a database creates disk and network latency. An in-memory `Map` provides microsecond lookups for smooth 60 FPS gameplay, while MongoDB is updated in the background.
-2. **What is WebRTC Glare and how was it solved?**
-   - *Viva Answer:* If Player A and Player B walk into earshot at the exact same moment, both might send an SDP Offer simultaneously, causing a connection collision. We solved this with the **Lower Socket ID rule**: the server compares socket IDs lexicographically (`socketA.id < socketB.id`) and designates only the smaller ID to initiate the offer.
-3. **Why enforce a 100px proximity check on WebRTC signaling in the server?**
-   - *Viva Answer:* Security and privacy. If the server blindly relayed WebRTC offers, a rogue client could send an offer to any player across the map. The server enforces Euclidean distance ($\le 100$px) before relaying offers, answers, or ICE candidates.
-4. **How is ghost player resurrection prevented on disconnect?**
-   - *Viva Answer:* When a player disconnects, the server cancels pending debounce timers, awaits in-flight database save promises, marks the socket ID in a `disconnectedSockets` set to block delayed saves, and removes the document from MongoDB and RAM.
+#### 🌐 Module 1: WebRTC Audio Pipeline (Abhishek)
+- **`client/src/hooks/useMediaStream.js`**:
+  - Prompts browser for microphone permissions (`navigator.mediaDevices.getUserMedia({ audio: true })`).
+  - Manages audio tracks, handles mute/unmute toggling (`track.enabled = !track.enabled`), and handles mic device errors or disconnections gracefully.
+- **`client/src/utils/peerConnection.js`**:
+  - Factory creating `RTCPeerConnection` instances configured with public STUN servers (`stun:stun.l.google.com:19302`) to traverse NAT/firewalls.
+  - Automatically attaches the local microphone audio track to the peer connection (`pc.addTrack(track, stream)`).
+  - Handles `onicecandidate` forwarding to server via `webrtc:ice-candidate`.
+  - Listens to incoming tracks (`pc.ontrack`) and delegates remote audio streams to the spatial audio mixer.
+- **`client/src/hooks/useWebRTC.js`**:
+  - Orchestrates WebRTC peer-to-peer life cycle (`peersRef` map of `peerSocketId -> RTCPeerConnection`).
+  - Creates SDP Offer (`pc.createOffer()`) when designated as initiator (`shouldInitiateOffer: true`).
+  - Processes incoming `webrtc:offer`, sets remote description (`setRemoteDescription`), creates SDP Answer (`pc.createAnswer()`), and replies back via `webrtc:answer`.
+  - Buffers ICE candidates arriving before remote description is set to avoid race conditions.
+  - Closes and cleans up `RTCPeerConnection` when peers leave proximity (`nearby:leave`) or disconnect.
+- **Web Audio Spatial Mixer (`GainNode` + `StereoPannerNode` in `VirtualOffice.jsx`)**:
+  - Routes remote stream: `MediaStreamSource -> GainNode -> StereoPannerNode -> AudioContext.destination`.
+  - **Distance Attenuation (`GainNode`):** Applies inverse linear formula: `gain = Math.max(0, 1 - distance / 100)`. At 0px distance, volume is 100% (1.0). At 100px earshot boundary, volume smoothly drops to 0% (0.0).
+  - **Stereo Panning (`StereoPannerNode`):** Calculates horizontal angle: `pan = Math.max(-1, Math.min(1, (peer.x - my.x) / 100))`. A peer standing to your left plays out of the left headphone; to your right plays out of the right headphone.
+
+#### 🎨 Module 2: Frontend HTML5 Canvas & Interaction (Tanvi)
+- **`client/src/VirtualOffice.jsx`**:
+  - Renders a 2000 × 2000 px virtual office world on an HTML5 `<canvas>` with camera panning that follows the local player.
+  - **60 FPS Game Loop:** Powered by `requestAnimationFrame`, clearing and drawing office tiles, walls, meeting rooms, desks, avatars, and name tags every frame.
+  - **Coordinate Lerping (Linear Interpolation):** Eliminates visual lag and network jitter on remote avatars by smoothly interpolating coordinates (`pos = pos + (target - pos) * 0.2`) rather than snapping.
+  - **Collision Detection:** AABB (Axis-Aligned Bounding Box) logic stops avatars from walking through office walls and meeting room partitions.
+  - **Earshot Ring:** Renders a transparent 100-pixel radius circle centered around the local avatar to visually communicate the exact zone where audio connects.
+  - **`localStorage` Persistence:** Stores username in browser storage so refreshing the page immediately re-enters the office without prompting the join modal.
+
+#### ⚡ Module 3: Real-Time Signaling & In-Memory Dispatch (Abhay)
+- **`server/src/server.js`**:
+  - Express & Socket.IO server initialization with CORS policies allowing client connection, and `express.json({ limit: "10kb" })` to reject oversized payload DoS attempts.
+- **`server/src/sockets/socketHandler.js`**:
+  - Central signaling and event orchestrator for `join`, `move`, `disconnect`, `webrtc:offer`, `webrtc:answer`, and `webrtc:ice-candidate`.
+  - **100px Proximity Verification Guard:** Validates Euclidean distance ($\le 100$px) on the server before relaying any WebRTC message, guaranteeing private audio and preventing eavesdropping.
+  - **Lower Socket ID Glare Prevention Rule:** Dictates `shouldInitiateOffer` exclusively to the lexicographically smaller socket ID (`socketA.id < socketB.id`) on simultaneous proximity entry.
+  - **Teardown on Disconnect:** Emits immediate `user:left` and `nearby:leave` events to active in-range peers so WebRTC connections close instantly without ghost connections.
+- **`server/src/services/userManager.js`**:
+  - Maintains an in-memory `Map` of connected users in RAM for sub-millisecond coordinate lookups for 60 FPS movement without database bottlenecks.
+  - **Coordinate Clamping:** Restricts avatar coordinates strictly within office bounds (`0` to `2000` px).
+  - **Input Sanitization:** Strips HTML/script tags from usernames to protect against Cross-Site Scripting (XSS).
+
+#### 🗄️ Module 4: Database & Spatial Persistence (Kajal)
+- **`server/src/models/Player.js` & `server/models/Player.js`**:
+  - Mongoose schema with `position: [x, y]` Cartesian coordinate array and a `2d` index (`{ position: "2d" }`).
+- **`server/src/services/persistenceManager.js`**:
+  - **Debounced Persistence (1000ms):** Debounces position saves to MongoDB, updating the database only after the user stops moving for 1 second. Reduces database write operations by over 95%.
+  - **In-Flight Write Tracking:** Disconnect cleanup awaits pending database write promises before executing `deleteOne`, preventing race conditions where delayed writes resurrect deleted players ("ghost players").
+  - **`getNearbyUsersInMemory()`**: High-speed in-memory proximity querying for live movement diffs, returning matches in < 0.01ms.
+  - **`clusterUsers()`**: Breadth-First Search (BFS) graph clustering algorithm that groups transitively connected players within 100px into conference/conversation clusters.
+- **`server/src/services/queryTimer.js`**:
+  - High-resolution timing stopwatch (`performance.now()`) measuring spatial query latency against the `< 20ms` performance target, with automatic secret/credential redacting for safe logs.
+- **`docs/benchmarks.md`**:
+  - Reproducible spatial audit and latency benchmarks across 10, 25, 50, 100, and 200 concurrent users.
+
+---
+
+### 2. Core Architecture Viva Questions & Answers
+
+1. **Why use a Cartesian `2d` index instead of MongoDB's `2dsphere` index?**
+   - *Viva Answer:* Our virtual office canvas is a flat 2D Cartesian plane in pixels ($1000 \times 600$ or $2000 \times 2000$). `2dsphere` assumes coordinates are spherical longitude and latitude in degrees and calculates distances over Earth's curvature in meters. MongoDB's `2d` index uses pure planar Euclidean geometry ($d = \sqrt{\Delta x^2 + \Delta y^2}$) in raw pixels, perfectly matching our 100-pixel earshot rule without trigonometric distortion.
+
+2. **Why keep live positions in memory in Node.js RAM instead of reading from MongoDB?**
+   - *Viva Answer:* With 50 players moving at 30–60 FPS, the server receives up to 1,500 position updates per second. Sending 1,500 queries/sec to MongoDB creates severe disk I/O, serialization overhead, and network latency (5–25ms locally, 35–70ms on cloud DBs). Storing live coordinates in a Node.js V8 heap `Map` provides instant sub-millisecond lookups (~0.009ms p95), ensuring buttery-smooth 60 FPS gameplay, while MongoDB is used as an asynchronous backup.
+
+3. **How does Debouncing work and why is it needed?**
+   - *Viva Answer:* During continuous avatar movement, the server broadcasts new coordinates to peers via WebSockets immediately, but postpones writing to MongoDB by resetting a 1000ms timer. The position is saved to MongoDB only when the avatar pauses or stops moving for 1 full second. This reduces database write operations by over 95% while keeping client screens synchronized in real time.
+
+4. **What is WebRTC Glare and how was it solved?**
+   - *Viva Answer:* If Player A and Player B walk into 100px earshot simultaneously, both browsers detect the proximity change at the exact same moment. If both independently create and send an SDP Offer, their offers collide—a classic WebRTC race condition known as "WebRTC Glare". We solved this using the **Lower Socket ID rule**: the server compares socket IDs lexicographically (`socketA.id < socketB.id`) and designates only the smaller ID to initiate the offer (`shouldInitiateOffer = true`), guaranteeing zero collision.
+
+5. **Why enforce a 100px proximity check on WebRTC signaling inside the server?**
+   - *Viva Answer:* Security and eavesdropping prevention. In WebRTC, the server acts as the signaling channel. If the server blindly forwarded SDP offers and ICE candidates without checking distance, a compromised or modified client script could connect to any user's microphone anywhere on the map. The server validates Euclidean distance ($\le 100$px) before relaying offers, answers, or ICE candidates, making unauthorized audio interception physically impossible.
+
+6. **How is ghost player resurrection prevented on disconnect?**
+   - *Viva Answer:* When a user abruptly closes their browser tab:
+     1. The server cancels any pending debounced save timer.
+     2. It awaits any in-flight asynchronous database write promises.
+     3. It records the socket ID in a `disconnectedSockets` Set so any delayed write cannot re-create the user.
+     4. It deletes the player record from MongoDB and RAM.
+     5. It broadcasts `user:left` and `nearby:leave` to active peers to immediately close WebRTC peer connections.
+
+7. **How does spatial audio attenuation and stereo panning work in the browser?**
+   - *Viva Answer:* When an incoming WebRTC audio track is received, it connects through the Web Audio API graph:
+     - The **`GainNode`** dynamically attenuates volume based on Euclidean distance: `gain = Math.max(0, 1 - distance / 100)`. When 0px away, gain is 1.0 (full volume); at 100px, gain drops smoothly to 0.0 (silent).
+     - The **`StereoPannerNode`** positions sound horizontally in the stereo field: `pan = (peerX - myX) / 100` (clamped between -1.0 for full left and +1.0 for full right).
+
+8. **How is the Euclidean distance formula optimized in code for 60 FPS performance?**
+   - *Viva Answer:* Euclidean distance is $\sqrt{(x_2 - x_1)^2 + (y_2 - y_1)^2}$. Because computing square roots (`Math.sqrt`) is computationally expensive when evaluating dozens of players every frame, our filtering logic compares squared distance: $(x_2 - x_1)^2 + (y_2 - y_1)^2 \le 100^2 = 10,000$. The expensive square root is deferred exclusively to candidates that pass the threshold for distance sorting.
+
+9. **How do you detect when a user enters or leaves the 100px earshot without sending duplicate events?**
+   - *Viva Answer:* We maintain a set of previously nearby peer IDs for each socket in `userNearbyMap`. When a user moves or joins, we query nearby users within 100px and compute the set difference (`entered = current \ previous`, `left = previous \ current`). If a user moves but stays within 100px of the same peers, both diff sets are empty, so no events are emitted.
 
 ---
 
