@@ -10,8 +10,13 @@ function App() {
   });
   const { localStream, isMuted, permissionGranted, startAudio, toggleMute } = useMediaStream();
 
-  const handleJoin = (name) => {
+  const handleJoin = async (name) => {
     localStorage.setItem("proxispeak_username", name);
+    try {
+      await startAudio(); // Start audio on user gesture (fixes browser autoplay restriction)
+    } catch (e) {
+      console.warn("Audio start deferred until user grants permission:", e);
+    }
     setUsername(name);
   };
 
