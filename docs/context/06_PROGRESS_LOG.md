@@ -3,10 +3,10 @@
 > Update this every night before pushing. The AI reads it at the start of each session.
 
 ## Current status
-- Current day: Day 14 (Fri 23 Oct 2026)
-- Current task (from 02_TEAM_PLAN.md): chore: merge Week 2 branches, tag v0.2-mid
+- Current day: Day 18 (Tue 27 Oct 2026)
+- Current task (from 02_TEAM_PLAN.md): docs: mid review checklist; chore: Week 3 board; feat: Socket.io Redis adapter
 - Blockers: none
-- Week 2 status: ✅ COMPLETE — all Week 2 milestones merged into main, tagged v0.2-mid
+- Mid Review / Week 3 status: ✅ READY — Week 2 tagged v0.2-mid, Mid Review Checklist & Week 3 board created, Redis adapter configured with graceful fallback, 65/65 unit/integration tests passing
 
 ---
 
@@ -73,6 +73,28 @@
   - **Plan:** `chore: merge Week 2 branches, tag v0.2-mid`
   - **Done:** Merged Week 2 branches (`abhay-team-lead`, `abhishek-audio`, `tanvi-frontend`, `kajal-backend`) into `main`. Tagged release `v0.2-mid`, pushed to remote, and verified test suite.
   - **Commit:** `chore: merge Week 2 branches, tag v0.2-mid`
+
+### Mid Review Prep (24 to 26 Oct): Feature Freeze, Documentation, Verification
+
+- **Day 15 (Sat 24 Oct 2026):**
+  - **Plan:** `fix: only bugs from full demo rehearsal`
+  - **Done:** Conducted end-to-end multi-client rehearsal, verified WebRTC renegotiation guards, confirmed error recovery when clients disconnect abruptly.
+  - **Commit:** `fix: only bugs from full demo rehearsal`
+- **Day 16 (Sun 25 Oct 2026):**
+  - **Plan:** `docs: main README (overview, install, run)`
+  - **Done:** Revised and streamlined root `README.md` with complete architecture breakdown, installation steps, scripts reference, and environment variable documentation.
+  - **Commit:** `docs: main README (overview, install, run)`
+- **Day 17 (Mon 26 Oct 2026):**
+  - **Plan:** `docs: final Week 1 and 2 write-up; test install from a fresh clone`
+  - **Done:** Documented end-to-end installation test from fresh clone, audited all 4 member modules in comprehensive viva guide, verified zero dangling processes.
+  - **Commit:** `docs: final Week 1 and 2 write-up; test install from a fresh clone`
+
+### Week 3 (27 Oct to 1 Nov): Multi-Instance Scaling & Dynamic Attenuation
+
+- **Day 18 (Tue 27 Oct 2026):**
+  - **Plan:** `docs: mid review checklist; chore: Week 3 board`
+  - **Done:** Authored comprehensive Mid-Project Review Checklist and Week 3 Sprint Board in `docs/mid-review-checklist.md`. Configured `@socket.io/redis-adapter` and `redis` client in `server/src/config/redis.js` with zero-downtime in-memory fallback, attached to `server/src/server.js`, updated health check endpoint (`/health`), and added automated regression tests in `server/test/redis.test.js` (65/65 tests passing).
+  - **Commit:** `docs: mid review checklist; chore: Week 3 board; feat: configure Redis adapter fallback`
 
 ---
 
