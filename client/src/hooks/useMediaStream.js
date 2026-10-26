@@ -1,58 +1,45 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 
 export function useMediaStream() {
-    const [localStream, setLocalStream] = useState(null);
-    const [isMuted, setIsMuted] = useState(false);
-    const [permissionGranted, setPermissionGranted] = useState(false);
-    const [error, setError] = useState(null);
+  const [localStream, setLocalStream] = useState(null);
+  const [isMuted, setIsMuted] = useState(false);
+  const [permissionGranted, setPermissionGranted] = useState(false);
+  const streamRef = useRef(null);
 
-    const startAudio = useCallback(async () => {
+  const startAudio = useCallback(async () => {
+    if (streamRef.current) return streamRef.current;
     try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true,
-        },
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
         video: false,
-    });
-
+      });
+      streamRef.current = stream;
       setLocalStream(stream);
       setPermissionGranted(true);
-      setError(null);
       return stream;
     } catch (err) {
-      console.error('Failed to access microphone:', err);
-      setError(err.name || 'Microphone access denied');
-      setPermissionGranted(false);
+      console.error('Audio capture error:', err);
       return null;
     }
   }, []);
 
   const toggleMute = useCallback(() => {
-    if (!localStream) return;
-    const audioTrack = localStream.getAudioTracks()[0];
-    if (audioTrack) {
-      audioTrack.enabled = !audioTrack.enabled;
-      setIsMuted(!audioTrack.enabled);
+    if (!streamRef.current) return;
+    const track = streamRef.current.getAudioTracks()[0];
+    if (track) {
+      track.enabled = !track.enabled;
+      setIsMuted(!track.enabled);
     }
-  }, [localStream]);
+  }, []);
 
-  // Cleanup tracks on unmount
   useEffect(() => {
     return () => {
-      if (localStream) {
-        localStream.getTracks().forEach((track) => track.stop());
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((t) => t.stop());
+        streamRef.current = null;
       }
     };
-  }, [localStream]);
+  }, []);
 
-  return {
-    localStream,
-    isMuted,
-    permissionGranted,
-    error,
-    startAudio,
-    toggleMute,
-  };
+  return { localStream, isMuted, permissionGranted, startAudio, toggleMute };
 }
