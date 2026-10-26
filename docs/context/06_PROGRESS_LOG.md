@@ -201,7 +201,8 @@
 - [x] Week 1 merged to main (Scaffolding, Movement, Canvas, 2D Index)
 - [x] Week 2 completed across all 4 branches (Proximity, WebRTC, Glare Prevention, Attenuation)
 - [x] Week 2 merged to `main`, tagged `v0.2-mid` ✅ (23 Oct 2026)
-- [x] Full test suite verified (37/37 automated tests passing)
+- [x] Full test suite verified (65/65 automated tests passing with zero regressions)
+- [x] Mid review checklist & Week 3 sprint board authored (`docs/mid-review-checklist.md`)
 - [ ] Mid review ready (demo video, report, benchmark charts)
 - [ ] Week 3 merged, tagged `v0.3`
 - [ ] Week 4 merged, deployed, tagged `v1.0`
