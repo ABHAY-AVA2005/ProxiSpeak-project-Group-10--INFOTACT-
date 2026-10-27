@@ -125,3 +125,118 @@ export function getAllUsers() {
 export function getUserCount() {
   return users.size;
 }
+
+// Store for remote users connected to other Node.js server instances
+// Key: socketId (string) -> Value: { socketId, username, x, y, serverId, isRemote: true, updatedAt }
+const remoteUsers = new Map();
+
+/**
+ * Add or update a remote user received from Redis Pub/Sub
+ * @param {string} socketId - Unique socket identifier of remote user
+ * @param {string} username - Display name
+ * @param {number} x - X coordinate
+ * @param {number} y - Y coordinate
+ * @param {string} [serverId="remote"] - Identifier of remote server instance
+ * @returns {object} The created/updated remote user object
+ */
+export function addRemoteUser(socketId, username, x, y, serverId = "remote") {
+  const cleanName = sanitizeUsername(username) || `User_${String(socketId).slice(0, 4)}`;
+  const validX = clampCoordinate(x, WORLD_BOUNDS.MIN_X, WORLD_BOUNDS.MAX_X, WORLD_BOUNDS.DEFAULT_X);
+  const validY = clampCoordinate(y, WORLD_BOUNDS.MIN_Y, WORLD_BOUNDS.MAX_Y, WORLD_BOUNDS.DEFAULT_Y);
+
+  const remoteUser = {
+    socketId,
+    id: socketId,
+    username: cleanName,
+    x: validX,
+    y: validY,
+    serverId,
+    isRemote: true,
+    updatedAt: Date.now()
+  };
+
+  remoteUsers.set(socketId, remoteUser);
+  return remoteUser;
+}
+
+/**
+ * Updates a remote user's position from Redis Pub/Sub
+ * @param {string} socketId
+ * @param {number} x
+ * @param {number} y
+ * @returns {object|null} Updated remote user or null if not found
+ */
+export function updateRemoteUserPosition(socketId, x, y) {
+  const user = remoteUsers.get(socketId);
+  if (!user) return null;
+
+  user.x = clampCoordinate(x, WORLD_BOUNDS.MIN_X, WORLD_BOUNDS.MAX_X, user.x);
+  user.y = clampCoordinate(y, WORLD_BOUNDS.MIN_Y, WORLD_BOUNDS.MAX_Y, user.y);
+  user.updatedAt = Date.now();
+  return user;
+}
+
+/**
+ * Remove a remote user on remote disconnect from Redis Pub/Sub
+ * @param {string} socketId
+ * @returns {object|null} Removed remote user or null if not found
+ */
+export function removeRemoteUser(socketId) {
+  const user = remoteUsers.get(socketId);
+  if (user) {
+    remoteUsers.delete(socketId);
+    return user;
+  }
+  return null;
+}
+
+/**
+ * Retrieve a remote user by socketId
+ * @param {string} socketId
+ * @returns {object|undefined}
+ */
+export function getRemoteUser(socketId) {
+  return remoteUsers.get(socketId);
+}
+
+/**
+ * Get all remote users as an array
+ * @returns {Array<object>}
+ */
+export function getAllRemoteUsers() {
+  return Array.from(remoteUsers.values());
+}
+
+/**
+ * Returns all active users across all server instances (local + remote)
+ * Used by spatial proximity calculations to find peers across multiple Node instances.
+ * @returns {Array<object>}
+ */
+export function getAllActiveUsers() {
+  return [...users.values(), ...remoteUsers.values()];
+}
+
+/**
+ * Checks whether a given socketId is connected to this local server instance
+ * @param {string} socketId
+ * @returns {boolean}
+ */
+export function isLocalUser(socketId) {
+  return users.has(socketId);
+}
+
+/**
+ * Checks whether a given socketId belongs to a remote server instance
+ * @param {string} socketId
+ * @returns {boolean}
+ */
+export function isRemoteUser(socketId) {
+  return remoteUsers.has(socketId);
+}
+
+/**
+ * Resets the remote user store (useful for tests and reconnections)
+ */
+export function clearRemoteUsers() {
+  remoteUsers.clear();
+}

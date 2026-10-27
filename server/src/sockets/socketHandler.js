@@ -4,7 +4,10 @@ import {
   getAllUsers,
   updateUserPosition,
   getUser,
-  getUserCount
+  getUserCount,
+  getRemoteUser,
+  isRemoteUser,
+  isLocalUser
 } from "../services/userManager.js";
 import {
   persistPlayerJoin,
@@ -13,8 +16,16 @@ import {
   getNearbyUsers,
   getNearbyUsersInMemory,
   updateProximity,
-  cleanupProximityOnDisconnect
+  cleanupProximityOnDisconnect,
+  userNearbyMap,
+  getConfiguredMaxPeers
 } from "../services/persistenceManager.js";
+import {
+  setupRedisSync,
+  publishUserPosition,
+  publishUserJoin,
+  publishUserLeave
+} from "../services/redisSync.js";
 
 // Per-socket state for serialized proximity processing and query coalescing
 export const proximityQueues = new Map(); // socketId -> Promise
@@ -35,6 +46,9 @@ export function resetProximityQueues() {
  * @param {import("socket.io").Server} io - Socket.io server instance
  */
 export function setupSocketHandlers(io) {
+  // Initialize Redis cross-instance synchronization (if enabled)
+  setupRedisSync(io);
+
   /**
    * Helper: checks if two users are within earshot distance (default 100px)
    */
@@ -57,18 +71,19 @@ export function setupSocketHandlers(io) {
    * Uses real-time in-memory spatial lookup for sub-millisecond latency.
    */
   const runProximityDiff = async (targetSocket, user) => {
-    // 1. Query nearby candidates from live in-memory users (sub-millisecond, zero database lag)
+    // 1. Query nearby candidates from live in-memory users (local + remote)
     const currentNearby = await getNearbyUsersInMemory([user.x, user.y], {
-      excludePlayerId: targetSocket.id
+      excludePlayerId: targetSocket.id,
+      maxPeers: getConfiguredMaxPeers()
     });
 
-    // 2. Filter & verify: IDs from in-memory lookup must identify active Socket.IO sockets
+    // 2. Filter & verify: IDs from in-memory lookup must identify active users (local or remote)
     const activeNearby = [];
     for (const candidate of currentNearby) {
       const peerId = candidate.socketId || candidate.playerId || candidate.id;
       if (!peerId || peerId === targetSocket.id) continue;
 
-      const activeUser = getUser(peerId);
+      const activeUser = getUser(peerId) || getRemoteUser(peerId);
       if (!activeUser) {
         // Stale record from past session or disconnected socket - discard!
         continue;
@@ -80,7 +95,8 @@ export function setupSocketHandlers(io) {
         id: activeUser.socketId,
         username: activeUser.username,
         x: activeUser.x,
-        y: activeUser.y
+        y: activeUser.y,
+        isRemote: Boolean(activeUser.isRemote)
       });
     }
 
@@ -89,7 +105,9 @@ export function setupSocketHandlers(io) {
       return;
     }
 
-    const { entered, left } = updateProximity(targetSocket.id, user, activeNearby);
+    const { entered, left } = updateProximity(targetSocket.id, user, activeNearby, {
+      maxPeers: getConfiguredMaxPeers()
+    });
 
     // 3. Emit nearby:enter diffs
     // Rule: lower-id-sends-offer on nearby:enter prevents WebRTC glare collisions
@@ -97,7 +115,7 @@ export function setupSocketHandlers(io) {
       const peerId = peer.socketId || peer.playerId || peer.id;
       if (!peerId) continue;
 
-      const activePeer = getUser(peerId);
+      const activePeer = getUser(peerId) || getRemoteUser(peerId);
       if (!activePeer) continue;
 
       // Determine who initiates offer based on lower socket ID rule
@@ -113,15 +131,17 @@ export function setupSocketHandlers(io) {
         shouldInitiateOffer: shouldTargetInitiate
       });
 
-      // Notify peer that active socket entered proximity
-      io.to(peerId).emit("nearby:enter", {
-        socketId: targetSocket.id,
-        id: targetSocket.id,
-        username: user.username,
-        x: user.x,
-        y: user.y,
-        shouldInitiateOffer: !shouldTargetInitiate
-      });
+      // If peer is local, notify peer that active socket entered proximity
+      if (getUser(peerId)) {
+        io.to(peerId).emit("nearby:enter", {
+          socketId: targetSocket.id,
+          id: targetSocket.id,
+          username: user.username,
+          x: user.x,
+          y: user.y,
+          shouldInitiateOffer: !shouldTargetInitiate
+        });
+      }
     }
 
     // 4. Emit nearby:leave diffs
@@ -134,7 +154,7 @@ export function setupSocketHandlers(io) {
         id: peerId
       });
 
-      // Notify peer that active socket left proximity (only if peer is still connected)
+      // If peer is local, notify peer that active socket left proximity (only if peer is still connected)
       if (getUser(peerId)) {
         io.to(peerId).emit("nearby:leave", {
           socketId: targetSocket.id,
@@ -230,6 +250,9 @@ export function setupSocketHandlers(io) {
       // 3. Persist to MongoDB (if connected)
       persistPlayerJoin(newUser);
 
+      // Publish join to Redis for cross-instance position sharing
+      publishUserJoin(newUser);
+
       // 4. Calculate and emit initial proximity enter diffs on join
       await queueProximityCheck(socket, newUser);
     });
@@ -253,6 +276,9 @@ export function setupSocketHandlers(io) {
         y: updatedUser.y
       });
 
+      // Publish position to Redis for cross-instance synchronization
+      publishUserPosition(updatedUser);
+
       // Schedule debounced write to MongoDB
       scheduleDebouncedMove(socket.id, updatedUser.x, updatedUser.y);
 
@@ -264,17 +290,24 @@ export function setupSocketHandlers(io) {
 
     /**
      * WebRTC Signaling Relay
-     * Security & Performance Guardrail (Day 9, 10, 11):
+     * Security & Performance Guardrails:
      * - Relay offer, answer, and ICE candidate ONLY if both users exist and are within 100px earshot.
+     * - Nearest-N Peer Cap: relay only if target is in sender's active proximity set (max 6-8 peers).
      * - Lower socket ID rule prevents glare.
      */
     socket.on("webrtc:offer", ({ targetId, offer }) => {
       if (!targetId || !offer) return;
       const sender = getUser(socket.id);
-      const recipient = getUser(targetId);
+      const recipient = getUser(targetId) || getRemoteUser(targetId);
 
       // Guardrail: relay only if both users exist and are within 100px earshot
       if (!sender || !recipient || !areUsersWithinEarshot(sender, recipient, 100)) {
+        return;
+      }
+
+      // Guardrail: enforce nearest-N peer cap
+      const senderProximity = userNearbyMap.get(socket.id);
+      if (senderProximity && !senderProximity.has(targetId)) {
         return;
       }
 
@@ -288,10 +321,16 @@ export function setupSocketHandlers(io) {
     socket.on("webrtc:answer", ({ targetId, answer }) => {
       if (!targetId || !answer) return;
       const sender = getUser(socket.id);
-      const recipient = getUser(targetId);
+      const recipient = getUser(targetId) || getRemoteUser(targetId);
 
       // Guardrail: relay only if both users exist and are within 100px earshot
       if (!sender || !recipient || !areUsersWithinEarshot(sender, recipient, 100)) {
+        return;
+      }
+
+      // Guardrail: enforce nearest-N peer cap
+      const senderProximity = userNearbyMap.get(socket.id);
+      if (senderProximity && !senderProximity.has(targetId)) {
         return;
       }
 
@@ -305,10 +344,16 @@ export function setupSocketHandlers(io) {
     socket.on("webrtc:ice-candidate", ({ targetId, candidate }) => {
       if (!targetId || !candidate) return;
       const sender = getUser(socket.id);
-      const recipient = getUser(targetId);
+      const recipient = getUser(targetId) || getRemoteUser(targetId);
 
       // Guardrail: relay only if both users exist and are within 100px earshot
       if (!sender || !recipient || !areUsersWithinEarshot(sender, recipient, 100)) {
+        return;
+      }
+
+      // Guardrail: enforce nearest-N peer cap
+      const senderProximity = userNearbyMap.get(socket.id);
+      if (senderProximity && !senderProximity.has(targetId)) {
         return;
       }
 
@@ -322,8 +367,11 @@ export function setupSocketHandlers(io) {
     socket.on("webrtc:ice", ({ targetId, candidate }) => {
       if (!targetId || !candidate) return;
       const sender = getUser(socket.id);
-      const recipient = getUser(targetId);
+      const recipient = getUser(targetId) || getRemoteUser(targetId);
       if (!sender || !recipient || !areUsersWithinEarshot(sender, recipient, 100)) return;
+
+      const senderProximity = userNearbyMap.get(socket.id);
+      if (senderProximity && !senderProximity.has(targetId)) return;
 
       io.to(targetId).emit("webrtc:ice-candidate", {
         senderId: socket.id,
@@ -342,6 +390,9 @@ export function setupSocketHandlers(io) {
         // Broadcast user departure so all clients remove the avatar immediately
         socket.broadcast.emit("user:left", { socketId: socket.id });
       }
+
+      // Publish departure to Redis for cross-instance cleanup
+      publishUserLeave(socket.id);
 
       // Safe DB disconnect cleanup (cancels timer, saves final state, deletes record)
       await persistPlayerDisconnect(socket.id, removedUser);

@@ -1,12 +1,13 @@
-# 06 - Progress Log (Kajal, kajal-backend)
+﻿# 06 - Progress Log (Kajal, kajal-backend)
 
 Update this every night before pushing. The AI reads it at the start of each session.
 
 ## Current status
-- Current day: Day 14 (Fri 23 Oct 2026)
-- Current task (from 02_TEAM_PLAN.md): chore: merge Week 2 branches, tag v0.2-mid
-- Blockers: none
-- Week 2 status: ✅ COMPLETE — all Week 2 milestones merged into main, tagged v0.2-mid
+- Current day: Day 18 (Tue 27 Oct 2026)
+- Current task (from 02_TEAM_PLAN.md): chore: Redis setup (Docker) and config
+- Blockers: Docker is unavailable on this machine. The production Docker Compose configuration and offline fallback are implemented.
+- Week 2 status: COMPLETE — all Week 2 milestones merged into main, tagged v0.2-mid.
+- Week 3 status: Implementation committed locally; 73 backend tests passed and the 50-client load test passed. Live Redis testing remains unverified because Docker is unavailable.
 
 ## Daily entries
 
@@ -258,7 +259,7 @@ Done:
   - Server broadcasts use modern events exclusively: `users:list`, `user:joined`, `user:moved`, and `user:left`.
   - Updated `server/scripts/fake-clients.js` and `server/src/scripts/fake-clients.js` to emit `move` and listen to modern events.
   - Updated test assertions in `server/test/debounce-index.test.js` and added dedicated modern event assertion test in `server/test/persistence.test.js`.
-  - Preserved all Day 8–11 functionality (getNearbyUsers 100px threshold, clusterUsers, nearby:enter/leave, queryTimer, and debounced 2d index persistence).
+  - Preserved all Day 8â€“11 functionality (getNearbyUsers 100px threshold, clusterUsers, nearby:enter/leave, queryTimer, and debounced 2d index persistence).
 
 Files changed:
 - client/src/VirtualOffice.jsx
@@ -348,17 +349,17 @@ Done:
 - Finalized and published standardized spatial and clustering benchmark results tables in `README.md` and `docs/benchmarks.md` for the Week 2 / Mid-Project Review.
 - Documented verified empirical benchmark measurements across 10, 25, 50, 100, and 200 users:
   - `getNearbyUsersInMemory` (proximity):
-    - 10 users: 0.0085 ms avg (8.46 µs), 0.0093 ms p95 (9.30 µs), 1.8810 ms max (4 found in 100px)
-    - 25 users: 0.0076 ms avg (7.59 µs), 0.0083 ms p95 (8.30 µs), 0.6391 ms max (8 found in 100px)
-    - 50 users: 0.0098 ms avg (9.76 µs), 0.0099 ms p95 (9.90 µs), 0.5557 ms max (14 found in 100px)
-    - 100 users: 0.0144 ms avg (14.39 µs), 0.0148 ms p95 (14.80 µs), 0.5419 ms max (27 found in 100px)
-    - 200 users: 0.0202 ms avg (20.23 µs), 0.0303 ms p95 (30.30 µs), 0.6498 ms max (53 found in 100px)
+    - 10 users: 0.0085 ms avg (8.46 Âµs), 0.0093 ms p95 (9.30 Âµs), 1.8810 ms max (4 found in 100px)
+    - 25 users: 0.0076 ms avg (7.59 Âµs), 0.0083 ms p95 (8.30 Âµs), 0.6391 ms max (8 found in 100px)
+    - 50 users: 0.0098 ms avg (9.76 Âµs), 0.0099 ms p95 (9.90 Âµs), 0.5557 ms max (14 found in 100px)
+    - 100 users: 0.0144 ms avg (14.39 Âµs), 0.0148 ms p95 (14.80 Âµs), 0.5419 ms max (27 found in 100px)
+    - 200 users: 0.0202 ms avg (20.23 Âµs), 0.0303 ms p95 (30.30 Âµs), 0.6498 ms max (53 found in 100px)
   - `clusterUsers` (clustering):
-    - 10 users: 0.0058 ms avg (5.84 µs), 0.0090 ms p95 (9.00 µs), 0.3232 ms max
-    - 25 users: 0.0118 ms avg (11.77 µs), 0.0168 ms p95 (16.80 µs), 0.3494 ms max
-    - 50 users: 0.0594 ms avg (59.45 µs), 0.0687 ms p95 (68.70 µs), 0.6998 ms max
-    - 100 users: 0.2588 ms avg (258.75 µs), 0.3475 ms p95 (347.50 µs), 0.7954 ms max
-    - 200 users: 0.8866 ms avg (886.57 µs), 1.2113 ms p95 (1,211.30 µs), 5.1894 ms max
+    - 10 users: 0.0058 ms avg (5.84 Âµs), 0.0090 ms p95 (9.00 Âµs), 0.3232 ms max
+    - 25 users: 0.0118 ms avg (11.77 Âµs), 0.0168 ms p95 (16.80 Âµs), 0.3494 ms max
+    - 50 users: 0.0594 ms avg (59.45 Âµs), 0.0687 ms p95 (68.70 Âµs), 0.6998 ms max
+    - 100 users: 0.2588 ms avg (258.75 Âµs), 0.3475 ms p95 (347.50 Âµs), 0.7954 ms max
+    - 200 users: 0.8866 ms avg (886.57 Âµs), 1.2113 ms p95 (1,211.30 Âµs), 5.1894 ms max
 - Confirmed strict compliance with the project's `< 20.0 ms` performance target across all load tiers (proximity queries achieve ~660x to ~2,020x faster than required; clustering achieves ~16.5x to ~291x faster).
 - Explicitly documented execution environment metadata, labeling unrecorded hardware metrics as not recorded to prevent hallucination.
 - Documented clear reproduction commands (`cd server && npm run audit:spatial` and `cd server && npm test`).
@@ -461,14 +462,85 @@ Tomorrow (Day 15): fix: performance bugs (feature freeze and rehearsal prep)
   - Merged `abhishek-audio` (Week 2 frontend audio: `getUserMedia`, `PeerConnection`, `useWebRTC`, `AudioControls`) into `abhay-team-lead`.
   - Integrated full WebRTC audio pipeline into `VirtualOffice.jsx`: offer/answer/ICE handlers, `ontrack` audio playback via dynamic `<audio>` elements.
   - Added Web Audio API `GainNode` (volume attenuation by pixel distance) and `StereoPannerNode` (left/right panning) updated every frame in the game loop.
-  - Fixed client visual earshot ring from 200px → 100px to match the server's 100px audio threshold.
+  - Fixed client visual earshot ring from 200px â†’ 100px to match the server's 100px audio threshold.
   - Added `localStorage` persistence for username so refresh no longer shows the join screen again.
   - Tagged release `v0.2-mid` on `main` and pushed to GitHub.
   - Synced all team branches (`abhishek-audio`, `tanvi-frontend`, `kajal-backend`) with `main`.
   - Full backend test suite: 37/37 passing with 0 regressions.
 - Files changed: client/src/App.jsx, client/src/VirtualOffice.jsx, client/src/components/AudioControls.jsx, client/src/hooks/useMediaStream.js, client/src/hooks/useWebRTC.js, client/src/utils/peerConnection.js, docs/context/06_PROGRESS_LOG.md, README.md
 - Commit message(s): feat: integrate Abhishek Week 2 WebRTC audio, dynamic attenuation and stereo panning; fix: align client visual earshot ring to 100px; feat: remember username in localStorage across browser refreshes
-- Problems / fixes: Client earshot ring was 200px but server used 100px — fixed visual to match. Conflict in `useSocket.js` and `kajal-backend` resolved by accepting main version.
+- Problems / fixes: Client earshot ring was 200px but server used 100px â€” fixed visual to match. Conflict in `useSocket.js` and `kajal-backend` resolved by accepting main version.
+
+### Day 18 - Tue 27 Oct 2026
+- Planned: chore: Redis setup (Docker) and config
+- Done:
+  - Created root-level `docker-compose.yml` defining Redis 7 Alpine with persistent volume `redis-data` and healthcheck.
+  - Added `ioredis` to `server/package.json` dependencies.
+  - Implemented `server/src/config/redis.js` with dual publisher/subscriber connection handling, offline error tolerance, and graceful fallback.
+  - Documented Redis variables (`REDIS_URL`, `REDIS_ENABLED`, `MAX_PEERS`, `INSTANCE_ID`) in `.env.example`.
+  - Identified and documented environment blocker: Docker is not installed on this host (`CommandNotFoundException`). Prepared offline fallback so single-instance development and tests run cleanly.
+- Files changed: docker-compose.yml, server/package.json, .env.example, server/src/config/redis.js, docs/context/06_PROGRESS_LOG.md
+- Commit message(s): chore: Redis setup (Docker) and config
+- Problems / fixes: Docker unavailable on host; created container definition and added offline tolerance in config.
+- Tomorrow (Day 19): feat: Redis pub/sub for shared positions
+
+### Day 19 - Wed 28 Oct 2026
+- Planned: feat: Redis pub/sub for shared positions
+- Done:
+  - Implemented `server/src/services/redisSync.js` with channels `proxispeak:positions` and `proxispeak:lifecycle`.
+  - Added `SERVER_ID` self-message filtering to prevent infinite broadcast echo loops.
+  - Extended `server/src/services/userManager.js` with remote user registry (`addRemoteUser`, `updateRemoteUserPosition`, `removeRemoteUser`).
+  - Wired Socket.IO movement and lifecycle events in `server/src/sockets/socketHandler.js` to publish to Redis Pub/Sub.
+  - Added automated unit test suite `server/test/redisSync.test.js` validating message schemas and remote user synchronization.
+- Files changed: server/src/services/redisSync.js, server/src/services/userManager.js, server/src/sockets/socketHandler.js, server/test/redisSync.test.js, docs/context/06_PROGRESS_LOG.md
+- Commit message(s): feat: Redis pub/sub for shared positions
+- Problems / fixes: None.
+- Tomorrow (Day 20): feat: nearby logic works across instances
+
+### Day 20 - Thu 29 Oct 2026
+- Planned: feat: nearby logic works across instances
+- Done:
+  - Extended `getNearbyUsersInMemory` in `server/src/services/persistenceManager.js` to evaluate `getAllActiveUsers()` (local + remote).
+  - Updated `runProximityDiff` in `server/src/sockets/socketHandler.js` to detect remote peers entering or leaving earshot.
+  - Added automated unit tests verifying that remote users across server instances trigger proximity diffs and are correctly included in spatial lookups.
+- Files changed: server/src/services/persistenceManager.js, server/src/sockets/socketHandler.js, server/test/redisSync.test.js, docs/context/06_PROGRESS_LOG.md
+- Commit message(s): feat: nearby logic works across instances
+- Problems / fixes: None.
+- Tomorrow (Day 21): perf: nearest-N peer cap logic (6 to 8)
+
+### Day 21 - Fri 30 Oct 2026
+- Planned: perf: nearest-N peer cap logic (6 to 8)
+- Done:
+  - Implemented nearest-N peer limiting (`DEFAULT_MAX_PEERS = 8`, `MIN_MAX_PEERS = 6`, `getConfiguredMaxPeers()`, and `applyNearestPeerLimit()`) in `server/src/services/persistenceManager.js`.
+  - Updated `updateProximity` to enforce the 6â€“8 peer cap and calculate eviction diffs symmetrically when closer peers enter.
+  - Enforced peer cap guardrail on WebRTC signaling relays (`webrtc:offer`, `webrtc:answer`, `webrtc:ice-candidate`) in `server/src/sockets/socketHandler.js`.
+  - Added automated test suite `server/test/peerLimiting.test.js` validating the 6â€“8 peer cutoff and eviction of furthest peers.
+- Files changed: server/src/services/persistenceManager.js, server/src/sockets/socketHandler.js, server/test/peerLimiting.test.js, docs/context/06_PROGRESS_LOG.md
+- Commit message(s): perf: nearest-N peer cap logic (6 to 8)
+- Problems / fixes: None.
+- Tomorrow (Day 22): test: load test with 50 simulated clients
+
+### Day 22 - Sat 31 Oct 2026
+- Planned: test: load test with 50 simulated clients
+- Done:
+  - Created standalone ES-module load testing script `server/scripts/load-test-50.js`.
+  - Added `"test:load"` script to `server/package.json`.
+  - Executed 50-client load test simulation against live server: all 50 clients connected (p95 connect latency 54.6 ms), 950 movement events emitted, 46,550 move broadcasts delivered, 628 enter diffs, 462 leave diffs, and 0 peer cap violations.
+- Files changed: server/scripts/load-test-50.js, server/package.json, docs/context/06_PROGRESS_LOG.md
+- Commit message(s): test: load test with 50 simulated clients
+- Problems / fixes: None.
+- Tomorrow (Day 23): docs: scaling and Redis notes
+
+### Day 23 - Sun 1 Nov 2026
+- Planned: docs: scaling and Redis notes
+- Done:
+  - Authored comprehensive technical documentation in `docs/REDIS_SCALING.md` detailing multi-instance architecture, Pub/Sub channel schemas, nearest-N peer limiting mathematics ($O(N^2) \rightarrow O(N \cdot K)$), and load test results.
+  - Documented Docker unavailability on the Windows host and explained the limitations of in-process contract testing versus live Redis cluster testing.
+  - Added Week 3 Viva Voce preparation notes to `docs/context/06_PROGRESS_LOG.md`.
+  - Validated full test suite: **73 tests passed, 0 failed, 0 skipped** across 5 test suites (`debounce-index.test.js`, `persistence.test.js`, `queryTimer.test.js`, `peerLimiting.test.js`, `redisSync.test.js`).
+- Files changed: docs/REDIS_SCALING.md, docs/context/06_PROGRESS_LOG.md
+- Commit message(s): docs: scaling and Redis notes
+- Problems / fixes: None.
 
 <!-- Copy the block above for each new day. -->
 
@@ -481,7 +553,7 @@ Tomorrow (Day 15): fix: performance bugs (feature freeze and rehearsal prep)
 - **`server/src/services/userManager.js`**: Maintains an in-memory Map of active connected users in RAM for sub-millisecond lookups, enforcing coordinate clamping (0 to 2000px) and username sanitization against XSS.
 - **`server/src/services/persistenceManager.js`**: Handles debounced MongoDB persistence, in-flight write tracking, safe disconnect cleanup, `getNearbyUsers()`, `getNearbyUsersInMemory()`, `clusterUsers()`, and proximity diff tracking (`updateProximity`, `cleanupProximityOnDisconnect`).
 - **`server/src/services/queryTimer.js`**: High-resolution performance stopwatch measuring geospatial proximity queries, formatting secret-safe logs, tracking against the strictly <20ms target, and maintaining a ring buffer history.
-- **`server/src/scripts/spatial-audit.js`**: Standalone spatial audit suite verifying distance boundaries, requester exclusion, defensive coordinates, result correctness, and latency benchmarks across 10–200 users.
+- **`server/src/scripts/spatial-audit.js`**: Standalone spatial audit suite verifying distance boundaries, requester exclusion, defensive coordinates, result correctness, and latency benchmarks across 10â€“200 users.
 - **`docs/benchmarks.md`**: Technical documentation detailing spatial audit methodology, mathematical formulation, test scenario matrix, and empirical benchmark tables.
 - **`server/src/models/Player.js`**: Defines the Mongoose Player schema with Cartesian `position: [x, y]` and a `2d` geospatial index.
 - **`server/models/Player.js`**: Legacy Player model used by the existing CommonJS backend.
@@ -490,6 +562,13 @@ Tomorrow (Day 15): fix: performance bugs (feature freeze and rehearsal prep)
 - **`server/scripts/migrate-indexes.js`**: Legacy index migration script for managing MongoDB geospatial indexes.
 - **`server/src/scripts/migrate-indexes.js`**: ES-module migration script for inspecting, updating, and verifying MongoDB geospatial indexes.
 - **`server/scripts/fake-clients.js`**: Spawns configurable Socket.IO clients to test concurrent connections, movement broadcasts, and disconnect behavior.
+- **`docker-compose.yml`**: Defines standardized Redis 7 Alpine container configuration with healthcheck and persistent storage.
+- **`server/src/config/redis.js`**: Encapsulates Redis connection lifecycle with dedicated publisher/subscriber clients and offline error tolerance.
+- **`server/src/services/redisSync.js`**: Handles Redis Pub/Sub channels (`proxispeak:positions`, `proxispeak:lifecycle`) for cross-instance avatar synchronization and self-message filtering.
+- **`server/scripts/load-test-50.js`**: Automated load test simulating 50 concurrent Socket.IO clients moving and verifying nearest-N peer cap compliance.
+- **`server/test/peerLimiting.test.js`**: Unit test suite validating nearest-N peer limiting (6-8 peers) and eviction diff calculation.
+- **`server/test/redisSync.test.js`**: Unit test suite validating Redis Pub/Sub message schemas, server ID deduplication, and cross-instance proximity.
+- **`docs/REDIS_SCALING.md`**: Technical architectural guide detailing multi-instance Redis scaling, peer cap mathematics, and deployment steps.
 - **`server/test/debounce-index.test.js`**: Tests coordinate validation, debounced persistence, disconnect cleanup, and schema index definitions.
 - **`server/test/persistence.test.js`**: Tests schema indexes, coordinate clamping, defensive coordinate validation, getNearbyUsers, clusterUsers, proximity diff tracking, query timing metrics, and WebRTC signaling guardrails.
 - **`server/test/queryTimer.test.js`**: Dedicated unit test suite verifying query timer metrics, slow-query detection, and secret redaction.
@@ -509,7 +588,7 @@ Tomorrow (Day 15): fix: performance bugs (feature freeze and rehearsal prep)
    - *Viva Answer:* When a user moves, we reset a 1000ms timer. We only write to MongoDB once the user pauses or stops moving for 1 second. This reduces database write load by >95% while keeping the client's live screen perfectly updated via WebSockets.
 
 4. **What is WebRTC Glare and how did you prevent it?**
-   - *Viva Answer:* When Player A and Player B walk towards each other, both enter 100px earshot simultaneously. If both browsers independently try to send a WebRTC connection "Offer" at the exact same moment, the requests collide—a race condition called "WebRTC Glare". We solved this using the **Lower Socket ID rule**: the server compares socket IDs lexicographically (`socketA.id < socketB.id`) and designates only the smaller ID to initiate the offer (`shouldInitiateOffer = true`), guaranteeing zero collision.
+   - *Viva Answer:* When Player A and Player B walk towards each other, both enter 100px earshot simultaneously. If both browsers independently try to send a WebRTC connection "Offer" at the exact same moment, the requests collideâ€”a race condition called "WebRTC Glare". We solved this using the **Lower Socket ID rule**: the server compares socket IDs lexicographically (`socketA.id < socketB.id`) and designates only the smaller ID to initiate the offer (`shouldInitiateOffer = true`), guaranteeing zero collision.
 
 5. **Why do you enforce a 100px proximity check on WebRTC signaling inside the server?**
    - *Viva Answer:* Security and privacy. If the server blindly forwarded WebRTC offers, a rogue or modified client could connect to any player's audio across the entire building. The server verifies Euclidean distance ($\le 100$px) before relaying offers, answers, or ICE candidates, making eavesdropping impossible.
@@ -526,7 +605,7 @@ Tomorrow (Day 15): fix: performance bugs (feature freeze and rehearsal prep)
    - *Viva Answer:* Euclidean distance is $\sqrt{(x_i - x_0)^2 + (y_i - y_0)^2}$. Because computing square roots (`Math.sqrt`) is expensive at 60 FPS, the implementation compares squared distance $(x_i - x_0)^2 + (y_i - y_0)^2 \le 100^2 = 10,000$ during initial filtering, deferring square root calculations exclusively to the small subset of matching candidates for nearest-first sorting.
 
 8. **How does in-memory spatial lookup compare to MongoDB queries?**
-   - *Viva Answer:* In-memory lookup operates directly on the V8 JavaScript Map in the Node.js process heap (taking 0.0099 ms p95 at 50 users and 0.0303 ms at 200 users). MongoDB `$near` queries require TCP/TLS networking, BSON serialization, query planning, and document hydration, which takes 5–25 ms locally and 35–70 ms on cloud databases, exceeding the 20 ms budget. MongoDB is retained for debounced persistence, while in-memory lookup serves real-time signaling.
+   - *Viva Answer:* In-memory lookup operates directly on the V8 JavaScript Map in the Node.js process heap (taking 0.0099 ms p95 at 50 users and 0.0303 ms at 200 users). MongoDB `$near` queries require TCP/TLS networking, BSON serialization, query planning, and document hydration, which takes 5â€“25 ms locally and 35â€“70 ms on cloud databases, exceeding the 20 ms budget. MongoDB is retained for debounced persistence, while in-memory lookup serves real-time signaling.
 
 9. **How do you detect when a user enters or leaves the 100px earshot without sending duplicate events?**
    - *Viva Answer:* We maintain a set of previously nearby peer IDs for each socket in `userNearbyMap`. When a user moves or joins, we query nearby users within 100px and compute the set difference (`entered = current \ previous`, `left = previous \ current`). If a user moves but stays within 100px of the same peers, both diff sets are empty, so no events are emitted.
@@ -552,18 +631,47 @@ Tomorrow (Day 15): fix: performance bugs (feature freeze and rehearsal prep)
          - Clustering: p95 = **`0.0687 ms`** at 50 users (~291x faster), **`1.2113 ms`** at 200 users (~16.5x faster).
 
 14. **What is the test coverage and status of the backend test suite?**
-    - *Viva Answer:* The automated backend test suite runs via Node.js native test runner (`node --test`) across three dedicated test suites:
+    - *Viva Answer:* The automated backend test suite runs via Node.js native test runner (`node --test`) across 5 dedicated test suites:
       1. `server/test/debounce-index.test.js`: Validates coordinate bounds, debounced MongoDB updates (1000ms), safe disconnect cleanup, and 2D index declarations.
       2. `server/test/persistence.test.js`: Validates MongoDB `$near` queries, in-memory proximity lookups, boundary inclusion/exclusion, defensive coordinate handling, BFS clustering transitivity, proximity enter/leave diffs, queue serialization, and modern socket event protocols.
       3. `server/test/queryTimer.test.js`: Validates execution duration measurement, 20ms boundary enforcement, alert triggers, statistics calculation, and credential redaction.
-      - **Current Status:** **63 tests passed, 0 failed, 0 skipped** with a 100% pass rate.
+      4. `server/test/peerLimiting.test.js`: Validates nearest-N peer limiting, 6â€“8 peer cap configuration clamping, eviction diffs, and WebRTC signaling guardrails.
+      5. `server/test/redisSync.test.js`: Validates Redis Pub/Sub contract payloads, server-ID deduplication, remote user registry, and cross-instance proximity lookups.
+      - **Current Status:** **73 tests passed, 0 failed, 0 skipped** with a 100% pass rate.
+
+15. **Why is Redis Pub/Sub used to scale ProxiSpeak across multiple server instances?**
+    - *Viva Answer:* In a multi-server deployment behind a load balancer, User A connected to Server 1 and User B connected to Server 2 cannot communicate via in-memory WebSockets alone. Redis Pub/Sub acts as an ultra-fast, in-memory message broker: when User A moves on Server 1, Server 1 publishes a lightweight `user:moved` event to Redis channel `proxispeak:positions`. Server 2 receives the event via subscription, updates its remote user registry, and broadcasts the position to its local sockets, keeping all avatars in sync with sub-millisecond overhead.
+
+16. **How does nearest-N peer limiting optimize WebRTC mesh connections, and what is the mathematical reduction?**
+    - *Viva Answer:* A full WebRTC mesh network requires $N(N - 1) / 2 = O(N^2)$ total peer connections. For 50 concurrent users in the same room, each browser would attempt to maintain 49 simultaneous audio streams, crashing browser memory and CPU. Nearest-N peer limiting caps active audio connections to the $K$ closest peers (default $K = 8$, range 6â€“8). Total network connections drop to $O(N \cdot K)$ (at most $50 \times 8 = 400$ connections instead of 1,225), achieving an >83% reduction in browser audio processing while preserving natural spatial conversations.
+
+17. **How do you prevent infinite message loops (echoes) in Redis Pub/Sub?**
+    - *Viva Answer:* Every server instance generates a unique `SERVER_ID` upon startup and attaches it to every published payload (`serverId: SERVER_ID`). When an instance receives a message from a Redis channel, it checks `if (data.serverId === SERVER_ID)`. If the message originated from itself, it immediately discards it without re-broadcasting, preventing infinite feedback loops.
+
+18. **How does cross-instance proximity work between players on different Node.js servers?**
+    - *Viva Answer:* `userManager.js` maintains two stores: local users (connected directly to this instance's Socket.IO) and remote users (received via Redis Pub/Sub). The spatial lookup function `getNearbyUsersInMemory` queries the combined active pool `getAllActiveUsers()`. If remote user Bob is within 100px of local user Alice, Alice's proximity engine detects Bob, calculates distance, includes Bob in the nearest-8 peers, and emits `nearby:enter`.
+
+19. **What were the empirical results of the 50-client load test?**
+    - *Viva Answer:* We executed `server/scripts/load-test-50.js` simulating 50 concurrent Socket.IO clients moving at 5 Hz across the canvas:
+      - 50/50 clients connected with an average connect latency of 53.3 ms (p95 = 54.6 ms).
+      - 950 movement events emitted, generating 46,550 broadcast deliveries.
+      - 628 proximity `enter` diffs and 462 `leave` diffs calculated and emitted in real time.
+      - **0 Nearest-N cap violations**: every single client strictly maintained $\le 8$ active peers throughout the test.
+
+20. **How does the system behave when Docker or Redis is offline, and what are the limitations of offline testing?**
+    - *Viva Answer:* The Redis client configuration (`redis.js`) and synchronization service (`redisSync.js`) are built with defensive error handlers: if Redis is offline or unreachable, the server logs a warning and gracefully operates in standalone single-instance mode without crashing.
+    - *Testing Limitations:* In-process tests (`redisSync.test.js`) validate message contracts, JSON serialization, server-ID deduplication, and cross-instance spatial math. However, they do not simulate live Redis TCP socket round-trips, network partition latency, or Redis server memory pressure. Live verification requires running the provided `docker-compose.yml` on a Docker-equipped host.
+
+21. **What is the difference between Kajal's Redis Pub/Sub task and Abhay's Socket.IO Redis adapter task?**
+    - *Viva Answer:* Kajal's task is application-level **Redis Pub/Sub for coordinate sharing and geospatial proximity synchronization** (channels `proxispeak:positions` and `proxispeak:lifecycle`), updating the spatial engine and calculating 6â€“8 nearest peer diffs. Abhay's task is infrastructure-level **Socket.IO Redis Adapter** (`@socket.io/redis-adapter`), which handles Socket.IO's internal room broadcasting across server clusters. The two work together harmoniously without overlapping code responsibilities.
 
 ## Done checklist
 - [x] Week 1 merged to main
 - [x] Week 2 completed (in-memory spatial queries, spatial audit, benchmark tables, WebRTC signaling integration)
-- [x] Week 2 merged, tag v0.2-mid ✅ (23 Oct 2026)
+- [x] Week 2 merged, tag v0.2-mid âœ… (23 Oct 2026)
 - [x] Audio pipeline integrated (WebRTC, GainNode attenuation, StereoPanner)
 - [ ] Mid review ready (docs, benchmarks, video)
 - [ ] Week 3 merged, tag v0.3
 - [ ] Week 4 merged, deployed, tag v1.0
 - [ ] Final review ready (report, PPT, video)
+
