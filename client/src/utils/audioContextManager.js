@@ -1,28 +1,17 @@
-let audioCtx = null;
-const peerGainNodes = new Map();
+export function setPeerVolume(peerId, volume) {
+  const entry = peerGainNodes.get(peerId);
+  if (!entry || !audioCtx) return;
 
-export function getAudioContext() {
-  if (!audioCtx) {
-    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-    audioCtx = new AudioContextClass();
-  }
-  if (audioCtx.state === 'suspended') {
-    audioCtx.resume();
-  }
-  return audioCtx;
+  const clamped = Math.max(0, Math.min(1, volume));
+  // Smoothly ramp gain over 50ms to prevent clicking/popping
+  entry.gainNode.gain.setTargetAtTime(clamped, audioCtx.currentTime, 0.05);
 }
 
-export function createPeerAudioPipeline(peerId, mediaStream) {
-  const ctx = getAudioContext();
-  const source = ctx.createMediaStreamSource(mediaStream);
-  const gainNode = ctx.createGain();
-
-  // default volume
-  gainNode.gain.setValueAtTime(1.0, ctx.currentTime);
-
-  source.connect(gainNode);
-  gainNode.connect(ctx.destination);
-
-  peerGainNodes.set(peerId, { source, gainNode });
-  return gainNode;
+export function removePeerAudioPipeline(peerId) {
+  const entry = peerGainNodes.get(peerId);
+  if (entry) {
+    entry.source.disconnect();
+    entry.gainNode.disconnect();
+    peerGainNodes.delete(peerId);
+  }
 }
