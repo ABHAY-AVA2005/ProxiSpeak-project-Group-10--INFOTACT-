@@ -6,6 +6,7 @@ import dotenv from "dotenv";
 import { setupSocketHandlers } from "./sockets/socketHandler.js";
 import { getUserCount } from "./services/userManager.js";
 import { connectDB } from "./config/db.js";
+import { initRedis } from "./config/redis.js";
 
 // Load environment variables
 dotenv.config();
@@ -58,10 +59,17 @@ const io = new Server(server, {
   maxHttpBufferSize: 1e5 // 100 KB max socket packet size
 });
 
+// Initialize Redis for multi-instance scaling before setting up socket handlers
+try {
+  await initRedis();
+} catch (err) {
+  console.warn(`[Redis] Initialization failed (${err.message}). Continuing in standalone mode.`);
+}
+
 // Register socket handlers (connect, disconnect, join, users:list)
 setupSocketHandlers(io);
 
-// Start server
+// Start server (only after Redis initialization has been attempted)
 server.listen(PORT, () => {
   console.log(`===============================================`);
   console.log(`🚀 ProxiSpeak Server running on port ${PORT}`);
