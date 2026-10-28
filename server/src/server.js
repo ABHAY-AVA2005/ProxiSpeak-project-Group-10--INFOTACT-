@@ -14,8 +14,12 @@ dotenv.config();
 const PORT = process.env.PORT || 5000;
 const CLIENT_URL = process.env.CLIENT_URL || "http://localhost:5173";
 
-// Initialize MongoDB connection asynchronously
-connectDB();
+// Initialize MongoDB connection (await connection attempt before starting server)
+try {
+  await connectDB();
+} catch (err) {
+  console.warn(`[MongoDB] Initialization failed (${err.message}). Continuing with in-memory persistence.`);
+}
 
 // Create Express app
 const app = express();
@@ -69,7 +73,7 @@ try {
 // Register socket handlers (connect, disconnect, join, users:list)
 setupSocketHandlers(io);
 
-// Start server (only after Redis initialization has been attempted)
+// Start server (only after MongoDB and Redis initialization have been attempted)
 server.listen(PORT, () => {
   console.log(`===============================================`);
   console.log(`🚀 ProxiSpeak Server running on port ${PORT}`);
