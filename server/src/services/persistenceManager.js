@@ -1,5 +1,6 @@
 import { Player } from "../models/Player.js";
 import { isDbConnected } from "../config/db.js";
+import { getAllUsers } from "./userManager.js";
 import {
   measureQuery,
   logQueryTiming,
@@ -250,58 +251,114 @@ export async function getNearbyUsers(origin, options = {}) {
 
   // 4. In-memory fallback calculation
   if (Array.isArray(fallbackUsers)) {
-    if (fallbackUsers.length === 0) {
-      return [];
-    }
-
-    return await measureQuery(async () => {
-      const maxDistSq = validMaxDistance * validMaxDistance;
-      const candidates = [];
-
-      for (const u of fallbackUsers) {
-        if (!u || typeof u !== "object") continue;
-
-        // Match against both database playerId and in-memory socketId/id
-        const id = u.playerId ?? u.socketId ?? u.id;
-        if (excludePlayerId && id !== undefined && id !== null && String(id) === String(excludePlayerId)) {
-          continue;
-        }
-
-        // Validate candidate user coordinates
-        const ux = u.x ?? u.position?.[0];
-        const uy = u.y ?? u.position?.[1];
-        if (!Number.isFinite(ux) || !Number.isFinite(uy)) {
-          continue;
-        }
-
-        const dx = ux - originX;
-        const dy = uy - originY;
-        const distSq = dx * dx + dy * dy;
-
-        if (distSq <= maxDistSq) {
-          candidates.push({
-            user: u,
-            distance: Math.sqrt(distSq)
-          });
-        }
-      }
-
-      // Sort by ascending distance (closest first, matching MongoDB $near behavior)
-      candidates.sort((a, b) => a.distance - b.distance);
-      return candidates.map((item) => {
-        const u = item.user;
-        const sid = u.socketId || u.playerId || u.id;
-        return {
-          ...u,
-          socketId: sid,
-          id: u.id || sid,
-          playerId: u.playerId || sid
-        };
-      });
-    }, { ...queryContext, source: "in-memory" });
+    return await getNearbyUsersInMemory(origin, {
+      maxDistance: validMaxDistance,
+      excludePlayerId,
+      users: fallbackUsers
+    });
   }
 
   return [];
+}
+
+/**
+ * Real-time in-memory proximity query for connected active users.
+ * Performs sub-millisecond Euclidean distance calculation without database latency.
+ *
+ * @param {Array<number>|{x: number, y: number}} origin - Origin coordinates [x, y] or {x, y}
+ * @param {object} [options]
+ * @param {number} [options.maxDistance=100] - Search radius in canvas pixels (default: 100)
+ * @param {string} [options.excludePlayerId] - Socket/player ID to exclude from results
+ * @param {Array<object>} [options.users] - Optional candidate user list (defaults to active users from userManager)
+ * @returns {Promise<Array<object>>} Matching users sorted by distance ascending (closest first)
+ */
+export async function getNearbyUsersInMemory(origin, options = {}) {
+  // 1. Validate and normalize origin coordinates
+  const originX = Array.isArray(origin) ? origin[0] : origin?.x;
+  const originY = Array.isArray(origin) ? origin[1] : origin?.y;
+
+  if (!Number.isFinite(originX) || !Number.isFinite(originY)) {
+    return [];
+  }
+
+  // 2. Validate maxDistance
+  const {
+    maxDistance,
+    excludePlayerId = null,
+    users = null
+  } = options;
+
+  let validMaxDistance = 100;
+  if (maxDistance !== undefined && maxDistance !== null) {
+    if (typeof maxDistance !== "number" || !Number.isFinite(maxDistance) || maxDistance < 0) {
+      return [];
+    }
+    validMaxDistance = maxDistance;
+  }
+
+  // 3. Candidate source (defaults to active in-memory users)
+  const candidateUsers = Array.isArray(users) ? users : getAllUsers();
+  if (candidateUsers.length === 0) {
+    return [];
+  }
+
+  const queryContext = {
+    origin: [originX, originY],
+    maxDistance: validMaxDistance,
+    excludePlayerId
+  };
+
+  return await measureQuery(async () => {
+    const maxDistSq = validMaxDistance * validMaxDistance;
+    const candidates = [];
+
+    for (const u of candidateUsers) {
+      if (!u || typeof u !== "object") continue;
+
+      // Match against both database playerId and in-memory socketId/id
+      const id = u.socketId ?? u.playerId ?? u.id;
+      if (excludePlayerId && id !== undefined && id !== null && String(id) === String(excludePlayerId)) {
+        continue;
+      }
+
+      // Validate candidate user coordinates
+      const ux = u.x ?? u.position?.[0];
+      const uy = u.y ?? u.position?.[1];
+      if (!Number.isFinite(ux) || !Number.isFinite(uy)) {
+        continue;
+      }
+
+      const dx = ux - originX;
+      const dy = uy - originY;
+      const distSq = dx * dx + dy * dy;
+
+      // Include users on exact boundary (distSq <= maxDistSq)
+      if (distSq <= maxDistSq) {
+        candidates.push({
+          user: u,
+          distance: Math.sqrt(distSq),
+          x: ux,
+          y: uy
+        });
+      }
+    }
+
+    // Sort by ascending distance (closest first, matching MongoDB $near behavior)
+    candidates.sort((a, b) => a.distance - b.distance);
+
+    return candidates.map((item) => {
+      const u = item.user;
+      const sid = u.socketId || u.playerId || u.id;
+      return {
+        ...u,
+        socketId: sid,
+        id: u.id || sid,
+        playerId: u.playerId || sid,
+        x: item.x,
+        y: item.y
+      };
+    });
+  }, { ...queryContext, source: "in-memory" });
 }
 
 /**

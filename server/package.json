@@ -3,13 +3,13 @@
   "version": "0.1.0",
   "description": "ProxiSpeak signaling and backend server",
   "main": "src/server.js",
-  "type": "module",
   "scripts": {
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
     "test": "node --test test/**/*.test.js",
-    "test:clients": "node src/scripts/fake-clients.js",
-    "migrate:indexes": "node src/scripts/migrate-indexes.js"
+    "test:clients": "node scripts/fake-clients.js",
+    "migrate:indexes": "node scripts/migrate-indexes.js",
+    "audit:spatial": "node src/scripts/spatial-audit.js"
   },
   "keywords": [
     "webrtc",
@@ -20,11 +20,11 @@
   "author": "Abhay Varshit Aripirala (Team Lead)",
   "license": "ISC",
   "dependencies": {
-    "cors": "^2.8.5",
-    "dotenv": "^16.4.7",
-    "express": "^4.21.2",
-    "mongoose": "^9.11.2",
-    "socket.io": "^4.8.1"
+    "cors": "^2.8.6",
+    "dotenv": "^18.0.5",
+    "express": "^5.2.1",
+    "mongoose": "^9.10.4",
+    "socket.io": "^4.8.4"
   },
   "devDependencies": {
     "socket.io-client": "^4.8.4"

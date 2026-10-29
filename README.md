@@ -1,187 +1,160 @@
-<div align="center">
+# ProxiSpeak
 
----
+A 2D virtual office where voice chat depends on distance. Move your avatar around a shared map and connect by WebRTC audio only with people within earshot (100 px).
 
-## 📖 About
+Built as a 4-person internship project at Infotact Solutions. This README separates what is **implemented and verified** from what is **planned**, so nothing here overstates the current state.
 
-Remote tools like Zoom put everyone into rigid "rooms" where only one person can speak at a time. They miss the spontaneity of a real office, where you overhear nearby chats and walk over to join one.
+## Why
 
-**ProxiSpeak** is a 2D virtual office. You move your avatar around a map, and the audio of people nearby gets louder as you approach and quieter as you leave. It supports 50+ users in the same space.
+Tools like Zoom put everyone in rigid rooms. A physical office has spontaneous, overheard conversations. ProxiSpeak explores that with proximity-gated audio.
 
-## ✨ Features
+## Status
 
-|      | Feature                         | Description                                                                        |
-| ---- | ------------------------------- | ---------------------------------------------------------------------------------- |
-| 🗺️ | **2D Virtual World**      | Overhead office map drawn with React and HTML5 Canvas, with smooth avatar movement |
-| 📍   | **Geospatial Engine**     | MongoDB `$near` and `$geoWithin` queries find who is within earshot (100 px)   |
-| 📡   | **Signaling Server**      | Node.js and Socket.io set up WebRTC handshakes only between nearby users           |
-| 🔊   | **Spatial Audio Mixer**   | Web Audio API adjusts volume (gain) and left/right panning from avatar distance    |
-| 🧱   | **Obstacles Block Sound** | Furniture and walls saved in MongoDB reduce audio between avatars                  |
-| 🚀   | **Scales Out**            | Redis Pub/Sub lets several Node instances share one virtual space                  |
+| Area | Status |
+|---|---|
+| Socket.IO server: join, move, leave, broadcast | Implemented |
+| Server-side proximity diffing (`nearby:enter` / `nearby:leave`) at 100 px | Implemented |
+| Proximity-gated WebRTC signaling (offer, answer, ICE) | Implemented |
+| Glare-free offerer election (`shouldInitiateOffer`) | Implemented |
+| Coordinate validation (bounds, finite numbers) | Implemented |
+| Debounced MongoDB persistence + race-safe disconnect cleanup | Implemented |
+| Spatial benchmark script (`audit:spatial`) | Implemented |
+| React + Canvas world, avatar movement | Implemented *(confirm)* |
+| P2P audio via `getUserMedia` + WebRTC | Implemented *(confirm)* |
+| Distance-based volume (gain) and stereo panning | Planned *(update if merged)* |
+| Obstacles/walls attenuating sound | Planned |
+| Redis Pub/Sub horizontal scaling | Planned |
+| MongoDB `$near` / `$geoWithin` queries for proximity | Planned (see Design Notes) |
 
-## 🏗️ Architecture
+## How It Works
+
+1. The client sends its x/y position as the avatar moves (about 15 updates/sec).
+2. The server validates the position, updates in-memory state, and broadcasts `user:moved`.
+3. The server diffs each user's nearby set. When two users cross the 100 px boundary it emits `nearby:enter` or `nearby:leave` to only that pair.
+4. `nearby:enter` carries `shouldInitiateOffer`, decided by comparing socket IDs lexicographically, so exactly one side creates the WebRTC offer and offer collisions (glare) are avoided.
+5. Offers, answers and ICE candidates are relayed only if the server re-checks that both users are still within 100 px (`areUsersWithinEarshot`). Otherwise they are dropped.
+6. Audio flows peer to peer between connected users.
 
 ```mermaid
 flowchart LR
-    A[React + Canvas Client] -- move x/y --> B[Socket.io Signaling Server]
-    B -- nearby users --> C[(MongoDB 2d index)]
-    B <-- Pub/Sub --> D[(Redis)]
-    A <-. WebRTC P2P audio .-> E[Other Clients]
-    B -- offer / answer / ICE --> A
-    A --> F[Web Audio API: gain + panning]
+    A[React + Canvas Client] -- move x/y --> B[Socket.io Server]
+    B -- in-memory proximity diff --> B
+    B -- debounced writes --> C[(MongoDB)]
+    B -- nearby:enter/leave + signaling --> A
+    A <-. WebRTC P2P audio .-> E[Nearby Clients]
 ```
 
-**How it works**
+## Design Notes
 
-1. Your client sends its x/y position about 15 times per second.
-2. The server finds users within 100 px and tells both sides to connect.
-3. The lower socket id sends the WebRTC offer, and audio flows peer to peer.
-4. Each client mixes incoming audio by distance, with volume and stereo pan.
+- **In-memory state is the source of truth for real-time behavior.** Positions and proximity are computed in memory, so movement broadcasts and proximity checks never wait on the database.
+- **MongoDB stores last-known positions only.** A `2d` index exists on `position`, but live proximity is computed in memory, not with `$near`. The index is kept for persistence and for possible future queries.
+- **Debounced persistence.** A client can emit 15 to 60 `move` events per second. Writes are debounced (`DB_DEBOUNCE_MS = 1000`), so only the final position after movement pauses is saved. This cuts writes by up to ~95% in the design (15 to 60 events/sec collapse to at most one write per idle second).
+  - *To verify with data:* run `npm run test:clients` and compare move events received vs. `updateOne` calls.
+- **Race-safe disconnect.** On disconnect the server cancels the debounce timer, marks the socket in a short-lived tombstone set, flushes any pending position, awaits in-flight writes, then deletes the document. This stops late async writes from resurrecting deleted players.
 
-## 🎯 Performance Targets
+## Performance
 
-| Metric                         | Target                  |
-| ------------------------------ | ----------------------- |
-| Proximity query and clustering | under **20 ms**   |
-| Concurrent users               | **50+**           |
-| Canvas rendering               | steady **60 FPS** |
-| Earshot radius                 | **100 px**        |
+Measured with `npm run audit:spatial`. These numbers cover **server-side in-memory computation only** (proximity lookup and clustering) on **simulated users**. They are not end-to-end audio latency and not real WebRTC load.
 
-Measured results are in [`docs/benchmarks.md`](docs/benchmarks.md) *(added during the mid review)*.
+| Users | Proximity avg (ms) | Proximity p95 (ms) | Clustering avg (ms) | Clustering p95 (ms) |
+|:--:|:--:|:--:|:--:|:--:|
+| 10 | *rerun* | *rerun* | *rerun* | *rerun* |
+| 25 | 0.0063 | 0.0089 | 0.0106 | 0.0120 |
+| 50 | 0.0065 | 0.0091 | 0.0434 | 0.0696 |
+| 100 | 0.0106 | 0.0186 | 0.2378 | 0.3553 |
+| 200 | 0.0207 | 0.0317 | 0.9817 | 1.3458 |
 
-## 🧰 Tech Stack
+Target: p95 under 20 ms. All measured rows are well under it.
 
-| Layer      | Technology                                                    |
-| ---------- | ------------------------------------------------------------- |
-| Frontend   | React, HTML5 Canvas, Web Audio API, WebRTC (`getUserMedia`) |
-| Backend    | Node.js, Express, Socket.io                                   |
-| Database   | MongoDB (`2d` geospatial index)                             |
-| Scaling    | Redis Pub/Sub, `@socket.io/redis-adapter`                   |
-| Deployment | HTTPS hosting (frontend and backend), MongoDB Atlas           |
+> **Known issue:** the earlier 10-user row reported avg (0.0147 ms) above p95 (0.0097 ms), which is not possible for a correct percentile. Re-run the audit, check the percentile calculation in `spatial-audit.js`, and fill in the row before publishing.
 
-## 📁 Project Structure
-
-```
-ProxiSpeak/
-├── client/              React app (components, hooks, world, audio)
-├── server/              Express + Socket.io (sockets, models, routes, services)
-├── docs/
-│   ├── context/         Project brief, plan, rules, decisions, progress log
-│   └── benchmarks.md    Spatial audit and load test results
-├── .env.example         Required environment variables (no secrets)
-└── README.md
-```
-
-## 🔌 Socket.IO Events Reference
- 
-| Event Name | Direction | Payload | Description |
-|---|---|---|---|
-| `join` | Client ➔ Server | `{ username: string, x?: number, y?: number }` | Register user into spatial session and persist join |
-| `users:list` | Server ➔ Client | `Array<User>` | Initial snapshot of all active players in the world |
-| `user:joined` | Server ➔ Client (broadcast) | `{ socketId, username, x, y }` | Notifies active clients when a new user enters |
-| `move` | Client ➔ Server | `{ x: number, y: number }` | Sends client's updated coordinate position |
-| `user:moved` | Server ➔ Client (broadcast) | `{ socketId, x, y }` | Zero-lag WebSocket broadcast to all peers |
-| `user:left` | Server ➔ Client (broadcast) | `{ socketId }` | Clean disconnect cleanup and DB persistence flush |
-| `nearby:enter` | Server ➔ Client | `{ socketId, id, username, x, y, shouldInitiateOffer: boolean }` | Notifies when a peer enters 100px earshot (includes glare-free offer election) |
-| `nearby:leave` | Server ➔ Client | `{ socketId, id }` | Notifies when a peer leaves 100px earshot to close peer connection |
-| `webrtc:offer` | Client ⇄ Server (Relay) | `{ targetId, offer }` / `{ senderId, offer }` | Relays WebRTC SDP offer strictly within 100px proximity radius |
-| `webrtc:answer` | Client ⇄ Server (Relay) | `{ targetId, answer }` / `{ senderId, answer }` | Relays WebRTC SDP answer strictly within 100px proximity radius |
-| `webrtc:ice-candidate` | Client ⇄ Server (Relay) | `{ targetId, candidate }` / `{ senderId, candidate }` | Relays ICE candidate for P2P audio track establishment within 100px |
-
-
-## 🧪 Testing & Simulation Scripts
-
-From the `server/` directory:
-- `npm test`: Runs Node.js automated test suite (`persistence.test.js` validating Cartesian `2d` index, clamping, and debouncing).
-- `npm run test:clients`: Runs `fake-clients.js` multi-avatar simulation with customizable duration and client count.
-- `npm run migrate:indexes`: Audits and ensures the `position_2d` index in MongoDB.
-
-## 🚀 Getting Started
-
-> Setup steps will be finalised as the project grows. Update this section each week.
-
-**Prerequisites:** Node.js (LTS), Git, a MongoDB Atlas account, a microphone and headphones.
+Methodology: `docs/benchmarks.md`.
 
 ```bash
-# 1. Clone
+cd server && npm run audit:spatial
+```
+
+## Tech Stack
+
+| Layer | Technology |
+|---|---|
+| Frontend | React, HTML5 Canvas, WebRTC (`getUserMedia`) |
+| Backend | Node.js, Express, Socket.IO |
+| Database | MongoDB (Mongoose), `2d` index on `position` |
+| Planned | Web Audio API (gain, panning), Redis Pub/Sub with `@socket.io/redis-adapter` |
+
+## Socket.IO Events
+
+| Event | Direction | Payload | Description |
+|---|---|---|---|
+| `join` | Client → Server | `{ username?, x?, y? }` | Register in the world |
+| `users:list` | Server → Client | `User[]` | Snapshot of active users, sent to the joiner |
+| `user:joined` | Server → Clients | `User` | Broadcast to others when someone joins |
+| `move` | Client → Server | `{ x, y }` | Validated, applied in memory, persisted with debounce |
+| `user:moved` | Server → Clients | `{ socketId, id, x, y }` | Broadcast of a valid move |
+| `user:left` | Server → Clients | `{ socketId }` | Broadcast on disconnect |
+| `nearby:enter` | Server → pair | `{ socketId, id, username, x, y, shouldInitiateOffer }` | Pair entered 100 px earshot |
+| `nearby:leave` | Server → pair | `{ socketId, id }` | Pair left earshot; close the peer connection |
+| `webrtc:offer` / `webrtc:answer` / `webrtc:ice-candidate` | Client ⇄ Server | `{ targetId, ... }` | Relayed only if both peers are within 100 px |
+
+**Validation:** coordinates must be finite numbers within `0 ≤ x ≤ 1000`, `0 ≤ y ≤ 600`. Invalid input is dropped with no state change.
+
+## Data Model
+
+```javascript
+// server/models/Player.js
+{
+  playerId: String,      // socket.id, unique + indexed
+  x: Number,             // default 400
+  y: Number,             // default 400
+  position: [Number],    // [x, y], 2d index
+  lastSeen: Date
+}  // timestamps: true
+```
+
+## Testing
+
+From `server/`:
+
+- `npm test`: persistence tests (2d index, coordinate clamping, debouncing)
+- `npm run test:clients`: multi-avatar simulation with configurable client count and duration
+- `npm run migrate:indexes`: ensures the `position_2d` index exists
+- `npm run audit:spatial`: spatial benchmark across 10 to 200 simulated users
+
+## Getting Started
+
+Prerequisites: Node.js (LTS), a MongoDB Atlas account, a microphone and headphones.
+
+```bash
 git clone https://github.com/ABHAY-AVA2005/ProxiSpeak-project-Group-10--INFOTACT-.git
 cd ProxiSpeak-project-Group-10--INFOTACT-
+cp .env.example .env     # fill in your own values; never commit .env
 
-# 2. Environment
-cp .env.example .env        # fill in your own values, never commit .env
-
-# 3. Backend
 cd server && npm install && npm run dev
-
-# 4. Frontend (new terminal)
+# new terminal
 cd client && npm install && npm run dev
 ```
 
-Open the app in **two browser tabs or two devices**, join with different names, and walk the avatars close together to hear each other. Use headphones to avoid echo.
+Open two browser tabs or devices, join with different names, and move the avatars within 100 px of each other. Use headphones to avoid echo.
 
-## 🗓️ Roadmap
+## Limitations
 
-| Week                   | Backend                                                           | Frontend                                    | Status |
-| ---------------------- | ----------------------------------------------------------------- | ------------------------------------------- | ------ |
-| **1**            | Socket.io server, avatar x/y broadcast, MongoDB geospatial schema | React Canvas world, keyboard/mouse movement | ⬜     |
-| **2**            | `$near` proximity groups, signaling only within 100 px          | WebRTC P2P audio with `getUserMedia`      | ⬜     |
-| **Mid Review**   | Spatial audit under 20 ms                                         | Two-browser audio demo                      | ⬜     |
-| **3**            | Redis Pub/Sub, mesh scaling                                       | Web Audio volume drop-off by distance       | ⬜     |
-| **4**            | Room and obstacle persistence                                     | Stereo panning, steady 60 FPS               | ⬜     |
-| **Final Review** | Scalable stateful geospatial server                               | Immersive physics-aware audio platform      | ⬜     |
+- Audio is a P2P mesh, which is fine for small groups in earshot but does not scale to large crowds in one radius.
+- No TURN server is configured, so some restrictive networks may fail to connect.
+- Benchmarks use simulated users; real concurrent audio sessions were tested at small scale only.
+- Single Node instance until Redis scaling is implemented.
 
-*(Change ⬜ to ✅ as each stage is merged into `main`.)*
+## Team
 
-## 👥 Team
+| Member | Role |
+|---|---|
+| Abhay Varshit Aripirala | Team Lead, Backend (signaling, proximity, persistence) |
+| Tanvi Dighe | Frontend (Canvas world) |
+| Abhishek Bhalla | Frontend (WebRTC and Web Audio) |
+| Kajal Kumari Singh | Backend (MongoDB, Redis) |
 
-| Member                            | Role                            | Branch              |
-| --------------------------------- | ------------------------------- | ------------------- |
-| **Abhay Varshit Aripirala** | Team Lead, Backend (signaling)  | `abhay-team-lead` |
-| **Tanvi Dighe**             | Frontend (Canvas world)         | `tanvi-frontend`  |
-| **Abhishek Bhalla**         | Frontend (WebRTC and Web Audio) | `abhishek-audio`  |
-| **Kajal Kumari Singh**      | Backend (MongoDB, Redis)        | `kajal-backend`   |
+Project docs: `docs/context/`.
 
-## 🔀 Git Workflow
+## Note
 
-- `main` holds only reviewed, merged code. The team lead merges.
-- Everyone commits **daily** in their own branch.
-- Commit format: `type: short meaning` (`feat`, `fix`, `docs`, `test`, `chore`, `perf`, `refactor`).
-- Never commit secrets. Use `.env`.
-
-##### **PULL REQ ->MERGE FLOW**
-
-To ensure a pull request (PR) is correct before merging, you should review and test it using the following steps:
-
-* **Read the Title and Description:**
-* Understand the context, problem being solved, or feature being added.
-* Check if the author linked any relevant issues or task tickets.
-* **Review the Code Changes ("Files Changed" tab):**
-* **Functionality:** Check if the logic solves the intended problem without creating edge-case bugs.
-* **Code Quality & Readability:** Ensure naming conventions, code structure, and formatting follow project standards.
-* **Security & Performance:** Look for security risks (e.g., exposed credentials, unvalidated inputs) or inefficient queries/loops.
-* **Scope:** Make sure the PR only changes what it intends to change, without unrelated modifications.
-* **Check Automated Tests and CI Status:**
-* Verify if all continuous integration (CI) checks (like GitHub Actions) pass.
-* Ensure unit, integration, or end-to-end tests are passing.
-* Check test coverage to ensure new code includes corresponding tests.
-* **Test the Changes Locally:**
-* Fetch and switch to the PR branch using the Git CLI or GitHub CLI (`gh pr checkout <pr-number>`).
-* Run the project locally and verify the UI or API functionality works as expected.
-* Run tests locally to verify no regressions occur.
-* **Use Code Review Features:**
-* Leave inline comments or questions on specific lines of code if anything is unclear.
-* Select **Request Changes** if fixes are needed before merging.
-* Select **Approve** once all criteria are met and the code is ready.
-* **Merge the Pull Request:**
-* Choose the appropriate merge strategy (Create a merge commit, Squash and merge, or Rebase and merge).
-* Click **Confirm merge** and delete the feature branch if it is no longer needed.
-
-## 📄 Documentation
-
-Detailed documents live in [`docs/context/`](docs/context/): project brief, team plan, evaluation, GitHub rules and technical decisions.
-
-## 🔒 Note
-
-This is an internship project built for **Infotact Solutions**. Confidential information from the internship is not to be shared outside the team.
-
-<div align="center">
+Built for Infotact Solutions. Confidential internship information is not to be shared outside the team.

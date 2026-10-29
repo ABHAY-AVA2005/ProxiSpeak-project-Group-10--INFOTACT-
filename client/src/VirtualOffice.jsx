@@ -151,7 +151,7 @@ function VirtualOffice({ username = "You", earshotRadius = 100, localStream = nu
       pc.ontrack = (event) => {
         console.log("[WebRTC] Received audio stream from:", peerId);
         const stream = event.streams[0] || new MediaStream([event.track]);
-        
+
         let audioEl = document.getElementById(`audio-${peerId}`);
         if (!audioEl) {
           audioEl = document.createElement("audio");
@@ -311,7 +311,7 @@ function VirtualOffice({ username = "You", earshotRadius = 100, localStream = nu
     // ── Keyboard ───────────────────────────────────────────────────────────
     const onKeyDown = (e) => {
       const k = e.key.toLowerCase();
-      if (["arrowup","arrowdown","arrowleft","arrowright","w","a","s","d"].includes(k)) {
+      if (["arrowup", "arrowdown", "arrowleft", "arrowright", "w", "a", "s", "d"].includes(k)) {
         e.preventDefault();
         clickTarget.current = null; // cancel click-to-move when key pressed
       }
@@ -352,9 +352,9 @@ function VirtualOffice({ username = "You", earshotRadius = 100, localStream = nu
       let dy = 0;
 
       const k = keys.current;
-      if (k["arrowup"]    || k["w"]) dy -= SPEED;
-      if (k["arrowdown"]  || k["s"]) dy += SPEED;
-      if (k["arrowleft"]  || k["a"]) dx -= SPEED;
+      if (k["arrowup"] || k["w"]) dy -= SPEED;
+      if (k["arrowdown"] || k["s"]) dy += SPEED;
+      if (k["arrowleft"] || k["a"]) dx -= SPEED;
       if (k["arrowright"] || k["d"]) dx += SPEED;
 
       // Click-to-move (only when no key held)

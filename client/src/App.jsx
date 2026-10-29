@@ -6,12 +6,12 @@ import { useMediaStream } from "./hooks/useMediaStream";
 
 function App() {
   const [username, setUsername] = useState(() => {
-    return localStorage.getItem("proxispeak_username") || null;
+    return sessionStorage.getItem("proxispeak_username") || null;
   });
   const { localStream, isMuted, permissionGranted, startAudio, toggleMute } = useMediaStream();
 
   const handleJoin = async (name) => {
-    localStorage.setItem("proxispeak_username", name);
+    sessionStorage.setItem("proxispeak_username", name);
     try {
       await startAudio(); // Start audio on user gesture (fixes browser autoplay restriction)
     } catch (e) {
