@@ -3,7 +3,7 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
-const MONGODB_URI = process.env.MONGODB_URI || "mongodb://127.0.0.1:27017/proxispeak";
+const MONGODB_URI = process.env.MONGODB_URI || process.env.MONGO_URI || "mongodb://127.0.0.1:27017/proxispeak";
 
 function isExactPosition2d(index) {
   return index.key && index.key.position === "2d" && Object.keys(index.key).length === 1;
@@ -46,9 +46,21 @@ export async function runIndexMigration() {
       console.log("  ✔ Created 2D index successfully.");
     }
 
+    // Final verification of index configuration
+    const finalIndexes = await collection.indexes();
+    const hasExact2d = finalIndexes.some(isExactPosition2d);
+    const hasObsolete2dsphere = finalIndexes.some(isExactLocation2dSphere);
+
+    if (!hasExact2d || hasObsolete2dsphere) {
+      throw new Error(
+        `Migration verification failed: 2d index present: ${hasExact2d}, obsolete 2dsphere present: ${hasObsolete2dsphere}`
+      );
+    }
+    console.log("  ✔ Verified: { position: '2d' } active and obsolete indexes removed.");
     console.log("\nMigration completed successfully!");
   } catch (err) {
     console.error("Migration error:", err.message);
+    process.exitCode = 1;
   } finally {
     await mongoose.disconnect();
   }

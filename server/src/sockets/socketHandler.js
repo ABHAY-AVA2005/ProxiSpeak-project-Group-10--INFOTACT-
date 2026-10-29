@@ -11,6 +11,7 @@ import {
   scheduleDebouncedMove,
   persistPlayerDisconnect,
   getNearbyUsers,
+  getNearbyUsersInMemory,
   updateProximity,
   cleanupProximityOnDisconnect
 } from "../services/persistenceManager.js";
@@ -53,16 +54,15 @@ export function setupSocketHandlers(io) {
 
   /**
    * Executes proximity diff calculation and emits events.
-   * Verifies that IDs returned by getNearbyUsers() correspond to active Socket.IO sockets.
+   * Uses real-time in-memory spatial lookup for sub-millisecond latency.
    */
   const runProximityDiff = async (targetSocket, user) => {
-    // 1. Query nearby candidates from persistence layer
-    const currentNearby = await getNearbyUsers([user.x, user.y], {
-      excludePlayerId: targetSocket.id,
-      fallbackUsers: getAllUsers()
+    // 1. Query nearby candidates from live in-memory users (sub-millisecond, zero database lag)
+    const currentNearby = await getNearbyUsersInMemory([user.x, user.y], {
+      excludePlayerId: targetSocket.id
     });
 
-    // 2. Filter & verify: IDs from MongoDB (or fallback) must identify active Socket.IO sockets
+    // 2. Filter & verify: IDs from in-memory lookup must identify active Socket.IO sockets
     const activeNearby = [];
     for (const candidate of currentNearby) {
       const peerId = candidate.socketId || candidate.playerId || candidate.id;
@@ -70,7 +70,7 @@ export function setupSocketHandlers(io) {
 
       const activeUser = getUser(peerId);
       if (!activeUser) {
-        // Stale MongoDB record from past session or disconnected socket - discard!
+        // Stale record from past session or disconnected socket - discard!
         continue;
       }
 
@@ -84,7 +84,7 @@ export function setupSocketHandlers(io) {
       });
     }
 
-    // Check if target socket disconnected while awaiting getNearbyUsers
+    // Check if target socket disconnected while awaiting lookup
     if (targetSocket.connected === false || !getUser(targetSocket.id)) {
       return;
     }
@@ -92,8 +92,7 @@ export function setupSocketHandlers(io) {
     const { entered, left } = updateProximity(targetSocket.id, user, activeNearby);
 
     // 3. Emit nearby:enter diffs
-    // Rule (Day 11): lower-id-sends-offer on nearby:enter.
-    // The socket with alphabetically/lexicographically smaller ID sends the offer.
+    // Rule: lower-id-sends-offer on nearby:enter prevents WebRTC glare collisions
     for (const peer of entered) {
       const peerId = peer.socketId || peer.playerId || peer.id;
       if (!peerId) continue;
@@ -236,7 +235,7 @@ export function setupSocketHandlers(io) {
     });
 
     /**
-     * Movement handler (supports both 'move' and legacy 'player-move')
+     * Movement handler (listens to 'move' only)
      * Payload: { x: number, y: number }
      */
     const handleMove = async (coords) => {
@@ -253,12 +252,6 @@ export function setupSocketHandlers(io) {
         x: updatedUser.x,
         y: updatedUser.y
       });
-      // Backward compatibility event
-      socket.broadcast.emit("player-moved", {
-        id: socket.id,
-        x: updatedUser.x,
-        y: updatedUser.y
-      });
 
       // Schedule debounced write to MongoDB
       scheduleDebouncedMove(socket.id, updatedUser.x, updatedUser.y);
@@ -268,7 +261,6 @@ export function setupSocketHandlers(io) {
     };
 
     socket.on("move", handleMove);
-    socket.on("player-move", handleMove);
 
     /**
      * WebRTC Signaling Relay
@@ -349,7 +341,6 @@ export function setupSocketHandlers(io) {
       if (removedUser) {
         // Broadcast user departure so all clients remove the avatar immediately
         socket.broadcast.emit("user:left", { socketId: socket.id });
-        socket.broadcast.emit("player-disconnected", socket.id);
       }
 
       // Safe DB disconnect cleanup (cancels timer, saves final state, deletes record)
