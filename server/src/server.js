@@ -1,17 +1,15 @@
+import "dotenv/config";
 import express from "express";
 import http from "http";
 import { Server } from "socket.io";
 import cors from "cors";
-import dotenv from "dotenv";
 import { setupSocketHandlers } from "./sockets/socketHandler.js";
 import { getUserCount } from "./services/userManager.js";
-import { connectDB } from "./config/db.js";
-import { initRedis } from "./config/redis.js";
+import { connectDB, isDbConnected, closeDB } from "./config/db.js";
+import { initRedis, isRedisConnected, closeRedis } from "./config/redis.js";
+import { SERVER_ID } from "./services/redisSync.js";
 
-// Load environment variables
-dotenv.config();
-
-const PORT = process.env.PORT || 5000;
+const PORT = Number(process.env.PORT) || 5000;
 const CLIENT_URL = process.env.CLIENT_URL || "http://localhost:5173";
 
 // Initialize MongoDB connection (await connection attempt before starting server)
@@ -44,6 +42,14 @@ app.get("/health", (req, res) => {
   res.json({
     status: "ok",
     service: "ProxiSpeak Signaling Server",
+    instanceId: SERVER_ID,
+    port: PORT,
+    redis: {
+      connected: isRedisConnected()
+    },
+    database: {
+      connected: isDbConnected()
+    },
     activeUsers: getUserCount(),
     uptime: Math.round(process.uptime()),
     timestamp: new Date().toISOString()
@@ -76,8 +82,34 @@ setupSocketHandlers(io);
 // Start server (only after MongoDB and Redis initialization have been attempted)
 server.listen(PORT, () => {
   console.log(`===============================================`);
-  console.log(`🚀 ProxiSpeak Server running on port ${PORT}`);
+  console.log(`🚀 ProxiSpeak Server running on port ${PORT} [Instance: ${SERVER_ID}]`);
   console.log(`📡 Socket.io ready for client: ${CLIENT_URL}`);
   console.log(`🔒 Security headers & payload caps active`);
   console.log(`===============================================`);
 });
+
+/**
+ * Gracefully stops HTTP, Socket.IO, Redis, and Database connections
+ */
+export async function stopServer() {
+  return new Promise((resolve) => {
+    io.close(() => {
+      server.close(async () => {
+        try { await closeRedis(); } catch (_) {}
+        try { await closeDB(); } catch (_) {}
+        resolve();
+      });
+    });
+  });
+}
+
+const handleShutdown = async (signal) => {
+  console.log(`[Server] ${signal} received, shutting down gracefully...`);
+  await stopServer();
+  process.exit(0);
+};
+
+process.on("SIGTERM", () => handleShutdown("SIGTERM"));
+process.on("SIGINT", () => handleShutdown("SIGINT"));
+
+export { app, server, io };

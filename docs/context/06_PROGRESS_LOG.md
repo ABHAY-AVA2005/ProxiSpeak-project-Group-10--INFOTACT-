@@ -9,11 +9,11 @@
 Update this every night before pushing. The AI reads it at the start of each session.
 
 ## Current status
-- Current day: Day 18 (Tue 27 Oct 2026)
-- Current task (from 02_TEAM_PLAN.md): chore: Redis setup (Docker) and config
-- Blockers: Docker is unavailable on this machine. The production Docker Compose configuration and offline fallback are implemented.
+- Current day: Day 24 (Mon 2 Nov 2026)
+- Current task (from 02_TEAM_PLAN.md): chore: multi-instance workflow and live Redis verification
+- Blockers: None. Docker Desktop is running with Redis 7 Alpine (`proxispeak-redis`).
 - Week 2 status: COMPLETE — all Week 2 milestones merged into main, tagged v0.2-mid.
-- Week 3 status: Implementation committed locally; 73 backend tests passed and the 50-client load test passed. Live Redis testing remains unverified because Docker is unavailable.
+- Week 3 status: COMPLETE — 81 backend tests passed (73 unit tests + 8 live Redis integration tests). Multi-instance workflow and cross-instance Pub/Sub synchronization verified.
 
 ## Daily entries
 
@@ -547,6 +547,33 @@ Tomorrow (Day 15): fix: performance bugs (feature freeze and rehearsal prep)
 - Files changed: docs/REDIS_SCALING.md, docs/context/06_PROGRESS_LOG.md
 - Commit message(s): docs: scaling and Redis notes
 - Problems / fixes: None.
+
+### Day 24 - Mon 2 Nov 2026
+- Planned: Single-command multi-instance workflow (start, status, test, stop), live Redis Pub/Sub integration test suite, and server lifecycle fixes.
+- Done:
+  - Created single-command development workflow script `scripts/dev-multi-instance.ps1` and CMD wrapper `scripts/dev-multi-instance.cmd` supporting `start`, `status`, `test`, `stop`, and `restart`.
+  - Investigated and resolved the root cause of server instances stopping unexpectedly: replaced console-attached child processes with detached Windows processes via WMI `Win32_Process.Create` and exact listening socket PID tracking, allowing both backend instances to survive independently of the launching terminal.
+  - Resolved 30-second server startup stall when MongoDB is offline by configuring `serverSelectionTimeoutMS: 2000` (customizable via `MONGO_CONNECT_TIMEOUT_MS`) in `server/src/config/db.js`, allowing immediate fast fallback to in-memory persistence in ~2 seconds.
+  - Enhanced HTTP health endpoint `/health` in `server/src/server.js` to report `instanceId`, `port`, `redis: { connected }`, and `database: { connected }`, enabling health checks to explicitly differentiate between a healthy HTTP server, Redis connection, and database connectivity.
+  - Implemented graceful shutdown handlers for `SIGTERM` and `SIGINT` in `server/src/server.js`, properly closing HTTP, Socket.IO, Redis publisher/subscriber, and MongoDB connections via `stopServer()`, `closeRedis()`, and `closeDB()`.
+  - Authored comprehensive live Redis integration test suite `server/test/redisIntegration.test.js` verifying dual-client TCP connection, message delivery on `proxispeak:lifecycle`, position updates on `proxispeak:positions`, remote user state updates in `userManager`, server-ID deduplication (ignoring self-published messages), connection timeouts, clean resource teardown, and live cross-instance Socket.IO synchronization between port 5000 and port 5001.
+  - Added dedicated test scripts (`test:unit`, `test:integration`) to `server/package.json`.
+  - Validated full test suite: **81 tests passed, 0 failed, 0 skipped** (73 unit tests across 5 suites + 8 live Redis integration tests).
+- Files changed:
+  - `server/package.json`
+  - `server/src/config/db.js`
+  - `server/src/config/redis.js`
+  - `server/src/services/redisSync.js`
+  - `server/src/server.js`
+  - `server/test/redisIntegration.test.js`
+  - `scripts/dev-multi-instance.ps1`
+  - `scripts/dev-multi-instance.cmd`
+  - `docs/context/06_PROGRESS_LOG.md`
+- Problems / fixes:
+  - Discovered that PowerShell `Start-Process` attaches child processes to the terminal console session, causing Node to exit when the terminal closes; resolved via WMI process delegation.
+  - Discovered that MongoDB connection attempt defaulted to a 30-second timeout before failing, making port 5000 appear unavailable during startup; resolved by setting `serverSelectionTimeoutMS: 2000`.
+  - Fixed PowerShell 5.1 ANSI parsing issue by standardizing on ASCII status tags (`[OK]`, `[ERROR]`, `[WARN]`, `[INFO]`).
+  - Separated stdout and stderr log redirection paths in `Start-Process` / WMI execution.
 
 <!-- Copy the block above for each new day. -->
 

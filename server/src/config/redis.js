@@ -125,7 +125,7 @@ export function getRedisSubscriber() {
  * @returns {boolean}
  */
 export function isRedisConnected() {
-  return isConnected && publisher?.status === "ready" && subscriber?.status === "ready";
+  return Boolean(isConnected && publisher?.status === "ready" && subscriber?.status === "ready");
 }
 
 /**

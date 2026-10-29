@@ -9,7 +9,7 @@ import {
 /**
  * Unique server instance identifier to filter out self-published messages
  */
-export const SERVER_ID = process.env.INSTANCE_ID || `srv_${Math.random().toString(36).substring(2, 9)}_${Date.now()}`;
+export const SERVER_ID = (process.env.INSTANCE_ID && process.env.INSTANCE_ID.trim()) || `srv_${Math.random().toString(36).substring(2, 9)}_${Date.now()}`;
 
 /**
  * Redis Pub/Sub channel constants
@@ -102,8 +102,8 @@ export function processIncomingSyncMessage(channel, rawMessage, io = null) {
  */
 export async function setupRedisSync(io) {
   const subscriber = getRedisSubscriber();
-  if (!subscriber || isSubscribed) {
-    return;
+  if (!subscriber || !isRedisConnected() || isSubscribed) {
+    return false;
   }
 
   try {
@@ -114,8 +114,10 @@ export async function setupRedisSync(io) {
     subscriber.on("message", (channel, message) => {
       processIncomingSyncMessage(channel, message, io);
     });
+    return true;
   } catch (err) {
     console.warn(`[RedisSync] Could not subscribe to channels (${err.message}). Cross-instance sync paused.`);
+    return false;
   }
 }
 
