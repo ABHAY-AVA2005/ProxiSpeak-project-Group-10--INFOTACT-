@@ -67,17 +67,53 @@ function Test-TcpPort {
 }
 
 # ---------------------------------------------------------------------------
+# Helper: Verify Redis responds to PING command with PONG
+# ---------------------------------------------------------------------------
+function Test-RedisPing {
+    param (
+        [string]$HostName = "127.0.0.1",
+        [int]$Port = 6379,
+        [int]$TimeoutMs = 1500
+    )
+    $client = $null
+    try {
+        $client = New-Object System.Net.Sockets.TcpClient
+        $iar = $client.BeginConnect($HostName, $Port, $null, $null)
+        $wh = $iar.AsyncWaitHandle
+        if (-not $wh.WaitOne($TimeoutMs, $false)) {
+            return $false
+        }
+        $client.EndConnect($iar)
+        $stream = $client.GetStream()
+        $stream.ReadTimeout = $TimeoutMs
+        $stream.WriteTimeout = $TimeoutMs
+        $writer = New-Object System.IO.StreamWriter($stream, [System.Text.Encoding]::ASCII)
+        $reader = New-Object System.IO.StreamReader($stream, [System.Text.Encoding]::ASCII)
+        $writer.WriteLine("PING")
+        $writer.Flush()
+        $resp = $reader.ReadLine()
+        return ($resp -like "*PONG*")
+    } catch {
+        return $false
+    } finally {
+        if ($client) {
+            $client.Close()
+        }
+    }
+}
+
+# ---------------------------------------------------------------------------
 # Helper: Ensure Redis is available or start it via Docker Compose
 # ---------------------------------------------------------------------------
 function Ensure-Redis {
     Write-Host "[Redis] Checking Redis availability on $REDIS_HOST port $REDIS_PORT..." -ForegroundColor Cyan
 
-    if (Test-TcpPort -HostName $REDIS_HOST -Port $REDIS_PORT -TimeoutMs 1500) {
+    if (Test-RedisPing -HostName $REDIS_HOST -Port $REDIS_PORT -TimeoutMs 1500) {
         Write-Host "[Redis] Redis is already running and reachable on port $REDIS_PORT." -ForegroundColor Green
         return $true
     }
 
-    Write-Host "[Redis] Redis is not responding on port $REDIS_PORT. Checking Docker..." -ForegroundColor Yellow
+    Write-Host "[Redis] Redis is not responding to PING on port $REDIS_PORT. Checking Docker..." -ForegroundColor Yellow
 
     $dockerCmd = Get-Command "docker" -ErrorAction SilentlyContinue
     if (-not $dockerCmd) {
@@ -97,12 +133,12 @@ function Ensure-Redis {
     Write-Host "[Redis] Starting Redis container via existing Docker Compose..." -ForegroundColor Cyan
     & docker compose -f $DockerComposeFile up -d redis 2>&1 | Out-Null
 
-    # Wait for Redis to become available (up to 12s)
+    # Wait for Redis to become available and respond to PING (up to 12s)
     $attempts = 0
     while ($attempts -lt 12) {
         Start-Sleep -Seconds 1
         $attempts++
-        if (Test-TcpPort -HostName $REDIS_HOST -Port $REDIS_PORT -TimeoutMs 1000) {
+        if (Test-RedisPing -HostName $REDIS_HOST -Port $REDIS_PORT -TimeoutMs 1000) {
             Write-Host "[Redis] Redis container started and ready on port $REDIS_PORT!" -ForegroundColor Green
             return $true
         }
@@ -236,8 +272,9 @@ function Start-Instances {
 
         Write-Host "[Start] Launching $id on port $port..." -ForegroundColor Cyan
 
+        $redisUrl = "redis://$REDIS_HOST`:$REDIS_PORT"
         # cmd.exe wrapper with explicit output redirection, detached via WMI
-        $cmdLine = "cmd.exe /c `"set PORT=$port& set INSTANCE_ID=$id& set MONGO_CONNECT_TIMEOUT_MS=2000& node src/server.js > `"`"$logFile`"`" 2> `"`"$errFile`"`"`""
+        $cmdLine = "cmd.exe /c `"set PORT=$port& set INSTANCE_ID=$id& set MONGO_CONNECT_TIMEOUT_MS=2000& set REDIS_URL=$redisUrl& node src/server.js > `"`"$logFile`"`" 2> `"`"$errFile`"`"`""
         $res = $wmiProcess.Create($cmdLine, $ServerDir, $null)
 
         if ($res.ReturnValue -ne 0) {
@@ -335,7 +372,7 @@ function Get-InstancesStatus {
     Write-Host "`n=== ProxiSpeak System Status ===" -ForegroundColor Cyan
 
     # Redis Check
-    $redisOk = Test-TcpPort -HostName $REDIS_HOST -Port $REDIS_PORT -TimeoutMs 1000
+    $redisOk = Test-RedisPing -HostName $REDIS_HOST -Port $REDIS_PORT -TimeoutMs 1000
     if ($redisOk) {
         Write-Host "Redis Service:      ONLINE (Port $REDIS_PORT)" -ForegroundColor Green
     } else {
@@ -405,7 +442,7 @@ function Run-Tests {
 
     # 1. Pre-check Redis
     Write-Host "`n[1/3] Checking Redis Availability..." -ForegroundColor Cyan
-    $redisOk = Test-TcpPort -HostName $REDIS_HOST -Port $REDIS_PORT -TimeoutMs 1500
+    $redisOk = Test-RedisPing -HostName $REDIS_HOST -Port $REDIS_PORT -TimeoutMs 1500
     if (-not $redisOk) {
         Write-Host "[ERROR] Redis is offline on port $REDIS_PORT." -ForegroundColor Red
         Write-Host "        Live integration tests require Redis. Run: docker compose up -d redis" -ForegroundColor Yellow

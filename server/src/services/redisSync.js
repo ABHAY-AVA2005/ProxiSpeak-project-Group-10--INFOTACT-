@@ -20,6 +20,47 @@ export const REDIS_CHANNELS = Object.freeze({
 });
 
 let isSubscribed = false;
+let currentMessageListener = null;
+
+/**
+ * Checks whether Redis Pub/Sub channels are currently subscribed
+ * @returns {boolean}
+ */
+export function isRedisSyncSubscribed() {
+  return isSubscribed;
+}
+
+/**
+ * Set up Redis Pub/Sub subscription and message forwarding to local Socket.IO instance
+ * @param {import("socket.io").Server} io - Socket.io server instance
+ */
+export async function setupRedisSync(io) {
+  const subscriber = getRedisSubscriber();
+  if (!subscriber || !isRedisConnected()) {
+    return false;
+  }
+  if (isSubscribed) {
+    return true;
+  }
+
+  try {
+    await subscriber.subscribe(REDIS_CHANNELS.POSITIONS, REDIS_CHANNELS.LIFECYCLE);
+    isSubscribed = true;
+    console.log(`[RedisSync] Subscribed to ${REDIS_CHANNELS.POSITIONS} and ${REDIS_CHANNELS.LIFECYCLE} (Server ID: ${SERVER_ID})`);
+
+    if (currentMessageListener) {
+      subscriber.off("message", currentMessageListener);
+    }
+    currentMessageListener = (channel, message) => {
+      processIncomingSyncMessage(channel, message, io);
+    };
+    subscriber.on("message", currentMessageListener);
+    return true;
+  } catch (err) {
+    console.warn(`[RedisSync] Could not subscribe to channels (${err.message}). Cross-instance sync paused.`);
+    return false;
+  }
+}
 
 /**
  * Dispatches an incoming Redis Pub/Sub message to local Socket.IO clients and remote user state.
@@ -96,30 +137,6 @@ export function processIncomingSyncMessage(channel, rawMessage, io = null) {
   return null;
 }
 
-/**
- * Set up Redis Pub/Sub subscription and message forwarding to local Socket.IO instance
- * @param {import("socket.io").Server} io - Socket.io server instance
- */
-export async function setupRedisSync(io) {
-  const subscriber = getRedisSubscriber();
-  if (!subscriber || !isRedisConnected() || isSubscribed) {
-    return false;
-  }
-
-  try {
-    await subscriber.subscribe(REDIS_CHANNELS.POSITIONS, REDIS_CHANNELS.LIFECYCLE);
-    isSubscribed = true;
-    console.log(`[RedisSync] Subscribed to ${REDIS_CHANNELS.POSITIONS} and ${REDIS_CHANNELS.LIFECYCLE} (Server ID: ${SERVER_ID})`);
-
-    subscriber.on("message", (channel, message) => {
-      processIncomingSyncMessage(channel, message, io);
-    });
-    return true;
-  } catch (err) {
-    console.warn(`[RedisSync] Could not subscribe to channels (${err.message}). Cross-instance sync paused.`);
-    return false;
-  }
-}
 
 /**
  * Publishes user position update to Redis
@@ -201,4 +218,9 @@ export async function publishUserLeave(socketId) {
  */
 export function resetRedisSyncState() {
   isSubscribed = false;
+  const subscriber = getRedisSubscriber();
+  if (subscriber && currentMessageListener) {
+    try { subscriber.off("message", currentMessageListener); } catch (_) {}
+  }
+  currentMessageListener = null;
 }

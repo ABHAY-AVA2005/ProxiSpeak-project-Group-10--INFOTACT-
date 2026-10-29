@@ -12,7 +12,7 @@ let isInitialized = false;
  * Default Redis configuration
  */
 export const REDIS_CONFIG = Object.freeze({
-  URL: process.env.REDIS_URL || "redis://127.0.0.1:6379",
+  URL: (process.env.REDIS_URL && process.env.REDIS_URL.trim()) || "redis://127.0.0.1:6379",
   ENABLED: process.env.REDIS_ENABLED !== "false",
   CONNECT_TIMEOUT_MS: 3000,
   MAX_RECONNECT_RETRIES: 3
@@ -26,17 +26,23 @@ export const REDIS_CONFIG = Object.freeze({
  * @returns {Promise<{ publisher: Redis|null, subscriber: Redis|null, isConnected: boolean }>}
  */
 export async function initRedis(customOptions = {}) {
-  if (isInitialized && publisher && subscriber) {
-    return { publisher, subscriber, isConnected };
+  if (isInitialized && publisher && subscriber && isRedisConnected()) {
+    return { publisher, subscriber, isConnected: true };
   }
 
   const enabled = customOptions.enabled ?? REDIS_CONFIG.ENABLED;
-  const url = customOptions.url ?? REDIS_CONFIG.URL;
+  const url = (customOptions.url && String(customOptions.url).trim()) || REDIS_CONFIG.URL;
 
   if (!enabled) {
     console.log("[Redis] Redis scaling is disabled via REDIS_ENABLED=false");
     isInitialized = true;
+    isConnected = false;
     return { publisher: null, subscriber: null, isConnected: false };
+  }
+
+  // If previous instances exist but are not connected, clean them up first
+  if (publisher || subscriber) {
+    await closeRedis();
   }
 
   const clientOptions = {
@@ -53,36 +59,51 @@ export async function initRedis(customOptions = {}) {
     ...customOptions
   };
 
+  let lastPublisherError = null;
+  let lastSubscriberError = null;
+
   try {
     publisher = new Redis(url, clientOptions);
     subscriber = new Redis(url, clientOptions);
 
-    // Attach defensive error handlers to prevent unhandled error event exceptions
+    // Attach defensive error handlers to capture diagnostic error details
     publisher.on("error", (err) => {
-      isConnected = false;
-      // Only log once or on non-connection errors to avoid log spam
-      if (err.code !== "ECONNREFUSED" && err.code !== "ETIMEDOUT") {
-        console.warn("[Redis Publisher Error]", err.message);
-      }
+      lastPublisherError = err;
+      isConnected = isRedisConnected();
+      const codeMsg = err.code ? `[${err.code}] ` : "";
+      console.warn(`[Redis Publisher Error] ${codeMsg}${err.message}`);
     });
 
     subscriber.on("error", (err) => {
-      isConnected = false;
-      if (err.code !== "ECONNREFUSED" && err.code !== "ETIMEDOUT") {
-        console.warn("[Redis Subscriber Error]", err.message);
-      }
+      lastSubscriberError = err;
+      isConnected = isRedisConnected();
+      const codeMsg = err.code ? `[${err.code}] ` : "";
+      console.warn(`[Redis Subscriber Error] ${codeMsg}${err.message}`);
     });
 
     publisher.on("ready", () => {
-      isConnected = true;
+      isConnected = isRedisConnected();
       console.log("[Redis] Publisher connected and ready");
     });
 
     subscriber.on("ready", () => {
+      isConnected = isRedisConnected();
       console.log("[Redis] Subscriber connected and ready");
     });
 
     publisher.on("close", () => {
+      isConnected = false;
+    });
+
+    subscriber.on("close", () => {
+      isConnected = false;
+    });
+
+    publisher.on("end", () => {
+      isConnected = false;
+    });
+
+    subscriber.on("end", () => {
       isConnected = false;
     });
 
@@ -92,16 +113,32 @@ export async function initRedis(customOptions = {}) {
       subscriber.connect()
     ]);
 
-    isConnected = true;
+    isConnected = isRedisConnected();
     isInitialized = true;
     console.log(`[Redis] Connected successfully to ${url}`);
+    return { publisher, subscriber, isConnected: true };
   } catch (err) {
+    // Preserve exact diagnostic details from underlying network errors
+    const underlying = lastPublisherError || lastSubscriberError;
+    const detail = underlying
+      ? `${underlying.code ? underlying.code + ": " : ""}${underlying.message}`
+      : err.message;
+
     isConnected = false;
     isInitialized = true;
-    console.warn(`[Redis] Connection to ${url} unavailable (${err.message}). Operating in standalone single-instance mode.`);
-  }
+    console.warn(`[Redis] Connection to ${url} unavailable (${detail}). Operating in standalone single-instance mode.`);
 
-  return { publisher, subscriber, isConnected };
+    // Safely tear down failed clients to prevent unhandled background retry attempts
+    try {
+      if (publisher) { publisher.disconnect(); }
+      if (subscriber) { subscriber.disconnect(); }
+    } catch (_) {}
+
+    publisher = null;
+    subscriber = null;
+
+    return { publisher: null, subscriber: null, isConnected: false };
+  }
 }
 
 /**
@@ -125,7 +162,7 @@ export function getRedisSubscriber() {
  * @returns {boolean}
  */
 export function isRedisConnected() {
-  return Boolean(isConnected && publisher?.status === "ready" && subscriber?.status === "ready");
+  return Boolean(publisher && subscriber && publisher.status === "ready" && subscriber.status === "ready");
 }
 
 /**
@@ -135,24 +172,27 @@ export async function closeRedis() {
   const closePromises = [];
 
   if (publisher) {
+    const pub = publisher;
     closePromises.push(
-      publisher.quit().catch(() => {
-        try { publisher.disconnect(); } catch (_) {}
+      pub.quit().catch(() => {
+        try { pub.disconnect(); } catch (_) {}
       })
     );
   }
 
   if (subscriber) {
+    const sub = subscriber;
     closePromises.push(
-      subscriber.quit().catch(() => {
-        try { subscriber.disconnect(); } catch (_) {}
+      sub.quit().catch(() => {
+        try { sub.disconnect(); } catch (_) {}
       })
     );
   }
 
-  await Promise.all(closePromises);
   publisher = null;
   subscriber = null;
   isConnected = false;
   isInitialized = false;
+
+  await Promise.allSettled(closePromises);
 }

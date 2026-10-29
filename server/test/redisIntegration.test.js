@@ -17,8 +17,18 @@ import assert from "node:assert/strict";
 import Redis from "ioredis";
 import { io as ioClient } from "socket.io-client";
 import {
+  initRedis,
+  closeRedis,
+  isRedisConnected,
+  getRedisPublisher,
+  getRedisSubscriber
+} from "../src/config/redis.js";
+import {
   REDIS_CHANNELS,
-  processIncomingSyncMessage
+  processIncomingSyncMessage,
+  setupRedisSync,
+  isRedisSyncSubscribed,
+  resetRedisSyncState
 } from "../src/services/redisSync.js";
 import {
   getRemoteUser,
@@ -374,6 +384,58 @@ test("Live Redis - Times out cleanly if an invalid port/host is targeted", async
   );
 
   try { deadClient.disconnect(); } catch (_) {}
+});
+
+test("Live Redis - initRedis connects successfully and reports readiness", async () => {
+  try {
+    const res = await initRedis({ url: REDIS_URL });
+    assert.equal(res.isConnected, true);
+    assert.ok(res.publisher);
+    assert.ok(res.subscriber);
+    assert.equal(isRedisConnected(), true);
+    assert.equal(getRedisPublisher()?.status, "ready");
+    assert.equal(getRedisSubscriber()?.status, "ready");
+  } finally {
+    await closeRedis();
+    assert.equal(isRedisConnected(), false);
+    assert.equal(getRedisPublisher(), null);
+    assert.equal(getRedisSubscriber(), null);
+  }
+});
+
+test("Live Redis - initRedis gracefully handles unreachable host without crashing", async () => {
+  try {
+    const res = await initRedis({
+      url: "redis://127.0.0.1:63799",
+      connectTimeout: 400
+    });
+    assert.equal(res.isConnected, false);
+    assert.equal(res.publisher, null);
+    assert.equal(res.subscriber, null);
+    assert.equal(isRedisConnected(), false);
+  } finally {
+    await closeRedis();
+  }
+});
+
+test("Live Redis - setupRedisSync subscribes subscriber to required channels", async () => {
+  try {
+    await initRedis({ url: REDIS_URL });
+    assert.equal(isRedisConnected(), true);
+
+    const dummyIO = { emit: () => {} };
+    const subscribed = await setupRedisSync(dummyIO);
+    assert.equal(subscribed, true);
+    assert.equal(isRedisSyncSubscribed(), true);
+
+    // Calling again returns true idempotently without duplicating listeners
+    const subscribedAgain = await setupRedisSync(dummyIO);
+    assert.equal(subscribedAgain, true);
+  } finally {
+    resetRedisSyncState();
+    await closeRedis();
+    assert.equal(isRedisConnected(), false);
+  }
 });
 
 test("Live Redis - End-to-end Socket.IO cross-instance check (if ports 5000 and 5001 active)", async (t) => {

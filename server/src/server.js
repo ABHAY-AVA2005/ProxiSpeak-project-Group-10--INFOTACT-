@@ -77,7 +77,7 @@ try {
 }
 
 // Register socket handlers (connect, disconnect, join, users:list)
-setupSocketHandlers(io);
+await setupSocketHandlers(io);
 
 // Start server (only after MongoDB and Redis initialization have been attempted)
 server.listen(PORT, () => {

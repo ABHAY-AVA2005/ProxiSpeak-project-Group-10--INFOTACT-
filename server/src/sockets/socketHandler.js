@@ -46,8 +46,6 @@ export function resetProximityQueues() {
  * @param {import("socket.io").Server} io - Socket.io server instance
  */
 export function setupSocketHandlers(io) {
-  // Initialize Redis cross-instance synchronization (if enabled)
-  setupRedisSync(io);
 
   /**
    * Helper: checks if two users are within earshot distance (default 100px)
@@ -413,5 +411,11 @@ export function setupSocketHandlers(io) {
         }
       }
     });
+  });
+
+  // Initialize Redis cross-instance synchronization (if enabled)
+  return setupRedisSync(io).catch((err) => {
+    console.warn(`[RedisSync] Setup failed (${err.message}). Cross-instance sync paused.`);
+    return false;
   });
 }
