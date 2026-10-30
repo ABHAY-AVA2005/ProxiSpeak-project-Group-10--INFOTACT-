@@ -1,7 +1,12 @@
 import { useEffect, useRef } from "react";
 import { io } from "socket.io-client";
 
-const SERVER_URL = import.meta.env.VITE_SERVER_URL || "http://localhost:5000";
+const serverPort = new URLSearchParams(window.location.search).get("server");
+
+const SERVER_URL =
+  serverPort === "5001"
+    ? "http://localhost:5001"
+    : import.meta.env.VITE_SERVER_URL || "http://localhost:5000";
 
 // ─── World constants (match server WORLD_BOUNDS) ─────────────────────────────
 const WORLD_W = 1000;
@@ -265,7 +270,7 @@ function VirtualOffice({ username = "You", earshotRadius = 100, localStream = nu
           audioNodes[peerId].source.disconnect();
           audioNodes[peerId].gainNode.disconnect();
           if (audioNodes[peerId].pannerNode) audioNodes[peerId].pannerNode.disconnect();
-        } catch (_) {}
+        } catch (_) { }
         delete audioNodes[peerId];
       }
       const audioEl = document.getElementById(`audio-${peerId}`);
