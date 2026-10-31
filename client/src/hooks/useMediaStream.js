@@ -1,33 +1,48 @@
 import { useState, useEffect, useCallback } from 'react';
 
 export function useMediaStream() {
-    const [localStream, setLocalStream] = useState(null);
-    const [isMuted, setIsMuted] = useState(false);
-    const [permissionGranted, setPermissionGranted] = useState(false);
-    const [error, setError] = useState(null);
+  const [localStream, setLocalStream] = useState(null);
+  const [isMuted, setIsMuted] = useState(false);
+  const [permissionGranted, setPermissionGranted] = useState(false);
+  const [error, setError] = useState(null);
 
-    const startAudio = useCallback(async () => {
+  const startAudio = useCallback(async () => {
+    if (!navigator?.mediaDevices?.getUserMedia) {
+      const message = 'This browser does not support microphone access.';
+      setError(message);
+      setPermissionGranted(false);
+      return null;
+    }
+
     try {
-        const stream = await navigator.mediaDevices.getUserMedia({
+      if (localStream) {
+        localStream.getTracks().forEach((track) => track.stop());
+      }
+
+      const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true,
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
         },
         video: false,
-    });
+      });
 
       setLocalStream(stream);
       setPermissionGranted(true);
+      setIsMuted(false);
       setError(null);
       return stream;
     } catch (err) {
       console.error('Failed to access microphone:', err);
-      setError(err.name || 'Microphone access denied');
+      const message = err && err.name === 'NotAllowedError'
+        ? 'Microphone access was blocked. Please allow access and try again.'
+        : 'Unable to enable microphone. Please check browser permissions and try again.';
+      setError(message);
       setPermissionGranted(false);
       return null;
     }
-  }, []);
+  }, [localStream]);
 
   const toggleMute = useCallback(() => {
     if (!localStream) return;
@@ -38,7 +53,6 @@ export function useMediaStream() {
     }
   }, [localStream]);
 
-  // Cleanup tracks on unmount
   useEffect(() => {
     return () => {
       if (localStream) {

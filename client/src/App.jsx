@@ -8,7 +8,7 @@ function App() {
   const [username, setUsername] = useState(() => {
     return sessionStorage.getItem("proxispeak_username") || null;
   });
-  const { localStream, isMuted, permissionGranted, startAudio, toggleMute } = useMediaStream();
+  const { localStream, isMuted, permissionGranted, error, startAudio, toggleMute } = useMediaStream();
 
   const handleJoin = (name) => {
     sessionStorage.setItem("proxispeak_username", name);
@@ -35,6 +35,7 @@ function App() {
         toggleMute={toggleMute}
         permissionGranted={permissionGranted}
         startAudio={startAudio}
+        error={error}
       />
       <p style={{ color: "#6b7280", fontSize: "12px", marginTop: "12px" }}>
         Move with <kbd style={{ background: "#374151", color: "#e5e7eb", padding: "1px 5px", borderRadius: "3px" }}>WASD</kbd> or Arrow keys · Click canvas to move there
