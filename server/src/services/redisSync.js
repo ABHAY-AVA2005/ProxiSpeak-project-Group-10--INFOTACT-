@@ -101,6 +101,7 @@ export function processIncomingSyncMessage(channel, rawMessage, io = null) {
         io.emit("user:moved", {
           socketId: data.socketId,
           id: data.socketId,
+          username: data.username || existingRemote?.username,
           x: data.x,
           y: data.y
         });

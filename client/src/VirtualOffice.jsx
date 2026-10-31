@@ -116,8 +116,21 @@ function VirtualOffice({ username = "You", earshotRadius = 100, localStream = nu
       const id = data.socketId || data.id;
       if (!id || id === socket.id) return;
       const p = remotePlayers.current[id];
-      if (p) { p.targetX = data.x; p.targetY = data.y; }
-      else remotePlayers.current[id] = { x: data.x, y: data.y, targetX: data.x, targetY: data.y, username: "" };
+      if (p) {
+        p.targetX = data.x;
+        p.targetY = data.y;
+        if (data.username && (!p.username || p.username === "?")) {
+          p.username = data.username;
+        }
+      } else {
+        remotePlayers.current[id] = {
+          x: data.x,
+          y: data.y,
+          targetX: data.x,
+          targetY: data.y,
+          username: data.username || ""
+        };
+      }
     });
 
     socket.on("user:left", (data) => {
@@ -241,9 +254,12 @@ function VirtualOffice({ username = "You", earshotRadius = 100, localStream = nu
       });
     }
 
-    socket.on("nearby:enter", async ({ socketId, id, shouldInitiateOffer }) => {
+    socket.on("nearby:enter", async ({ socketId, id, username, shouldInitiateOffer }) => {
       const peerId = socketId || id;
       if (!peerId) return;
+      if (username && remotePlayers.current[peerId] && (!remotePlayers.current[peerId].username || remotePlayers.current[peerId].username === "?")) {
+        remotePlayers.current[peerId].username = username;
+      }
       console.log(`[ProxiSpeak] nearby:enter from ${peerId}, initiateOffer=${shouldInitiateOffer}`);
       const pc = getOrCreatePC(peerId);
 
@@ -511,16 +527,17 @@ function VirtualOffice({ username = "You", earshotRadius = 100, localStream = nu
         }
 
         // Initial letter inside avatar
+        const displayName = rp.username && rp.username.trim() ? rp.username : "?";
         ctx.fillStyle = "#fff";
         ctx.font = `bold 13px Inter, Arial`;
         ctx.textAlign = "center";
-        ctx.fillText((rp.username || "?")[0].toUpperCase(), rp.x, rp.y + 5);
+        ctx.fillText(displayName[0].toUpperCase(), rp.x, rp.y + 5);
 
         // Username label above avatar
         ctx.fillStyle = inEarshot ? "#e5e7eb" : "#6b7280";
         ctx.font = "11px Inter, Arial";
         ctx.textAlign = "center";
-        ctx.fillText(rp.username || id.slice(0, 6), rp.x, rp.y - AVATAR_RADIUS - 6);
+        ctx.fillText(displayName !== "?" ? displayName : id.slice(0, 6), rp.x, rp.y - AVATAR_RADIUS - 6);
 
         // Earshot distance badge
         if (inEarshot) {

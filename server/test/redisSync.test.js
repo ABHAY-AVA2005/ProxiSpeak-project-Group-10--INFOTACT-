@@ -129,6 +129,7 @@ test("RedisSync - Synchronizes remote user lifecycle (join, move, leave)", () =>
   assert.equal(io.emitted.length, 2);
   assert.equal(io.emitted[1].event, "user:moved");
   assert.equal(io.emitted[1].data.x, 160);
+  assert.equal(io.emitted[1].data.username, "Bob_Remote");
 
   // 3. Remote user leaves
   const leaveMsg = JSON.stringify({

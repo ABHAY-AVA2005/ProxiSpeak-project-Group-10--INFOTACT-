@@ -2,9 +2,11 @@ import {
   addUser,
   removeUser,
   getAllUsers,
+  getAllActiveUsers,
   updateUserPosition,
   getUser,
   getUserCount,
+  getActiveUserCount,
   getRemoteUser,
   isRemoteUser,
   isLocalUser
@@ -175,8 +177,8 @@ export function setupSocketHandlers(io) {
       return Promise.resolve();
     }
 
-    // Avoid unnecessary queries if user is alone in the room
-    if (getUserCount() <= 1) {
+    // Avoid unnecessary queries if user is alone in the room across all instances
+    if (getActiveUserCount() <= 1) {
       lastEvaluatedPositions.set(socketId, { x: user.x, y: user.y });
       return Promise.resolve();
     }
@@ -240,7 +242,7 @@ export function setupSocketHandlers(io) {
       console.log(`[User Joined] ${newUser.username} (${newUser.socketId}) at [${newUser.x}, ${newUser.y}]`);
 
       // 1. Send the current user snapshot to the joining user
-      socket.emit("users:list", getAllUsers());
+      socket.emit("users:list", getAllActiveUsers());
 
       // 2. Broadcast to all OTHER users that someone joined
       socket.broadcast.emit("user:joined", newUser);
@@ -270,6 +272,7 @@ export function setupSocketHandlers(io) {
       socket.broadcast.emit("user:moved", {
         socketId: socket.id,
         id: socket.id,
+        username: updatedUser.username,
         x: updatedUser.x,
         y: updatedUser.y
       });
@@ -386,7 +389,7 @@ export function setupSocketHandlers(io) {
 
       if (removedUser) {
         // Broadcast user departure so all clients remove the avatar immediately
-        socket.broadcast.emit("user:left", { socketId: socket.id });
+        socket.broadcast.emit("user:left", { socketId: socket.id, id: socket.id });
       }
 
       // Publish departure to Redis for cross-instance cleanup

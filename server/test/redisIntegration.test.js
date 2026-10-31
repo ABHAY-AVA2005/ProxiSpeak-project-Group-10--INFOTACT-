@@ -476,16 +476,24 @@ test("Live Redis - End-to-end Socket.IO cross-instance check (if ports 5000 and 
     ]);
 
     const bReceivedEvents = [];
+    const aReceivedEvents = [];
+    let bUsersList = null;
+
+    socketB.on("users:list", (list) => { bUsersList = list; });
     socketB.on("user:joined", (user) => bReceivedEvents.push({ type: "join", user }));
     socketB.on("user:moved", (user) => bReceivedEvents.push({ type: "move", user }));
+    socketB.on("user:left", (user) => bReceivedEvents.push({ type: "leave", user }));
 
-    // Client A joins on Instance 1
+    socketA.on("user:joined", (user) => aReceivedEvents.push({ type: "join", user }));
+    socketA.on("user:moved", (user) => aReceivedEvents.push({ type: "move", user }));
+
+    // 1. Client A joins on Instance 1
     socketA.emit("join", { username: "Alice_Inst1", x: 250, y: 350 });
 
-    // Wait for event to relay over Redis to Instance 2 -> Client B
+    // Wait for event to relay over Redis to Instance 2
     await new Promise((r) => setTimeout(r, 400));
 
-    // Client A moves on Instance 1
+    // 2. Client A moves on Instance 1
     socketA.emit("move", { x: 270, y: 370 });
 
     await new Promise((r) => setTimeout(r, 400));
@@ -495,7 +503,33 @@ test("Live Redis - End-to-end Socket.IO cross-instance check (if ports 5000 and 
     const moveEvt = bReceivedEvents.find((e) => e.type === "move" && e.user.x === 270);
 
     assert.ok(joinEvt, "Client on Instance 2 must receive user:joined for user on Instance 1 via Redis");
+    assert.equal(joinEvt.user.username, "Alice_Inst1", "user:joined must have correct username");
     assert.ok(moveEvt, "Client on Instance 2 must receive user:moved for user on Instance 1 via Redis");
+    assert.equal(moveEvt.user.username, "Alice_Inst1", "user:moved must include username");
+
+    // 3. Client B joins on Instance 2 - must receive Alice in users:list snapshot!
+    socketB.emit("join", { username: "Bob_Inst2", x: 260, y: 360 });
+
+    await new Promise((r) => setTimeout(r, 400));
+
+    assert.ok(bUsersList, "Client B must receive users:list on join");
+    const aliceInList = (Array.isArray(bUsersList) ? bUsersList : Object.values(bUsersList))
+      .find((u) => u.socketId === socketA.id || u.username === "Alice_Inst1");
+    assert.ok(aliceInList, "Client B on Instance 2 must receive remote player Alice in users:list");
+    assert.equal(aliceInList.username, "Alice_Inst1", "Alice's username in users:list must be preserved");
+
+    // 4. Client A on Instance 1 must receive user:joined for Bob
+    const bobJoinEvt = aReceivedEvents.find((e) => e.type === "join" && e.user.username === "Bob_Inst2");
+    assert.ok(bobJoinEvt, "Client A on Instance 1 must receive user:joined for Bob on Instance 2");
+    assert.equal(bobJoinEvt.user.username, "Bob_Inst2");
+
+    // 5. Client B moves on Instance 2 - Client A must receive user:moved with Bob's username
+    socketB.emit("move", { x: 290, y: 390 });
+    await new Promise((r) => setTimeout(r, 400));
+
+    const bobMoveEvt = aReceivedEvents.find((e) => e.type === "move" && e.user.x === 290);
+    assert.ok(bobMoveEvt, "Client A on Instance 1 must receive user:moved for Bob on Instance 2");
+    assert.equal(bobMoveEvt.user.username, "Bob_Inst2", "user:moved for Bob must include username");
   } finally {
     socketA.disconnect();
     socketB.disconnect();

@@ -72,10 +72,12 @@ export function useSocket(username) {
       if (!id || id === s.id) return;
       setUsers((prev) => {
         const current = prev.get(id);
-        if (!current) return prev;
+        const username = coords.username || (current ? current.username : `User_${id.slice(0, 4)}`);
         const next = new Map(prev);
         next.set(id, {
-          ...current,
+          ...(current || {}),
+          socketId: id,
+          username,
           x: coords.x,
           y: coords.y,
         });

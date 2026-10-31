@@ -61,6 +61,7 @@ export function addUser(socketId, username, x, y) {
 
   const user = {
     socketId,
+    id: socketId,
     username: cleanName,
     x: validX,
     y: validY,
@@ -124,6 +125,14 @@ export function getAllUsers() {
  */
 export function getUserCount() {
   return users.size;
+}
+
+/**
+ * Get count of all active users across all server instances (local + remote)
+ * @returns {number}
+ */
+export function getActiveUserCount() {
+  return users.size + remoteUsers.size;
 }
 
 // Store for remote users connected to other Node.js server instances
