@@ -3,8 +3,10 @@ import {
   addRemoteUser,
   updateRemoteUserPosition,
   removeRemoteUser,
-  getRemoteUser
+  getRemoteUser,
+  isLocalUser
 } from "./userManager.js";
+import { userNearbyMap } from "./persistenceManager.js";
 
 /**
  * Unique server instance identifier to filter out self-published messages
@@ -16,7 +18,8 @@ export const SERVER_ID = (process.env.INSTANCE_ID && process.env.INSTANCE_ID.tri
  */
 export const REDIS_CHANNELS = Object.freeze({
   POSITIONS: "proxispeak:positions",
-  LIFECYCLE: "proxispeak:lifecycle"
+  LIFECYCLE: "proxispeak:lifecycle",
+  SIGNALING: "proxispeak:signaling"
 });
 
 let isSubscribed = false;
@@ -44,9 +47,9 @@ export async function setupRedisSync(io) {
   }
 
   try {
-    await subscriber.subscribe(REDIS_CHANNELS.POSITIONS, REDIS_CHANNELS.LIFECYCLE);
+    await subscriber.subscribe(REDIS_CHANNELS.POSITIONS, REDIS_CHANNELS.LIFECYCLE, REDIS_CHANNELS.SIGNALING);
     isSubscribed = true;
-    console.log(`[RedisSync] Subscribed to ${REDIS_CHANNELS.POSITIONS} and ${REDIS_CHANNELS.LIFECYCLE} (Server ID: ${SERVER_ID})`);
+    console.log(`[RedisSync] Subscribed to ${REDIS_CHANNELS.POSITIONS}, ${REDIS_CHANNELS.LIFECYCLE}, and ${REDIS_CHANNELS.SIGNALING} (Server ID: ${SERVER_ID})`);
 
     if (currentMessageListener) {
       subscriber.off("message", currentMessageListener);
@@ -133,6 +136,62 @@ export function processIncomingSyncMessage(channel, rawMessage, io = null) {
       }
       return data;
     }
+  } else if (channel === REDIS_CHANNELS.SIGNALING) {
+    if (!data.targetId || !isLocalUser(data.targetId)) {
+      // Discard: target is not hosted on this server instance
+      return null;
+    }
+
+    if (data.event === "webrtc:offer") {
+      if (io) {
+        io.to(data.targetId).emit("webrtc:offer", {
+          senderId: data.senderId,
+          offer: data.offer
+        });
+      }
+      return data;
+    } else if (data.event === "webrtc:answer") {
+      if (io) {
+        io.to(data.targetId).emit("webrtc:answer", {
+          senderId: data.senderId,
+          answer: data.answer
+        });
+      }
+      return data;
+    } else if (data.event === "webrtc:ice-candidate") {
+      if (io) {
+        io.to(data.targetId).emit("webrtc:ice-candidate", {
+          senderId: data.senderId,
+          candidate: data.candidate
+        });
+      }
+      return data;
+    } else if (data.event === "proximity:enter" && data.peer) {
+      let peerSet = userNearbyMap.get(data.targetId);
+      if (!peerSet) {
+        peerSet = new Set();
+        userNearbyMap.set(data.targetId, peerSet);
+      }
+      peerSet.add(data.peer.socketId);
+
+      if (io) {
+        io.to(data.targetId).emit("nearby:enter", data.peer);
+      }
+      return data;
+    } else if (data.event === "proximity:leave" && data.peerId) {
+      const peerSet = userNearbyMap.get(data.targetId);
+      if (peerSet) {
+        peerSet.delete(data.peerId);
+      }
+
+      if (io) {
+        io.to(data.targetId).emit("nearby:leave", {
+          socketId: data.peerId,
+          id: data.peerId
+        });
+      }
+      return data;
+    }
   }
 
   return null;
@@ -211,6 +270,81 @@ export async function publishUserLeave(socketId) {
     await publisher.publish(REDIS_CHANNELS.LIFECYCLE, payload);
   } catch (err) {
     console.warn("[RedisSync] Failed to publish user leave:", err.message);
+  }
+}
+
+/**
+ * Publishes a WebRTC signaling message (offer, answer, ice-candidate) to Redis
+ * @param {object} signal - { event, targetId, senderId, offer?, answer?, candidate? }
+ */
+export async function publishWebRTCSignal(signal) {
+  if (!signal || !signal.targetId || !signal.event) return;
+  const publisher = getRedisPublisher();
+  if (!publisher || !isRedisConnected()) return;
+
+  const payload = JSON.stringify({
+    event: signal.event,
+    targetId: signal.targetId,
+    senderId: signal.senderId,
+    offer: signal.offer,
+    answer: signal.answer,
+    candidate: signal.candidate,
+    serverId: SERVER_ID,
+    timestamp: Date.now()
+  });
+
+  try {
+    await publisher.publish(REDIS_CHANNELS.SIGNALING, payload);
+  } catch (err) {
+    console.warn(`[RedisSync] Failed to publish ${signal.event}:`, err.message);
+  }
+}
+
+/**
+ * Publishes proximity enter notification for a remote peer
+ * @param {object} param0 - { targetId, peer }
+ */
+export async function publishProximityEnter({ targetId, peer }) {
+  if (!targetId || !peer) return;
+  const publisher = getRedisPublisher();
+  if (!publisher || !isRedisConnected()) return;
+
+  const payload = JSON.stringify({
+    event: "proximity:enter",
+    targetId,
+    peer,
+    serverId: SERVER_ID,
+    timestamp: Date.now()
+  });
+
+  try {
+    await publisher.publish(REDIS_CHANNELS.SIGNALING, payload);
+  } catch (err) {
+    console.warn("[RedisSync] Failed to publish proximity:enter:", err.message);
+  }
+}
+
+/**
+ * Publishes proximity leave notification for a remote peer
+ * @param {object} param0 - { targetId, peerId }
+ */
+export async function publishProximityLeave({ targetId, peerId }) {
+  if (!targetId || !peerId) return;
+  const publisher = getRedisPublisher();
+  if (!publisher || !isRedisConnected()) return;
+
+  const payload = JSON.stringify({
+    event: "proximity:leave",
+    targetId,
+    peerId,
+    serverId: SERVER_ID,
+    timestamp: Date.now()
+  });
+
+  try {
+    await publisher.publish(REDIS_CHANNELS.SIGNALING, payload);
+  } catch (err) {
+    console.warn("[RedisSync] Failed to publish proximity:leave:", err.message);
   }
 }
 

@@ -26,7 +26,10 @@ import {
   setupRedisSync,
   publishUserPosition,
   publishUserJoin,
-  publishUserLeave
+  publishUserLeave,
+  publishWebRTCSignal,
+  publishProximityEnter,
+  publishProximityLeave
 } from "../services/redisSync.js";
 
 // Per-socket state for serialized proximity processing and query coalescing
@@ -141,6 +144,18 @@ export function setupSocketHandlers(io) {
           y: user.y,
           shouldInitiateOffer: !shouldTargetInitiate
         });
+      } else if (isRemoteUser(peerId)) {
+        publishProximityEnter({
+          targetId: peerId,
+          peer: {
+            socketId: targetSocket.id,
+            id: targetSocket.id,
+            username: user.username,
+            x: user.x,
+            y: user.y,
+            shouldInitiateOffer: !shouldTargetInitiate
+          }
+        });
       }
     }
 
@@ -159,6 +174,11 @@ export function setupSocketHandlers(io) {
         io.to(peerId).emit("nearby:leave", {
           socketId: targetSocket.id,
           id: targetSocket.id
+        });
+      } else if (isRemoteUser(peerId)) {
+        publishProximityLeave({
+          targetId: peerId,
+          peerId: targetSocket.id
         });
       }
     }
@@ -313,10 +333,19 @@ export function setupSocketHandlers(io) {
       }
 
       console.log(`[WebRTC] Relay offer: ${socket.id} -> ${targetId}`);
-      io.to(targetId).emit("webrtc:offer", {
-        senderId: socket.id,
-        offer
-      });
+      if (getUser(targetId)) {
+        io.to(targetId).emit("webrtc:offer", {
+          senderId: socket.id,
+          offer
+        });
+      } else if (isRemoteUser(targetId)) {
+        publishWebRTCSignal({
+          event: "webrtc:offer",
+          targetId,
+          senderId: socket.id,
+          offer
+        });
+      }
     });
 
     socket.on("webrtc:answer", ({ targetId, answer }) => {
@@ -336,13 +365,22 @@ export function setupSocketHandlers(io) {
       }
 
       console.log(`[WebRTC] Relay answer: ${socket.id} -> ${targetId}`);
-      io.to(targetId).emit("webrtc:answer", {
-        senderId: socket.id,
-        answer
-      });
+      if (getUser(targetId)) {
+        io.to(targetId).emit("webrtc:answer", {
+          senderId: socket.id,
+          answer
+        });
+      } else if (isRemoteUser(targetId)) {
+        publishWebRTCSignal({
+          event: "webrtc:answer",
+          targetId,
+          senderId: socket.id,
+          answer
+        });
+      }
     });
 
-    socket.on("webrtc:ice-candidate", ({ targetId, candidate }) => {
+    const handleIceCandidate = ({ targetId, candidate }) => {
       if (!targetId || !candidate) return;
       const sender = getUser(socket.id);
       const recipient = getUser(targetId) || getRemoteUser(targetId);
@@ -358,27 +396,23 @@ export function setupSocketHandlers(io) {
         return;
       }
 
-      io.to(targetId).emit("webrtc:ice-candidate", {
-        senderId: socket.id,
-        candidate
-      });
-    });
+      if (getUser(targetId)) {
+        io.to(targetId).emit("webrtc:ice-candidate", {
+          senderId: socket.id,
+          candidate
+        });
+      } else if (isRemoteUser(targetId)) {
+        publishWebRTCSignal({
+          event: "webrtc:ice-candidate",
+          targetId,
+          senderId: socket.id,
+          candidate
+        });
+      }
+    };
 
-    // Also support shorter alias 'webrtc:ice'
-    socket.on("webrtc:ice", ({ targetId, candidate }) => {
-      if (!targetId || !candidate) return;
-      const sender = getUser(socket.id);
-      const recipient = getUser(targetId) || getRemoteUser(targetId);
-      if (!sender || !recipient || !areUsersWithinEarshot(sender, recipient, 100)) return;
-
-      const senderProximity = userNearbyMap.get(socket.id);
-      if (senderProximity && !senderProximity.has(targetId)) return;
-
-      io.to(targetId).emit("webrtc:ice-candidate", {
-        senderId: socket.id,
-        candidate
-      });
-    });
+    socket.on("webrtc:ice-candidate", handleIceCandidate);
+    socket.on("webrtc:ice", handleIceCandidate);
 
     /**
      * Disconnect cleanup
@@ -410,6 +444,11 @@ export function setupSocketHandlers(io) {
           io.to(peerId).emit("nearby:leave", {
             socketId: socket.id,
             id: socket.id
+          });
+        } else if (isRemoteUser(peerId)) {
+          publishProximityLeave({
+            targetId: peerId,
+            peerId: socket.id
           });
         }
       }

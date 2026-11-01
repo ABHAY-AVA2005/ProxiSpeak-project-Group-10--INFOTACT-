@@ -1037,3 +1037,32 @@ Tomorrow (Day 15): fix: performance bugs (feature freeze and rehearsal prep)
 - [ ] Mid review ready (demo video, report, benchmark charts)
 - [ ] Week 3 merged, tagged `v0.3`
 - [ ] Week 4 merged, deployed, tagged `v1.0`
+
+---
+
+## 1 November 2026 - Cross-Instance Synchronization
+
+### Completed
+- Fixed remote username synchronization across backend instances.
+- Updated users:list to include local and remote users.
+- Preserved usernames in user:moved events.
+- Fixed cross-instance active-user counting.
+- Improved remote player rendering in the frontend.
+- Updated Redis synchronization and user management.
+- Added and updated Redis integration tests.
+- Verified backend instances on ports 5000 and 5001.
+- Verified Redis and MongoDB connectivity.
+- Verified multiple users appearing in the virtual office.
+- Confirmed remote player usernames display correctly.
+- Observed successful player movement in the browser.
+
+### Verification
+- Unit tests: 73/73 passed.
+- Integration tests: 11/11 passed.
+- Frontend production build: passed.
+- Cross-instance E2E simulation: passed.
+- Browser-level bidirectional movement: pending final confirmation.
+
+### Git
+- Commit: f80b118
+- Branch: kajal-backend

@@ -479,13 +479,35 @@ test("Live Redis - End-to-end Socket.IO cross-instance check (if ports 5000 and 
     const aReceivedEvents = [];
     let bUsersList = null;
 
+    const bNearbyEnters = [];
+    const bNearbyLeaves = [];
+    const bOffers = [];
+    const bAnswers = [];
+    const bIceCandidates = [];
+
+    const aNearbyEnters = [];
+    const aNearbyLeaves = [];
+    const aOffers = [];
+    const aAnswers = [];
+    const aIceCandidates = [];
+
     socketB.on("users:list", (list) => { bUsersList = list; });
     socketB.on("user:joined", (user) => bReceivedEvents.push({ type: "join", user }));
     socketB.on("user:moved", (user) => bReceivedEvents.push({ type: "move", user }));
     socketB.on("user:left", (user) => bReceivedEvents.push({ type: "leave", user }));
+    socketB.on("nearby:enter", (data) => bNearbyEnters.push(data));
+    socketB.on("nearby:leave", (data) => bNearbyLeaves.push(data));
+    socketB.on("webrtc:offer", (data) => bOffers.push(data));
+    socketB.on("webrtc:answer", (data) => bAnswers.push(data));
+    socketB.on("webrtc:ice-candidate", (data) => bIceCandidates.push(data));
 
     socketA.on("user:joined", (user) => aReceivedEvents.push({ type: "join", user }));
     socketA.on("user:moved", (user) => aReceivedEvents.push({ type: "move", user }));
+    socketA.on("nearby:enter", (data) => aNearbyEnters.push(data));
+    socketA.on("nearby:leave", (data) => aNearbyLeaves.push(data));
+    socketA.on("webrtc:offer", (data) => aOffers.push(data));
+    socketA.on("webrtc:answer", (data) => aAnswers.push(data));
+    socketA.on("webrtc:ice-candidate", (data) => aIceCandidates.push(data));
 
     // 1. Client A joins on Instance 1
     socketA.emit("join", { username: "Alice_Inst1", x: 250, y: 350 });
@@ -523,13 +545,86 @@ test("Live Redis - End-to-end Socket.IO cross-instance check (if ports 5000 and 
     assert.ok(bobJoinEvt, "Client A on Instance 1 must receive user:joined for Bob on Instance 2");
     assert.equal(bobJoinEvt.user.username, "Bob_Inst2");
 
-    // 5. Client B moves on Instance 2 - Client A must receive user:moved with Bob's username
+    // 5. Client B moves on Instance 2 into proximity with Alice (Alice at 270, 370; Bob at 290, 390 -> dist ~28px <= 100px)
     socketB.emit("move", { x: 290, y: 390 });
     await new Promise((r) => setTimeout(r, 400));
 
     const bobMoveEvt = aReceivedEvents.find((e) => e.type === "move" && e.user.x === 290);
     assert.ok(bobMoveEvt, "Client A on Instance 1 must receive user:moved for Bob on Instance 2");
     assert.equal(bobMoveEvt.user.username, "Bob_Inst2", "user:moved for Bob must include username");
+
+    // 6. Proximity enter diff check across instances
+    const aliceNearBob = aNearbyEnters.find((e) => e.socketId === socketB.id || e.id === socketB.id);
+    const bobNearAlice = bNearbyEnters.find((e) => e.socketId === socketA.id || e.id === socketA.id);
+
+    assert.ok(aliceNearBob, "Alice on Instance 1 must receive nearby:enter for Bob on Instance 2");
+    assert.ok(bobNearAlice, "Bob on Instance 2 must receive nearby:enter for Alice on Instance 1");
+
+    // Glare prevention check: exactly one side initiates offer
+    const aliceInitiates = socketA.id < socketB.id;
+    assert.equal(aliceNearBob.shouldInitiateOffer, aliceInitiates, "Alice's shouldInitiateOffer must match lower socket ID rule");
+    assert.equal(bobNearAlice.shouldInitiateOffer, !aliceInitiates, "Bob's shouldInitiateOffer must be inverted");
+
+    // 7. WebRTC Offer & Answer exchange across instances via Redis
+    if (aliceInitiates) {
+      socketA.emit("webrtc:offer", {
+        targetId: socketB.id,
+        offer: { type: "offer", sdp: "sdp-offer-from-alice" }
+      });
+      await new Promise((r) => setTimeout(r, 400));
+
+      assert.ok(bOffers.length >= 1, "Bob on Instance 2 must receive webrtc:offer from Alice on Instance 1 via Redis");
+      assert.equal(bOffers[0].senderId, socketA.id);
+      assert.equal(bOffers[0].offer.sdp, "sdp-offer-from-alice");
+
+      socketB.emit("webrtc:answer", {
+        targetId: socketA.id,
+        answer: { type: "answer", sdp: "sdp-answer-from-bob" }
+      });
+      await new Promise((r) => setTimeout(r, 400));
+
+      assert.ok(aAnswers.length >= 1, "Alice on Instance 1 must receive webrtc:answer from Bob on Instance 2 via Redis");
+      assert.equal(aAnswers[0].senderId, socketB.id);
+      assert.equal(aAnswers[0].answer.sdp, "sdp-answer-from-bob");
+    } else {
+      socketB.emit("webrtc:offer", {
+        targetId: socketA.id,
+        offer: { type: "offer", sdp: "sdp-offer-from-bob" }
+      });
+      await new Promise((r) => setTimeout(r, 400));
+
+      assert.ok(aOffers.length >= 1, "Alice on Instance 1 must receive webrtc:offer from Bob on Instance 2 via Redis");
+      assert.equal(aOffers[0].senderId, socketB.id);
+      assert.equal(aOffers[0].offer.sdp, "sdp-offer-from-bob");
+
+      socketA.emit("webrtc:answer", {
+        targetId: socketB.id,
+        answer: { type: "answer", sdp: "sdp-answer-from-alice" }
+      });
+      await new Promise((r) => setTimeout(r, 400));
+
+      assert.ok(bAnswers.length >= 1, "Bob on Instance 2 must receive webrtc:answer from Alice on Instance 1 via Redis");
+      assert.equal(bAnswers[0].senderId, socketA.id);
+      assert.equal(bAnswers[0].answer.sdp, "sdp-answer-from-alice");
+    }
+
+    // 8. ICE Candidate exchange across instances via Redis
+    socketA.emit("webrtc:ice-candidate", {
+      targetId: socketB.id,
+      candidate: { candidate: "candidate:inst1-to-inst2", sdpMid: "0" }
+    });
+    await new Promise((r) => setTimeout(r, 400));
+
+    assert.ok(bIceCandidates.length >= 1, "Bob on Instance 2 must receive ICE candidate from Alice on Instance 1 via Redis");
+    assert.equal(bIceCandidates[0].senderId, socketA.id);
+    assert.equal(bIceCandidates[0].candidate.candidate, "candidate:inst1-to-inst2");
+
+    // 9. Bob moves out of earshot (> 100px) -> both must receive nearby:leave across instances
+    socketB.emit("move", { x: 800, y: 800 });
+    await new Promise((r) => setTimeout(r, 500));
+
+    const aliceSawBobLeave = aNearbyLeaves.find((e) => e.socketId === socketB.id || e.id === socketB.id);
+    assert.ok(aliceSawBobLeave, "Alice on Instance 1 must receive nearby:leave when Bob on Instance 2 moves away");
   } finally {
     socketA.disconnect();
     socketB.disconnect();

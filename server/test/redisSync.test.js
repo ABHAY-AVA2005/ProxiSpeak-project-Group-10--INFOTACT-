@@ -19,7 +19,10 @@ import {
   processIncomingSyncMessage,
   publishUserPosition,
   publishUserJoin,
-  publishUserLeave
+  publishUserLeave,
+  publishWebRTCSignal,
+  publishProximityEnter,
+  publishProximityLeave
 } from "../src/services/redisSync.js";
 import {
   addRemoteUser,
@@ -36,6 +39,7 @@ import {
 import {
   getNearbyUsersInMemory,
   updateProximity,
+  userNearbyMap,
   resetNearbyMap
 } from "../src/services/persistenceManager.js";
 
@@ -45,6 +49,11 @@ function createMockIO() {
   io.emit = (event, data) => {
     io.emitted.push({ event, data });
   };
+  io.to = (targetId) => ({
+    emit: (event, data) => {
+      io.emitted.push({ targetId, event, data });
+    }
+  });
   return io;
 }
 
@@ -55,6 +64,7 @@ test("RedisSync - Constants and unique server instance identifier", () => {
 
   assert.equal(REDIS_CHANNELS.POSITIONS, "proxispeak:positions");
   assert.equal(REDIS_CHANNELS.LIFECYCLE, "proxispeak:lifecycle");
+  assert.equal(REDIS_CHANNELS.SIGNALING, "proxispeak:signaling");
 });
 
 test("RedisSync - processIncomingSyncMessage discards malformed JSON and self-messages", () => {
@@ -194,9 +204,152 @@ test("RedisSync - Publishing helpers fail safely and gracefully when Redis is of
     await publishUserPosition({ socketId: "s1", username: "U1", x: 100, y: 100 });
     await publishUserJoin({ socketId: "s1", username: "U1", x: 100, y: 100 });
     await publishUserLeave("s1");
+    await publishWebRTCSignal({ event: "webrtc:offer", targetId: "s1", senderId: "s2", offer: {} });
+    await publishProximityEnter({ targetId: "s1", peer: { socketId: "s2" } });
+    await publishProximityLeave({ targetId: "s1", peerId: "s2" });
     // Invalid inputs
     await publishUserPosition(null);
     await publishUserJoin(null);
     await publishUserLeave(null);
+    await publishWebRTCSignal(null);
+    await publishProximityEnter({});
+    await publishProximityLeave({});
   });
+});
+
+test("RedisSync - Dispatches incoming webrtc:offer, webrtc:answer, and webrtc:ice-candidate over SIGNALING channel", () => {
+  const io = createMockIO();
+  addUser("socket-local-alice", "Alice", 100, 100);
+
+  try {
+    // 1. Incoming offer for local Alice from remote Bob
+    const offerMsg = JSON.stringify({
+      event: "webrtc:offer",
+      targetId: "socket-local-alice",
+      senderId: "remote-bob",
+      offer: { type: "offer", sdp: "dummy-offer-sdp" },
+      serverId: "server-remote-02"
+    });
+
+    const offerResult = processIncomingSyncMessage(REDIS_CHANNELS.SIGNALING, offerMsg, io);
+    assert.ok(offerResult);
+    assert.equal(io.emitted.length, 1);
+    assert.equal(io.emitted[0].targetId, "socket-local-alice");
+    assert.equal(io.emitted[0].event, "webrtc:offer");
+    assert.equal(io.emitted[0].data.senderId, "remote-bob");
+    assert.equal(io.emitted[0].data.offer.sdp, "dummy-offer-sdp");
+
+    // 2. Incoming answer for local Alice from remote Bob
+    const answerMsg = JSON.stringify({
+      event: "webrtc:answer",
+      targetId: "socket-local-alice",
+      senderId: "remote-bob",
+      answer: { type: "answer", sdp: "dummy-answer-sdp" },
+      serverId: "server-remote-02"
+    });
+
+    const answerResult = processIncomingSyncMessage(REDIS_CHANNELS.SIGNALING, answerMsg, io);
+    assert.ok(answerResult);
+    assert.equal(io.emitted.length, 2);
+    assert.equal(io.emitted[1].targetId, "socket-local-alice");
+    assert.equal(io.emitted[1].event, "webrtc:answer");
+    assert.equal(io.emitted[1].data.senderId, "remote-bob");
+    assert.equal(io.emitted[1].data.answer.sdp, "dummy-answer-sdp");
+
+    // 3. Incoming ICE candidate for local Alice from remote Bob
+    const iceMsg = JSON.stringify({
+      event: "webrtc:ice-candidate",
+      targetId: "socket-local-alice",
+      senderId: "remote-bob",
+      candidate: { candidate: "candidate:1", sdpMid: "0" },
+      serverId: "server-remote-02"
+    });
+
+    const iceResult = processIncomingSyncMessage(REDIS_CHANNELS.SIGNALING, iceMsg, io);
+    assert.ok(iceResult);
+    assert.equal(io.emitted.length, 3);
+    assert.equal(io.emitted[2].targetId, "socket-local-alice");
+    assert.equal(io.emitted[2].event, "webrtc:ice-candidate");
+    assert.equal(io.emitted[2].data.senderId, "remote-bob");
+    assert.equal(io.emitted[2].data.candidate.candidate, "candidate:1");
+  } finally {
+    removeUser("socket-local-alice");
+  }
+});
+
+test("RedisSync - Dispatches incoming proximity:enter and proximity:leave, updating local userNearbyMap", () => {
+  const io = createMockIO();
+  addUser("socket-local-alice", "Alice", 100, 100);
+  resetNearbyMap();
+
+  try {
+    // 1. Proximity enter from remote instance
+    const enterMsg = JSON.stringify({
+      event: "proximity:enter",
+      targetId: "socket-local-alice",
+      peer: {
+        socketId: "remote-bob",
+        id: "remote-bob",
+        username: "Bob",
+        x: 140,
+        y: 100,
+        shouldInitiateOffer: true
+      },
+      serverId: "server-remote-02"
+    });
+
+    const enterResult = processIncomingSyncMessage(REDIS_CHANNELS.SIGNALING, enterMsg, io);
+    assert.ok(enterResult);
+
+    // Assert userNearbyMap updated
+    const aliceNearby = userNearbyMap.get("socket-local-alice");
+    assert.ok(aliceNearby, "Alice must have a proximity set in userNearbyMap");
+    assert.ok(aliceNearby.has("remote-bob"), "remote-bob must be in Alice's proximity set");
+
+    // Assert nearby:enter was emitted to local Alice
+    assert.equal(io.emitted.length, 1);
+    assert.equal(io.emitted[0].targetId, "socket-local-alice");
+    assert.equal(io.emitted[0].event, "nearby:enter");
+    assert.equal(io.emitted[0].data.socketId, "remote-bob");
+    assert.equal(io.emitted[0].data.shouldInitiateOffer, true);
+
+    // 2. Proximity leave from remote instance
+    const leaveMsg = JSON.stringify({
+      event: "proximity:leave",
+      targetId: "socket-local-alice",
+      peerId: "remote-bob",
+      serverId: "server-remote-02"
+    });
+
+    const leaveResult = processIncomingSyncMessage(REDIS_CHANNELS.SIGNALING, leaveMsg, io);
+    assert.ok(leaveResult);
+
+    // Assert userNearbyMap cleaned up
+    assert.equal(aliceNearby.has("remote-bob"), false, "remote-bob must be removed from proximity set");
+
+    // Assert nearby:leave was emitted to local Alice
+    assert.equal(io.emitted.length, 2);
+    assert.equal(io.emitted[1].targetId, "socket-local-alice");
+    assert.equal(io.emitted[1].event, "nearby:leave");
+    assert.equal(io.emitted[1].data.socketId, "remote-bob");
+  } finally {
+    removeUser("socket-local-alice");
+    resetNearbyMap();
+  }
+});
+
+test("RedisSync - Drops SIGNALING messages targeting non-local or unknown sockets", () => {
+  const io = createMockIO();
+
+  const unknownMsg = JSON.stringify({
+    event: "webrtc:offer",
+    targetId: "socket-nonexistent",
+    senderId: "remote-bob",
+    offer: {},
+    serverId: "server-remote-02"
+  });
+
+  const result = processIncomingSyncMessage(REDIS_CHANNELS.SIGNALING, unknownMsg, io);
+  assert.equal(result, null, "Messages for non-local sockets must be discarded");
+  assert.equal(io.emitted.length, 0);
 });
