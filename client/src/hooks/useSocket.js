@@ -1,10 +1,15 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { io } from 'socket.io-client';
 
-const SERVER_URL = import.meta.env.VITE_SERVER_URL || 'http://localhost:5000';
+const serverPort = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('server') : null;
+const SERVER_URL =
+  serverPort === '5001'
+    ? 'http://localhost:5001'
+    : import.meta.env.VITE_SERVER_URL || 'http://localhost:5000';
 
 export function useSocket(username) {
   const socketRef = useRef(null);
+  const [socket, setSocket] = useState(null);
   const [isConnected, setIsConnected] = useState(false);
   const [myId, setMyId] = useState(null);
   const [users, setUsers] = useState(new Map());
@@ -19,6 +24,7 @@ export function useSocket(username) {
     socketRef.current = s;
 
     s.on('connect', () => {
+      setSocket(s);
       setIsConnected(true);
       setMyId(s.id);
       // join with starting coordinates matching server default (100, 100)
@@ -72,12 +78,12 @@ export function useSocket(username) {
       if (!id || id === s.id) return;
       setUsers((prev) => {
         const current = prev.get(id);
-        const username = coords.username || (current ? current.username : `User_${id.slice(0, 4)}`);
+        const playerUsername = coords.username || (current ? current.username : `User_${id.slice(0, 4)}`);
         const next = new Map(prev);
         next.set(id, {
           ...(current || {}),
           socketId: id,
-          username,
+          username: playerUsername,
           x: coords.x,
           y: coords.y,
         });
@@ -98,6 +104,8 @@ export function useSocket(username) {
 
     return () => {
       s.disconnect();
+      socketRef.current = null;
+      setSocket(null);
     };
   }, [username]);
 
@@ -108,7 +116,7 @@ export function useSocket(username) {
   }, [isConnected]);
 
   return {
-    socket: socketRef.current,
+    socket,
     isConnected,
     myId,
     users,

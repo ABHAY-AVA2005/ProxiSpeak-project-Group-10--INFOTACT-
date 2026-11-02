@@ -1,21 +1,35 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 
 export function useMediaStream() {
-    const [localStream, setLocalStream] = useState(null);
-    const [isMuted, setIsMuted] = useState(false);
-    const [permissionGranted, setPermissionGranted] = useState(false);
-    const [error, setError] = useState(null);
+  const [localStream, setLocalStream] = useState(null);
+  const [isMuted, setIsMuted] = useState(false);
+  const [permissionGranted, setPermissionGranted] = useState(false);
+  const [error, setError] = useState(null);
 
-    const startAudio = useCallback(async () => {
+  const streamRef = useRef(null);
+  useEffect(() => {
+    streamRef.current = localStream;
+  }, [localStream]);
+
+  const startAudio = useCallback(async () => {
     try {
-        const stream = await navigator.mediaDevices.getUserMedia({
+      if (!navigator?.mediaDevices?.getUserMedia) {
+        throw new Error("navigator.mediaDevices.getUserMedia is not supported");
+      }
+      const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true,
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
         },
         video: false,
-    });
+      });
+
+      const audioTracks = stream.getAudioTracks();
+      if (audioTracks.length > 0) {
+        audioTracks[0].enabled = true;
+        console.log(`[MediaStream] Acquired audio track: id=${audioTracks[0].id}, enabled=${audioTracks[0].enabled}, state=${audioTracks[0].readyState}`);
+      }
 
       setLocalStream(stream);
       setPermissionGranted(true);
@@ -38,14 +52,17 @@ export function useMediaStream() {
     }
   }, [localStream]);
 
-  // Cleanup tracks on unmount
+  // Cleanup tracks only when component unmounts
   useEffect(() => {
     return () => {
-      if (localStream) {
-        localStream.getTracks().forEach((track) => track.stop());
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((track) => {
+          console.log(`[MediaStream] Stopping local track ${track.id} on unmount`);
+          track.stop();
+        });
       }
     };
-  }, [localStream]);
+  }, []);
 
   return {
     localStream,

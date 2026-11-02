@@ -1,5 +1,3 @@
-import React from 'react';
-
 export function AudioControls({ isMuted, toggleMute, permissionGranted, startAudio }) {
   if (!permissionGranted) {
     return (
