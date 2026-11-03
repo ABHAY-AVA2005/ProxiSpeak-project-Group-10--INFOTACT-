@@ -6,6 +6,7 @@ import dotenv from "dotenv";
 import { setupSocketHandlers } from "./sockets/socketHandler.js";
 import { getUserCount } from "./services/userManager.js";
 import { connectDB } from "./config/db.js";
+import { setupRedisAdapter, isRedisConnected } from "./config/redis.js";
 
 // Load environment variables
 dotenv.config();
@@ -40,6 +41,7 @@ app.get("/health", (req, res) => {
     status: "ok",
     service: "ProxiSpeak Signaling Server",
     activeUsers: getUserCount(),
+    redisConnected: isRedisConnected(),
     uptime: Math.round(process.uptime()),
     timestamp: new Date().toISOString()
   });
@@ -60,6 +62,9 @@ const io = new Server(server, {
 
 // Register socket handlers (connect, disconnect, join, users:list)
 setupSocketHandlers(io);
+
+// Initialize Redis adapter if REDIS_URL is provided, with fallback to in-memory adapter
+await setupRedisAdapter(io);
 
 // Start server
 server.listen(PORT, () => {
