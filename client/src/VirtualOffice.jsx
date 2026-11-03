@@ -85,27 +85,41 @@ function VirtualOffice({ username = "You", earshotRadius = 100, localStream = nu
   // Handle local microphone track updates without reconnecting the socket
   useEffect(() => {
     localStreamRef.current = localStream;
-    if (!localStream) return;
+    const audioTrack = localStream?.getAudioTracks()[0] || null;
 
-    const audioTrack = localStream.getAudioTracks()[0];
-    if (!audioTrack) return;
-
-    console.log(`[WebRTC] Local microphone stream updated: trackId=${audioTrack.id}, enabled=${audioTrack.enabled}, readyState=${audioTrack.readyState}`);
+    if (audioTrack) {
+      console.log(`[WebRTC] Local microphone stream updated: trackId=${audioTrack.id}, enabled=${audioTrack.enabled}, readyState=${audioTrack.readyState}`);
+    } else {
+      console.log("[WebRTC] Local microphone stopped or unavailable");
+    }
 
     // Update senders for all active peer connections
     Object.entries(peerConnectionsRef.current).forEach(([peerId, pc]) => {
       try {
-        const senders = pc.getSenders();
-        const audioSender = senders.find((s) => s.track && s.track.kind === "audio");
-        if (audioSender) {
-          audioSender.replaceTrack(audioTrack).then(() => {
-            console.log(`[WebRTC] Replaced local audio track on PC for ${peerId}`);
+        const transceivers = pc.getTransceivers ? pc.getTransceivers() : [];
+        const audioTransceiver = transceivers.find(
+          (t) => (t.sender?.track?.kind === "audio") || (t.receiver?.track?.kind === "audio")
+        );
+
+        if (audioTransceiver && audioTransceiver.sender) {
+          audioTransceiver.sender.replaceTrack(audioTrack).then(() => {
+            console.log(`[WebRTC] Replaced local audio track on PC for ${peerId} (track=${audioTrack?.id})`);
           }).catch((err) => {
             console.error(`[WebRTC] Failed to replace track for ${peerId}:`, err);
           });
         } else {
-          pc.addTrack(audioTrack, localStream);
-          console.log(`[WebRTC] Added local audio track on PC for ${peerId}`);
+          const senders = pc.getSenders();
+          const audioSender = senders.find((s) => !s.track || s.track.kind === "audio");
+          if (audioSender) {
+            audioSender.replaceTrack(audioTrack).then(() => {
+              console.log(`[WebRTC] Replaced local audio track on audio sender for ${peerId} (track=${audioTrack?.id})`);
+            }).catch((err) => {
+              console.error(`[WebRTC] Failed to replace track for ${peerId}:`, err);
+            });
+          } else if (audioTrack) {
+            pc.addTrack(audioTrack, localStream);
+            console.log(`[WebRTC] Added local audio track on PC for ${peerId}`);
+          }
         }
       } catch (err) {
         console.error(`[WebRTC] Error attaching local track to ${peerId}:`, err);
@@ -203,7 +217,77 @@ function VirtualOffice({ username = "You", earshotRadius = 100, localStream = nu
       }
     };
 
-    function getOrCreatePC(peerId) {
+    function setupRemoteAudio(peerId, track, stream = null) {
+      if (!track || track.kind !== "audio") return;
+      console.log(`[WebRTC] Setting up remote audio playback for ${peerId} (trackId: ${track.id}, readyState: ${track.readyState})`);
+
+      track.onmute = () => {
+        console.log(`[WebRTC] Track muted for ${peerId} (waiting for packets)`);
+      };
+      track.onunmute = () => {
+        console.log(`[WebRTC] Track unmuted for ${peerId} (audio packets actively arriving)`);
+        const el = document.getElementById(`audio-${peerId}`);
+        if (el && el.paused) {
+          el.play().catch((err) => console.warn(`[WebRTC] Autoplay on unmute failed for ${peerId}:`, err));
+        }
+      };
+      track.onended = () => {
+        console.log(`[WebRTC] Track ended for ${peerId}`);
+      };
+
+      let audioEl = document.getElementById(`audio-${peerId}`);
+      if (!audioEl) {
+        audioEl = document.createElement("audio");
+        audioEl.id = `audio-${peerId}`;
+        audioEl.style.display = "none";
+        document.body.appendChild(audioEl);
+      }
+
+      audioEl.autoplay = true;
+      audioEl.playsInline = true;
+      audioEl.muted = false; // CRITICAL: Remote audio must be unmuted to be heard
+
+      // Initial distance volume
+      const peer = remotePlayers.current[peerId];
+      const myX = player.current.x;
+      const myY = player.current.y;
+      let gain = 1.0;
+      if (peer) {
+        const dist = Math.hypot(peer.x - myX, peer.y - myY);
+        const maxDist = earshotRef.current || 100;
+        gain = Math.max(0, Math.min(1, 1 - dist / maxDist));
+      }
+      audioEl.volume = Math.max(0.01, gain); // Ensure volume is greater than 0
+
+      let mediaStream = stream;
+      if (!mediaStream) {
+        if (audioEl.srcObject instanceof MediaStream) {
+          mediaStream = audioEl.srcObject;
+        } else {
+          mediaStream = new MediaStream();
+        }
+      }
+      if (!mediaStream.getTracks().includes(track)) {
+        mediaStream.addTrack(track);
+      }
+
+      if (audioEl.srcObject !== mediaStream) {
+        audioEl.srcObject = mediaStream;
+      }
+
+      const playPromise = audioEl.play();
+      if (playPromise !== undefined) {
+        playPromise
+          .then(() => {
+            console.log(`[WebRTC] Audio playback active for ${peerId} (volume: ${audioEl.volume.toFixed(2)}, muted: ${audioEl.muted})`);
+          })
+          .catch((err) => {
+            console.warn(`[WebRTC] Audio playback blocked by autoplay policy for ${peerId}. Audio will resume on user interaction:`, err);
+          });
+      }
+    }
+
+    function getOrCreatePC(peerId, isInitiator = false) {
       if (peerConnections[peerId]) {
         const existing = peerConnections[peerId];
         if (existing.signalingState !== "closed" && existing.connectionState !== "closed" && existing.connectionState !== "failed") {
@@ -213,7 +297,7 @@ function VirtualOffice({ username = "You", earshotRadius = 100, localStream = nu
         delete peerConnections[peerId];
       }
 
-      console.log(`[WebRTC] Creating new RTCPeerConnection for ${peerId}`);
+      console.log(`[WebRTC] Creating new RTCPeerConnection for ${peerId} (isInitiator=${isInitiator})`);
       const pc = new RTCPeerConnection({
         iceServers: [
           { urls: "stun:stun.l.google.com:19302" },
@@ -221,14 +305,14 @@ function VirtualOffice({ username = "You", earshotRadius = 100, localStream = nu
         ],
       });
 
-      // Send local audio track if mic is enabled, or add transceiver so SDP negotiates audio
+      // Send local audio track if mic is enabled, or add transceiver for offerer
       if (localStreamRef.current && localStreamRef.current.getAudioTracks().length > 0) {
         localStreamRef.current.getAudioTracks().forEach((track) => {
           console.log(`[WebRTC] Adding local audio track (${track.id}, enabled=${track.enabled}) to PC for ${peerId}`);
           pc.addTrack(track, localStreamRef.current);
         });
-      } else {
-        console.log(`[WebRTC] Local mic not active yet, adding audio transceiver for ${peerId}`);
+      } else if (isInitiator) {
+        console.log(`[WebRTC] Local mic not active yet, adding audio transceiver for offerer ${peerId}`);
         pc.addTransceiver("audio", { direction: "sendrecv" });
       }
 
@@ -251,78 +335,9 @@ function VirtualOffice({ username = "You", earshotRadius = 100, localStream = nu
       };
 
       pc.ontrack = (event) => {
-        console.log(`[WebRTC] Received audio stream from: ${peerId}`);
-        const stream = (event.streams && event.streams[0]) ? event.streams[0] : new MediaStream([event.track]);
-
-        const audioTracks = stream.getAudioTracks();
-        console.log(`[WebRTC] Stream audio tracks count for ${peerId}: ${audioTracks.length}`);
-
-        if (audioTracks.length === 0 && event.track && event.track.kind === "audio") {
-          stream.addTrack(event.track);
-        }
-
-        const audioTrack = stream.getAudioTracks()[0] || event.track;
-        if (audioTrack) {
-          console.log(`[WebRTC] Remote track status for ${peerId}:`, {
-            id: audioTrack.id,
-            enabled: audioTrack.enabled,
-            readyState: audioTrack.readyState,
-            muted: audioTrack.muted,
-          });
-
-          audioTrack.onmute = () => {
-            console.log(`[WebRTC] Track muted for ${peerId} (waiting for packets)`);
-          };
-          audioTrack.onunmute = () => {
-            console.log(`[WebRTC] Track unmuted for ${peerId} (audio packets actively arriving)`);
-            const el = document.getElementById(`audio-${peerId}`);
-            if (el && el.paused) {
-              el.play().catch((err) => console.warn(`[WebRTC] Autoplay on unmute failed for ${peerId}:`, err));
-            }
-          };
-          audioTrack.onended = () => {
-            console.log(`[WebRTC] Track ended for ${peerId}`);
-          };
-        }
-
-        let audioEl = document.getElementById(`audio-${peerId}`);
-        if (!audioEl) {
-          audioEl = document.createElement("audio");
-          audioEl.id = `audio-${peerId}`;
-          audioEl.style.display = "none";
-          document.body.appendChild(audioEl);
-        }
-
-        audioEl.autoplay = true;
-        audioEl.playsInline = true;
-        audioEl.muted = false; // CRITICAL: Remote audio must be unmuted to be heard
-
-        // Initial distance volume
-        const peer = remotePlayers.current[peerId];
-        const myX = player.current.x;
-        const myY = player.current.y;
-        let gain = 1.0;
-        if (peer) {
-          const dist = Math.hypot(peer.x - myX, peer.y - myY);
-          const maxDist = earshotRef.current || 100;
-          gain = Math.max(0, Math.min(1, 1 - dist / maxDist));
-        }
-        audioEl.volume = Math.max(0.01, gain); // Ensure volume is greater than 0
-
-        if (audioEl.srcObject !== stream) {
-          audioEl.srcObject = stream;
-        }
-
-        const playPromise = audioEl.play();
-        if (playPromise !== undefined) {
-          playPromise
-            .then(() => {
-              console.log(`[WebRTC] Audio playback active for ${peerId} (volume: ${audioEl.volume.toFixed(2)}, muted: ${audioEl.muted})`);
-            })
-            .catch((err) => {
-              console.warn(`[WebRTC] Audio playback blocked by autoplay policy for ${peerId}. Audio will resume on user interaction:`, err);
-            });
-        }
+        console.log(`[WebRTC] Received audio stream ontrack from: ${peerId}`);
+        const stream = (event.streams && event.streams[0]) ? event.streams[0] : null;
+        setupRemoteAudio(peerId, event.track, stream);
       };
 
       peerConnections[peerId] = pc;
@@ -353,7 +368,7 @@ function VirtualOffice({ username = "You", earshotRadius = 100, localStream = nu
         remotePlayers.current[peerId].username = username;
       }
       console.log(`[ProxiSpeak] nearby:enter from ${peerId}, initiateOffer=${shouldInitiateOffer}`);
-      const pc = getOrCreatePC(peerId);
+      const pc = getOrCreatePC(peerId, shouldInitiateOffer);
 
       if (shouldInitiateOffer) {
         if (pc.signalingState !== "stable") {
@@ -393,14 +408,37 @@ function VirtualOffice({ username = "You", earshotRadius = 100, localStream = nu
 
     socket.on("webrtc:offer", async ({ senderId, offer }) => {
       console.log("[WebRTC] Received offer from:", senderId);
-      const pc = getOrCreatePC(senderId);
+      const pc = getOrCreatePC(senderId, false);
       try {
         await pc.setRemoteDescription(new RTCSessionDescription(offer));
         await drainPendingCandidates(senderId, pc);
+
+        // Ensure the transceiver negotiated from the offer is set to sendrecv
+        const transceivers = pc.getTransceivers ? pc.getTransceivers() : [];
+        const audioTransceiver = transceivers.find(
+          (t) => (t.sender?.track?.kind === "audio") || (t.receiver?.track?.kind === "audio")
+        );
+        if (audioTransceiver) {
+          if (audioTransceiver.direction !== "sendrecv") {
+            audioTransceiver.direction = "sendrecv";
+          }
+          if (localStreamRef.current && localStreamRef.current.getAudioTracks().length > 0) {
+            const track = localStreamRef.current.getAudioTracks()[0];
+            await audioTransceiver.sender.replaceTrack(track);
+          }
+        }
+
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
         socket.emit("webrtc:answer", { targetId: senderId, answer });
         console.log(`[WebRTC] Sent answer to ${senderId}`);
+
+        // Ensure remote audio playback is attached for the answerer
+        pc.getReceivers().forEach((receiver) => {
+          if (receiver.track && receiver.track.kind === "audio") {
+            setupRemoteAudio(senderId, receiver.track);
+          }
+        });
       } catch (err) {
         console.error("[WebRTC] Error handling offer:", err);
       }
@@ -414,6 +452,13 @@ function VirtualOffice({ username = "You", earshotRadius = 100, localStream = nu
           await pc.setRemoteDescription(new RTCSessionDescription(answer));
           await drainPendingCandidates(senderId, pc);
           console.log(`[WebRTC] Remote description set for answer from ${senderId}`);
+
+          // Ensure remote audio playback is attached for the offerer
+          pc.getReceivers().forEach((receiver) => {
+            if (receiver.track && receiver.track.kind === "audio") {
+              setupRemoteAudio(senderId, receiver.track);
+            }
+          });
         } catch (err) {
           console.error("[WebRTC] Error handling answer:", err);
         }
