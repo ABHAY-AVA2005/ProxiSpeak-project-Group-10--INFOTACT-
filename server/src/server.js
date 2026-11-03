@@ -7,6 +7,7 @@ import { setupSocketHandlers } from "./sockets/socketHandler.js";
 import { getUserCount } from "./services/userManager.js";
 import { connectDB } from "./config/db.js";
 import { setupRedisAdapter, isRedisConnected } from "./config/redis.js";
+import { DEFAULT_ROOM, getRoomByName, listRooms, upsertRoom } from "./services/roomService.js";
 
 // Load environment variables
 dotenv.config();
@@ -45,6 +46,37 @@ app.get("/health", (req, res) => {
     uptime: Math.round(process.uptime()),
     timestamp: new Date().toISOString()
   });
+});
+
+// Room persistence endpoints for Week 4 work: save and fetch office layouts
+app.get("/api/rooms", async (req, res) => {
+  try {
+    const rooms = await listRooms();
+    res.json(rooms);
+  } catch (error) {
+    res.status(500).json({ error: error.message || "Unable to load rooms" });
+  }
+});
+
+app.get("/api/rooms/:name", async (req, res) => {
+  try {
+    const room = await getRoomByName(req.params.name || DEFAULT_ROOM.name);
+    if (!room) {
+      return res.status(404).json({ error: "Room not found" });
+    }
+    return res.json(room);
+  } catch (error) {
+    return res.status(500).json({ error: error.message || "Unable to load room" });
+  }
+});
+
+app.post("/api/rooms", async (req, res) => {
+  try {
+    const room = await upsertRoom(req.body || DEFAULT_ROOM);
+    return res.status(201).json(room);
+  } catch (error) {
+    return res.status(400).json({ error: error.message || "Invalid room payload" });
+  }
 });
 
 // Create HTTP server & bind Socket.io
