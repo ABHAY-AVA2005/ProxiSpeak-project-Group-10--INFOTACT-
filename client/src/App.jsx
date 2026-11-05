@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { JoinScreen } from "./components/JoinScreen";
 import VirtualOffice from "./VirtualOffice";
 import { AudioControls } from "./components/AudioControls";
+import { CollaborativeWhiteboard } from "./components/CollaborativeWhiteboard";
 import { useMediaStream } from "./hooks/useMediaStream";
 
 const navItems = [
@@ -9,21 +10,25 @@ const navItems = [
   { id: "Team", icon: "◎", label: "Team", description: "Review the active office members" },
   { id: "Chat", icon: "◌", label: "Chat", description: "Send quick team messages" },
   { id: "Meetings", icon: "▣", label: "Meetings", description: "Create or join room-based meetings" },
+  { id: "Brainstorming", icon: "▤", label: "Brainstorming", description: "Use the collaborative idea board" },
   { id: "Settings", icon: "⚙", label: "Settings", description: "Update preferences and workspace mode" },
 ];
 
 const palette = ["purple", "pink", "gold", "mint", "amber", "teal", "salmon", "sky", "lavender"];
 const baseRooms = [
-  { id: "Focus Room", name: "Focus Room", x: 450, y: 96, width: 250, height: 220, fill: "rgba(194, 220, 201, 0.92)" },
-  { id: "Lounge", name: "Lounge", x: 85, y: 360, width: 255, height: 150, fill: "rgba(214, 199, 177, 0.95)" },
-  { id: "Open Work", name: "Open Work", x: 660, y: 360, width: 255, height: 150, fill: "rgba(214, 219, 208, 0.9)" },
+  { id: "Reception", name: "Reception", x: 42, y: 38, width: 210, height: 160, fill: "rgba(255, 240, 210, 0.9)" },
+  { id: "Open Workspace", name: "Open Workspace", x: 285, y: 38, width: 350, height: 220, fill: "rgba(175, 212, 220, 0.9)" },
+  { id: "Conference Room", name: "Conference Room", x: 675, y: 38, width: 250, height: 220, fill: "rgba(203, 211, 212, 0.9)" },
+  { id: "Brainstorming Room", name: "Brainstorming Room", x: 285, y: 320, width: 350, height: 190, fill: "rgba(212, 208, 248, 0.92)" },
+  { id: "Cafeteria", name: "Cafeteria", x: 675, y: 320, width: 250, height: 190, fill: "rgba(214, 192, 170, 0.96)" },
+  { id: "Private Meeting Room", name: "Private Meeting Room", x: 42, y: 320, width: 210, height: 190, fill: "rgba(194, 220, 201, 0.9)" },
 ];
 
 function App() {
   const [username, setUsername] = useState(() => sessionStorage.getItem("proxispeak_username") || "");
   const [roomName, setRoomName] = useState(() => sessionStorage.getItem("proxispeak_room") || "Team Alpha");
   const [activeTab, setActiveTab] = useState("Office");
-  const [activeRoom, setActiveRoom] = useState("Focus Room");
+  const [activeRoom, setActiveRoom] = useState("Open Workspace");
   const [officeRooms, setOfficeRooms] = useState(baseRooms);
   const [roomDraft, setRoomDraft] = useState("");
   const [themeMode, setThemeMode] = useState("dark");
@@ -44,11 +49,16 @@ function App() {
   const [notifications, setNotifications] = useState([]);
   const { localStream, isMuted, permissionGranted, error, startAudio, toggleMute, volumeLevel, setVolumeLevel } = useMediaStream();
 
+  const selfStatus = settings.doNotDisturb ? "Do Not Disturb" : settings.focusMode ? "Focus" : "Available";
   const activeRoomName = roomName.trim() || "Team Alpha";
   const presenceUsers = useMemo(() => {
-    if (onlineUsers.length > 0) return onlineUsers;
-    return [{ username, isSelf: true, status: "In office" }];
-  }, [onlineUsers, username]);
+    const baseList = onlineUsers.length > 0 ? onlineUsers : [{ username, isSelf: true, status: selfStatus }];
+    return baseList.map((user, index) => ({
+      ...user,
+      status: user.isSelf ? selfStatus : user.status || "Available",
+      label: user.isSelf ? `${user.username || username} (you)` : user.username || `Guest ${index + 1}`,
+    }));
+  }, [onlineUsers, selfStatus, username]);
 
   const filteredUsers = useMemo(() => {
     const query = presenceSearch.trim().toLowerCase();
@@ -74,7 +84,7 @@ function App() {
     sessionStorage.removeItem("proxispeak_room");
     setUsername("");
     setRoomName("Team Alpha");
-    setActiveRoom("Focus Room");
+    setActiveRoom("Open Workspace");
     setActiveTab("Office");
   };
 
@@ -88,6 +98,7 @@ function App() {
   };
 
   const addNotification = (title, detail) => {
+    if (settings.focusMode || settings.doNotDisturb) return;
     setNotifications((current) => [{ id: Date.now(), title, detail }, ...current].slice(0, 8));
   };
 
@@ -134,6 +145,10 @@ function App() {
   };
 
   const renderTabContent = () => {
+    if (activeTab === "Brainstorming") {
+      return <CollaborativeWhiteboard />;
+    }
+
     if (activeTab === "Team") {
       return (
         <div className="workspace-card list-card">
@@ -144,6 +159,7 @@ function App() {
           <div className="detail-list">
             {presenceUsers.map((user, index) => {
               const displayName = user.username || `Guest ${index + 1}`;
+              const statusText = user.status || "Available";
               return (
                 <div className="detail-row" key={user.socketId || `${displayName}-${index}`}>
                   <div className={`presence-avatar avatar-${user.isSelf ? "purple" : palette[index % palette.length]}`}>
@@ -156,9 +172,9 @@ function App() {
                   </div>
                   <div className="detail-copy">
                     <strong>{user.isSelf ? `${displayName} (you)` : displayName}</strong>
-                    <span>{user.isSelf ? "In office" : user.status || "In office"}</span>
+                    <span className={`status-pill ${statusText.toLowerCase().replace(/\s+/g, "-")}`}>{statusText}</span>
                   </div>
-                  <button type="button" className="secondary-button" title="Message teammate — start a direct note with this person." >Message</button>
+                  <button type="button" className="secondary-button" title="Message teammate — start a direct note with this person.">Message</button>
                 </div>
               );
             })}
@@ -237,6 +253,7 @@ function App() {
                     setActiveRoom(room.name);
                     setRoomName(room.name);
                     setActiveTab("Office");
+                    addNotification("Room activated", `${room.name} is now your active office area.`);
                   }}
                   title={`Open ${room.name} — jump your avatar directly into this room.`}
                 >
@@ -263,7 +280,13 @@ function App() {
               <button
                 type="button"
                 className="theme-toggle"
-                onClick={() => setThemeMode((current) => (current === "dark" ? "light" : "dark"))}
+                onClick={() => {
+                  setThemeMode((current) => {
+                    const next = current === "dark" ? "light" : "dark";
+                    addNotification("Theme updated", `Switched to ${next} mode.`);
+                    return next;
+                  });
+                }}
               >
                 {themeMode === "dark" ? "Dark" : "Light"}
               </button>

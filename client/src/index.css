@@ -945,6 +945,138 @@ button {
   }
 }
 
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  line-height: 1;
+  margin-top: 4px;
+  width: fit-content;
+  background: rgba(34, 197, 94, 0.12);
+  color: #166534;
+}
+
+.status-pill.available,
+.status-pill.in-office {
+  background: rgba(34, 197, 94, 0.12);
+  color: #166534;
+}
+
+.status-pill.focus {
+  background: rgba(59, 130, 246, 0.12);
+  color: #1d4ed8;
+}
+
+.status-pill.do-not-disturb,
+.status-pill.dnd {
+  background: rgba(239, 68, 68, 0.12);
+  color: #b91c1c;
+}
+
+.whiteboard-card {
+  padding: 18px;
+}
+
+.whiteboard-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.whiteboard-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: rgba(15, 23, 42, 0.04);
+  border: 1px solid rgba(15, 23, 42, 0.08);
+}
+
+.tool-group,
+.color-picker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.tool-group button,
+.clear-button,
+.add-note-button {
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 999px;
+  padding: 8px 12px;
+  background: rgba(255,255,255,0.7);
+  color: #1f2937;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.tool-group .tool-selected {
+  background: linear-gradient(135deg, #3b82f6, #6366f1);
+  color: white;
+  border-color: transparent;
+}
+
+.swatch {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid rgba(255,255,255,0.9);
+  box-shadow: 0 0 0 1px rgba(15,23,42,0.25);
+  cursor: pointer;
+}
+
+.swatch.selected {
+  transform: scale(1.14);
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.5);
+}
+
+.whiteboard-surface {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  gap: 14px;
+  min-height: 440px;
+}
+
+.whiteboard-svg {
+  flex: 1;
+  border-radius: 18px;
+  background: #f8fafc;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  box-shadow: inset 0 0 0 1px rgba(148,163,184,0.2);
+  touch-action: none;
+  cursor: crosshair;
+}
+
+.whiteboard-notes {
+  width: 180px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.sticky-note {
+  min-height: 84px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  box-shadow: 0 12px 22px rgba(15, 23, 42, 0.08);
+  font-weight: 700;
+  color: #1f2937;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
 @media (max-width: 920px) {
   .proxi-app-shell {
     flex-direction: column;
@@ -963,5 +1095,19 @@ button {
   .bottom-controls {
     flex-wrap: wrap;
     justify-content: center;
+  }
+
+  .whiteboard-surface {
+    flex-direction: column;
+  }
+
+  .whiteboard-notes {
+    width: 100%;
+    flex-direction: row;
+    overflow-x: auto;
+  }
+
+  .sticky-note {
+    min-width: 120px;
   }
 }
