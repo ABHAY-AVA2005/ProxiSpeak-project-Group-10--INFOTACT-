@@ -8,11 +8,24 @@ function App() {
   const [username, setUsername] = useState(() => {
     return sessionStorage.getItem("proxispeak_username") || null;
   });
+  const [roomName, setRoomName] = useState(() => {
+    return sessionStorage.getItem("proxispeak_room") || "sunrise-studio";
+  });
   const { localStream, isMuted, permissionGranted, error, startAudio, toggleMute } = useMediaStream();
 
-  const handleJoin = (name) => {
+  const handleJoin = (name, room) => {
+    const cleanRoom = (room || "sunrise-studio").trim() || "sunrise-studio";
     sessionStorage.setItem("proxispeak_username", name);
+    sessionStorage.setItem("proxispeak_room", cleanRoom);
     setUsername(name);
+    setRoomName(cleanRoom);
+  };
+
+  const handleLeave = () => {
+    sessionStorage.removeItem("proxispeak_username");
+    sessionStorage.removeItem("proxispeak_room");
+    setUsername(null);
+    setRoomName("sunrise-studio");
   };
 
   if (!username) {
@@ -30,9 +43,14 @@ function App() {
           </div>
         </div>
 
-        <div className="status-chip">
-          <span className="status-dot" />
-          Live · <strong>{username}</strong>
+        <div className="header-actions">
+          <div className="status-chip">
+            <span className="status-dot" />
+            Live · <strong>{username}</strong>
+          </div>
+          <button className="leave-button" type="button" onClick={handleLeave}>
+            End session
+          </button>
         </div>
       </header>
 
@@ -43,6 +61,10 @@ function App() {
             <h1>Productive collaboration, by proximity</h1>
           </div>
           <div className="workspace-stats">
+            <div className="stat-box">
+              <span className="stat-label">Room</span>
+              <strong>{roomName}</strong>
+            </div>
             <div className="stat-box">
               <span className="stat-label">Earshot</span>
               <strong>100px</strong>

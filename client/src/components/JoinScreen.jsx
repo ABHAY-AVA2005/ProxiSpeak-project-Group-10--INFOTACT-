@@ -2,17 +2,19 @@ import React, { useState } from 'react';
 
 export function JoinScreen({ onJoin }) {
   const [username, setUsername] = useState('');
+  const [roomName, setRoomName] = useState('sunrise-studio');
   const [isError, setIsError] = useState(false);
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    const clean = username.trim();
-    if (!clean) {
+    const cleanName = username.trim();
+    const cleanRoom = roomName.trim() || 'sunrise-studio';
+    if (!cleanName) {
       setIsError(true);
       return;
     }
     setIsError(false);
-    onJoin(clean);
+    onJoin(cleanName, cleanRoom);
   };
 
   return (
@@ -64,7 +66,7 @@ export function JoinScreen({ onJoin }) {
             width: '100%',
             maxWidth: '470px',
             background: 'rgba(255,255,255,0.35)',
-            border: '1px solid rgba(110, 120, 118, 0.18)',
+            border: '1px solid rgba(0, 0, 0, 0.8)',
             borderRadius: '22px',
             padding: '18px 18px 16px'
           }}>
@@ -103,7 +105,7 @@ export function JoinScreen({ onJoin }) {
                     padding: '14px 14px',
                     borderRadius: '12px',
                     background: '#e8f1ee',
-                    border: isError ? '1px solid #e57373' : '1px solid rgba(98, 108, 103, 0.18)',
+                    border: isError ? '1px solid #e57373' : '1px solid rgba(0, 0, 0, 0.8)',
                     color: '#243530',
                     fontSize: '1.02rem',
                     boxSizing: 'border-box',
@@ -117,14 +119,16 @@ export function JoinScreen({ onJoin }) {
                 <div style={{ fontSize: '0.82rem', color: '#5f706b', marginBottom: '8px' }}>Office room</div>
                 <input
                   type="text"
-                  value="sunrise-studio"
-                  readOnly
+                  value={roomName}
+                  onChange={(e) => setRoomName(e.target.value)}
+                  placeholder="sunrise-studio"
+                  maxLength={40}
                   style={{
                     width: '100%',
                     padding: '14px 14px',
                     borderRadius: '12px',
                     background: '#f9f7f5',
-                    border: '1px solid rgba(98, 108, 103, 0.18)',
+                    border: '1px solid rgba(0, 0, 0, 0.8)',
                     color: '#455a54',
                     fontSize: '1.02rem',
                     boxSizing: 'border-box',
@@ -170,7 +174,7 @@ export function JoinScreen({ onJoin }) {
             maxWidth: '700px',
             background: '#f4f2ee',
             borderRadius: '24px',
-            border: '1px solid rgba(90, 101, 92, 0.18)',
+            border: '1px solid rgba(0, 0, 0, 0.8)',
             padding: '20px 26px 18px',
             boxShadow: '0 24px 50px rgba(24, 30, 27, 0.08)'
           }}>
@@ -208,7 +212,7 @@ export function JoinScreen({ onJoin }) {
                 bottom: '18px',
                 borderRadius: '16px',
                 background: 'linear-gradient(180deg, rgba(117, 145, 134, 0.12), rgba(117, 145, 134, 0.03))',
-                border: '1px solid rgba(121, 145, 133, 0.16)'
+                border: '1px solid rgba(0, 0, 0, 0.8)'
               }} />
 
               <div style={{
@@ -219,7 +223,7 @@ export function JoinScreen({ onJoin }) {
                 height: '58%',
                 transform: 'translate(-50%, -50%)',
                 background: 'rgba(180, 204, 171, 0.22)',
-                border: '1px solid rgba(110, 130, 114, 0.2)',
+                border: '1px solid rgba(0, 0, 0, 0.8)',
                 borderRadius: '16px',
                 boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.25)'
               }} />
@@ -232,7 +236,7 @@ export function JoinScreen({ onJoin }) {
                 height: '26%',
                 background: '#d1e1d6',
                 borderRadius: '12px',
-                border: '1px solid rgba(100, 122, 111, 0.22)'
+                border: '1px solid rgba(0, 0, 0, 0.8)'
               }} />
 
               <div style={{

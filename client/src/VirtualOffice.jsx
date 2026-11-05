@@ -50,6 +50,9 @@ function drawDesk(ctx, x, y, w = 90, h = 48, tone = "#d2b48a") {
   ctx.fillRect(x + 8, y + h + 8, w, 10);
   ctx.fillStyle = tone;
   ctx.fillRect(x, y, w, h);
+  ctx.strokeStyle = "rgba(0, 0, 0, 0.8)";
+  ctx.lineWidth = 1.3;
+  ctx.strokeRect(x, y, w, h);
   ctx.fillStyle = "rgba(102, 74, 48, 0.25)";
   ctx.fillRect(x + 8, y + 8, w - 16, 8);
   ctx.fillStyle = "rgba(96, 70, 48, 0.22)";
@@ -448,7 +451,7 @@ function VirtualOffice({ username = "You", earshotRadius = 100, localStream = nu
 
       ctx.fillStyle = "rgba(192, 216, 198, 0.8)";
       ctx.fillRect(420, 80, 212, 208);
-      ctx.strokeStyle = "rgba(93, 126, 109, 0.4)";
+      ctx.strokeStyle = "rgba(0, 0, 0, 0.8)";
       ctx.lineWidth = 2;
       ctx.strokeRect(420, 80, 212, 208);
       ctx.fillStyle = "#5f8572";
@@ -458,7 +461,7 @@ function VirtualOffice({ username = "You", earshotRadius = 100, localStream = nu
 
       ctx.fillStyle = "rgba(214, 200, 173, 0.9)";
       ctx.fillRect(90, 360, 230, 130);
-      ctx.strokeStyle = "rgba(128, 110, 93, 0.35)";
+      ctx.strokeStyle = "rgba(0, 0, 0, 0.8)";
       ctx.strokeRect(90, 360, 230, 130);
       ctx.fillStyle = "#7a6a58";
       ctx.font = "600 12px Inter, Arial";
@@ -466,7 +469,7 @@ function VirtualOffice({ username = "You", earshotRadius = 100, localStream = nu
 
       ctx.fillStyle = "#d7d0c0";
       ctx.fillRect(690, 360, 210, 120);
-      ctx.strokeStyle = "rgba(89, 82, 76, 0.25)";
+      ctx.strokeStyle = "rgba(0, 0, 0, 0.8)";
       ctx.strokeRect(690, 360, 210, 120);
       ctx.fillStyle = "#7b6e60";
       ctx.fillText("OPEN WORK", 795, 376);
@@ -489,6 +492,9 @@ function VirtualOffice({ username = "You", earshotRadius = 100, localStream = nu
       WALLS.forEach((w, i) => {
         ctx.fillStyle = wallPalette[i % wallPalette.length];
         ctx.fillRect(w.x, w.y, w.width, w.height);
+        ctx.strokeStyle = "rgba(0, 0, 0, 0.8)";
+        ctx.lineWidth = 1.4;
+        ctx.strokeRect(w.x, w.y, w.width, w.height);
       });
 
       ctx.strokeStyle = "rgba(100, 110, 108, 0.85)";
@@ -564,7 +570,7 @@ function VirtualOffice({ username = "You", earshotRadius = 100, localStream = nu
       style={{
         width: "100%",
         maxWidth: "100%",
-        border: "1px solid rgba(107, 118, 112, 0.18)",
+        border: "1px solid rgba(0, 0, 0, 0.8)",
         borderRadius: "24px",
         display: "block",
         background: "#f1efe9",
