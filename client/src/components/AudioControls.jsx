@@ -5,7 +5,7 @@ export function AudioControls({ isMuted, toggleMute, permissionGranted, startAud
     padding: '10px 18px',
     color: '#fff',
     borderRadius: '10px',
-    border: 'none',
+    border: '1px solid rgba(0,0,0,0.8)',
     cursor: 'pointer',
     fontWeight: 700,
     boxShadow: '0 8px 18px rgba(15, 23, 42, 0.25)',
@@ -14,7 +14,7 @@ export function AudioControls({ isMuted, toggleMute, permissionGranted, startAud
 
   if (!permissionGranted) {
     return (
-      <div style={{ position: 'fixed', bottom: 20, right: 20, zIndex: 100, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '8px' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '8px', position: 'static' }}>
         <button
           onClick={startAudio}
           style={{ ...buttonStyle, background: 'linear-gradient(135deg, #2563eb, #3b82f6)' }}
@@ -31,7 +31,7 @@ export function AudioControls({ isMuted, toggleMute, permissionGranted, startAud
   }
 
   return (
-    <div style={{ position: 'fixed', bottom: 20, right: 20, zIndex: 100 }}>
+    <div style={{ position: 'static', display: 'inline-flex' }}>
       <button
         onClick={toggleMute}
         style={{
