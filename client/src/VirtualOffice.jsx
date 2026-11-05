@@ -16,9 +16,12 @@ const WALLS = [
 ];
 
 const ROOM_BORDERS = [
-  { name: "Focus Room", x: 450, y: 96, width: 250, height: 220, fill: "rgba(194, 220, 201, 0.9)" },
-  { name: "Lounge", x: 85, y: 360, width: 255, height: 150, fill: "rgba(214, 199, 177, 0.92)" },
-  { name: "Open Work", x: 660, y: 360, width: 255, height: 150, fill: "rgba(214, 219, 208, 0.9)" }
+  { name: "Reception", x: 42, y: 38, width: 210, height: 160, fill: "rgba(255, 240, 210, 0.9)" },
+  { name: "Open Workspace", x: 285, y: 38, width: 350, height: 220, fill: "rgba(175, 212, 220, 0.9)" },
+  { name: "Conference Room", x: 675, y: 38, width: 250, height: 220, fill: "rgba(203, 211, 212, 0.9)" },
+  { name: "Brainstorming Room", x: 285, y: 320, width: 350, height: 190, fill: "rgba(212, 208, 248, 0.92)" },
+  { name: "Cafeteria", x: 675, y: 320, width: 250, height: 190, fill: "rgba(214, 192, 170, 0.96)" },
+  { name: "Private Meeting Room", x: 42, y: 320, width: 210, height: 190, fill: "rgba(194, 220, 201, 0.9)" },
 ];
 
 function roomCenter(room) {
@@ -38,6 +41,108 @@ const OBSTACLES = [
 ];
 const ALL_SOLID = [...WALLS, ...OBSTACLES];
 
+function worldToGrid(x, y, cellSize = 20) {
+  return {
+    x: Math.floor(x / cellSize),
+    y: Math.floor(y / cellSize),
+  };
+}
+
+function gridToWorld(cellX, cellY, cellSize = 20) {
+  return {
+    x: cellX * cellSize + cellSize / 2,
+    y: cellY * cellSize + cellSize / 2,
+  };
+}
+
+function pointInRect(x, y, rect) {
+  return x >= rect.x && x <= rect.x + rect.width && y >= rect.y && y <= rect.y + rect.height;
+}
+
+function gridHasObstacle(gridX, gridY, cellSize = 20, radius = 1) {
+  const px = gridX * cellSize + cellSize / 2;
+  const py = gridY * cellSize + cellSize / 2;
+  for (const rect of ALL_SOLID) {
+    for (let offsetX = -radius; offsetX <= radius; offsetX += 1) {
+      for (let offsetY = -radius; offsetY <= radius; offsetY += 1) {
+        const x = px + offsetX * cellSize;
+        const y = py + offsetY * cellSize;
+        if (pointInRect(x, y, rect)) return true;
+      }
+    }
+  }
+  return false;
+}
+
+function findPathAStar(start, goal, cellSize = 20) {
+  const cols = Math.ceil(WORLD_W / cellSize);
+  const rows = Math.ceil(WORLD_H / cellSize);
+  const startCell = worldToGrid(start.x, start.y, cellSize);
+  const goalCell = worldToGrid(goal.x, goal.y, cellSize);
+
+  const startKey = `${startCell.x},${startCell.y}`;
+  const goalKey = `${goalCell.x},${goalCell.y}`;
+  const open = new Map();
+  const cameFrom = new Map();
+  const gScore = new Map();
+  const fScore = new Map();
+
+  open.set(startKey, 0);
+  gScore.set(startKey, 0);
+  fScore.set(startKey, heuristic(startCell, goalCell));
+
+  while (open.size > 0) {
+    let currentKey = null;
+    let bestValue = Number.POSITIVE_INFINITY;
+    for (const [key, score] of open.entries()) {
+      const value = fScore.get(key) ?? Number.POSITIVE_INFINITY;
+      if (value < bestValue) {
+        bestValue = value;
+        currentKey = key;
+      }
+    }
+
+    if (!currentKey) break;
+    if (currentKey === goalKey) {
+      const path = [];
+      let cursor = currentKey;
+      while (cursor) {
+        const [cx, cy] = cursor.split(',').map(Number);
+        path.push(gridToWorld(cx, cy, cellSize));
+        if (cursor === startKey) break;
+        cursor = cameFrom.get(cursor) ?? null;
+      }
+      return path.reverse();
+    }
+
+    open.delete(currentKey);
+    const [cx, cy] = currentKey.split(',').map(Number);
+    const neighbors = [
+      [cx + 1, cy], [cx - 1, cy], [cx, cy + 1], [cx, cy - 1],
+      [cx + 1, cy + 1], [cx - 1, cy - 1], [cx + 1, cy - 1], [cx - 1, cy + 1],
+    ];
+
+    for (const [nx, ny] of neighbors) {
+      if (nx < 0 || ny < 0 || nx >= cols || ny >= rows) continue;
+      if (gridHasObstacle(nx, ny, cellSize, 1)) continue;
+      const key = `${nx},${ny}`;
+      const tentative = (gScore.get(currentKey) ?? Infinity) + ((nx === cx || ny === cy) ? 1 : 1.4);
+      if (tentative < (gScore.get(key) ?? Infinity)) {
+        cameFrom.set(key, currentKey);
+        gScore.set(key, tentative);
+        fScore.set(key, tentative + heuristic({ x: nx, y: ny }, goalCell));
+        if (!open.has(key)) open.set(key, tentative);
+      }
+    }
+  }
+
+  return [start];
+}
+
+function heuristic(a, b) {
+  return Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
+}
+
 function checkCollision(cx, cy, radius = AVATAR_RADIUS) {
   for (const rect of ALL_SOLID) {
     const nearX = Math.max(rect.x, Math.min(cx, rect.x + rect.width));
@@ -45,6 +150,30 @@ function checkCollision(cx, cy, radius = AVATAR_RADIUS) {
     if ((cx - nearX) ** 2 + (cy - nearY) ** 2 < radius * radius) return true;
   }
   return false;
+}
+
+function resolveAvoidanceTarget(x, y, size = 20) {
+  let nearest = null;
+  let nearestDist = Number.POSITIVE_INFINITY;
+  for (const rect of ALL_SOLID) {
+    const centerX = rect.x + rect.width / 2;
+    const centerY = rect.y + rect.height / 2;
+    const dist = Math.hypot(x - centerX, y - centerY);
+    if (dist < nearestDist) {
+      nearest = rect;
+      nearestDist = dist;
+    }
+  }
+
+  if (!nearest) return { x, y };
+  const offsetX = x - (nearest.x + nearest.width / 2);
+  const offsetY = y - (nearest.y + nearest.height / 2);
+  const safeX = x + (Math.abs(offsetX) < 1 ? size : (offsetX / Math.abs(offsetX)) * size);
+  const safeY = y + (Math.abs(offsetY) < 1 ? size : (offsetY / Math.abs(offsetY)) * size);
+  return {
+    x: Math.max(20, Math.min(WORLD_W - 20, safeX)),
+    y: Math.max(20, Math.min(WORLD_H - 20, safeY)),
+  };
 }
 
 const REMOTE_COLOURS = ["#f97316", "#a855f7", "#ec4899", "#14b8a6", "#f59e0b", "#64748b", "#06b6d4", "#84cc16"];
@@ -89,7 +218,7 @@ function drawPlant(ctx, x, y) {
   }
 }
 
-function drawAvatar(ctx, x, y, { name, colour, isLocal, inEarshot }) {
+function drawAvatar(ctx, x, y, { name, colour, isLocal, inEarshot, direction = { x: 0, y: -1 } }) {
   const skin = isLocal ? "#f3d0b5" : "#ebc9a7";
   const shirt = isLocal ? "#2469d6" : colour;
   const initial = (name || (isLocal ? "YOU" : "U")).trim().charAt(0).toUpperCase() || "Y";
@@ -128,6 +257,14 @@ function drawAvatar(ctx, x, y, { name, colour, isLocal, inEarshot }) {
   ctx.lineTo(-9, 30);
   ctx.moveTo(5, 20);
   ctx.lineTo(9, 30);
+  ctx.stroke();
+
+  const angle = Math.atan2(direction.y, direction.x) || -Math.PI / 2;
+  ctx.strokeStyle = isLocal ? "#1d4ed8" : "rgba(255,255,255,0.8)";
+  ctx.lineWidth = 2.6;
+  ctx.beginPath();
+  ctx.moveTo(0, 0);
+  ctx.lineTo(Math.cos(angle) * 18, Math.sin(angle) * 18);
   ctx.stroke();
 
   ctx.restore();
@@ -170,6 +307,9 @@ function VirtualOffice({ username = "You", earshotRadius = 100, localStream = nu
       player.current.y = center.y;
     }
   }, [username, spawnRoom, roomSet]);
+
+  const pathRef = useRef([]);
+  const lastDirection = useRef({ x: 0, y: -1 });
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -407,8 +547,11 @@ function VirtualOffice({ username = "You", earshotRadius = 100, localStream = nu
       const scaleY = WORLD_H / rect.height;
       const tx = Math.round((e.clientX - rect.left) * scaleX);
       const ty = Math.round((e.clientY - rect.top) * scaleY);
+      const safeTarget = resolveAvoidanceTarget(tx, ty, 24);
       if (!checkCollision(tx, ty)) {
-        clickTarget.current = { x: tx, y: ty };
+        const computed = findPathAStar(player.current, safeTarget, 20);
+        pathRef.current = computed.length > 1 ? computed : [player.current, safeTarget];
+        clickTarget.current = { x: safeTarget.x, y: safeTarget.y };
       }
     };
     canvas.addEventListener("click", onCanvasClick);
@@ -434,29 +577,56 @@ function VirtualOffice({ username = "You", earshotRadius = 100, localStream = nu
       if (k["arrowleft"] || k["a"]) dx -= SPEED;
       if (k["arrowright"] || k["d"]) dx += SPEED;
 
-      if (dx === 0 && dy === 0 && clickTarget.current) {
-        const tdx = clickTarget.current.x - player.current.x;
-        const tdy = clickTarget.current.y - player.current.y;
+      if (pathRef.current.length > 1) {
+        const nextStep = pathRef.current[1];
+        const tdx = nextStep.x - player.current.x;
+        const tdy = nextStep.y - player.current.y;
         const dist = Math.hypot(tdx, tdy);
-        if (dist < CLICK_SPEED) {
-          player.current.x = clickTarget.current.x;
-          player.current.y = clickTarget.current.y;
-          clickTarget.current = null;
+
+        if (dist <= CLICK_SPEED) {
+          player.current.x = nextStep.x;
+          player.current.y = nextStep.y;
+          pathRef.current = pathRef.current.slice(1);
+          if (pathRef.current.length <= 1) {
+            clickTarget.current = null;
+          }
         } else {
           dx = (tdx / dist) * CLICK_SPEED;
           dy = (tdy / dist) * CLICK_SPEED;
         }
       }
 
+      if (dx !== 0 || dy !== 0) {
+        const directionX = dx || 1;
+        const directionY = dy || 0;
+        lastDirection.current = { x: directionX, y: directionY };
+      }
+
       if (dx !== 0) {
         const nx = Math.max(20, Math.min(WORLD_W - 20, player.current.x + dx));
         if (!checkCollision(nx, player.current.y)) player.current.x = nx;
-        else clickTarget.current = null;
+        else {
+          pathRef.current = [];
+          clickTarget.current = null;
+        }
       }
       if (dy !== 0) {
         const ny = Math.max(20, Math.min(WORLD_H - 20, player.current.y + dy));
         if (!checkCollision(player.current.x, ny)) player.current.y = ny;
-        else clickTarget.current = null;
+        else {
+          pathRef.current = [];
+          clickTarget.current = null;
+        }
+      }
+
+      if (pathRef.current.length <= 1 && clickTarget.current) {
+        const targetRoom = [...ROOM_BORDERS, ...roomSet].find((room) => {
+          const center = roomCenter(room);
+          return Math.hypot(center.x - clickTarget.current.x, center.y - clickTarget.current.y) < 55;
+        });
+        if (targetRoom) {
+          clickTarget.current = null;
+        }
       }
 
       const now = performance.now();
@@ -534,6 +704,17 @@ function VirtualOffice({ username = "You", earshotRadius = 100, localStream = nu
         ctx.setLineDash([3, 4]);
         ctx.stroke();
         ctx.setLineDash([]);
+
+        if (pathRef.current.length > 1) {
+          ctx.beginPath();
+          ctx.moveTo(pathRef.current[0].x, pathRef.current[0].y);
+          pathRef.current.slice(1).forEach((step) => ctx.lineTo(step.x, step.y));
+          ctx.strokeStyle = "rgba(41, 92, 255, 0.6)";
+          ctx.lineWidth = 2;
+          ctx.setLineDash([8, 6]);
+          ctx.stroke();
+          ctx.setLineDash([]);
+        }
       }
 
       ctx.beginPath();
