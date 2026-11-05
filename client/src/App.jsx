@@ -19,12 +19,6 @@ const baseRooms = [
   { id: "Open Work", name: "Open Work", x: 660, y: 360, width: 255, height: 150, fill: "rgba(214, 219, 208, 0.9)" },
 ];
 
-const baseNotifications = [
-  { id: 1, title: "Design sync reminder", detail: "Starts in 10 minutes in Focus Room" },
-  { id: 2, title: "New teammate joined", detail: "Ava just entered the office" },
-  { id: 3, title: "Silent mode enabled", detail: "Quiet hours is active for your workspace" },
-];
-
 function App() {
   const [username, setUsername] = useState(() => sessionStorage.getItem("proxispeak_username") || "");
   const [roomName, setRoomName] = useState(() => sessionStorage.getItem("proxispeak_room") || "Team Alpha");
@@ -33,14 +27,11 @@ function App() {
   const [officeRooms, setOfficeRooms] = useState(baseRooms);
   const [roomDraft, setRoomDraft] = useState("");
   const [themeMode, setThemeMode] = useState("dark");
-  const [searchOpen, setSearchOpen] = useState(false);
   const [notificationOpen, setNotificationOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [onlineUsers, setOnlineUsers] = useState([]);
-  const [chatMessages, setChatMessages] = useState([
-    { id: 1, sender: "System", text: "Welcome to the virtual office. Start a conversation nearby.", time: "Now" },
-    { id: 2, sender: "Ava", text: "Morning! I’m setting up the design review in the focus room.", time: "2m ago" },
-  ]);
+  const [presenceSearch, setPresenceSearch] = useState("");
+  const [chatMessages, setChatMessages] = useState([]);
   const [draftMessage, setDraftMessage] = useState("");
   const [settings, setSettings] = useState({
     autoJoinAudio: true,
@@ -50,14 +41,23 @@ function App() {
     screenShare: false,
     doNotDisturb: false,
   });
-  const [notifications, setNotifications] = useState(baseNotifications);
-  const { localStream, isMuted, permissionGranted, error, startAudio, toggleMute } = useMediaStream();
+  const [notifications, setNotifications] = useState([]);
+  const { localStream, isMuted, permissionGranted, error, startAudio, toggleMute, volumeLevel, setVolumeLevel } = useMediaStream();
 
   const activeRoomName = roomName.trim() || "Team Alpha";
   const presenceUsers = useMemo(() => {
     if (onlineUsers.length > 0) return onlineUsers;
     return [{ username, isSelf: true, status: "In office" }];
   }, [onlineUsers, username]);
+
+  const filteredUsers = useMemo(() => {
+    const query = presenceSearch.trim().toLowerCase();
+    if (!query) return presenceUsers;
+    return presenceUsers.filter((user) => {
+      const usernameText = (user.username || "").toLowerCase();
+      return usernameText.includes(query);
+    });
+  }, [presenceSearch, presenceUsers]);
 
   const handleJoin = (name, room) => {
     const cleanRoom = (room || "Team Alpha").trim() || "Team Alpha";
@@ -87,6 +87,10 @@ function App() {
     setOnlineUsers(nextUsers);
   };
 
+  const addNotification = (title, detail) => {
+    setNotifications((current) => [{ id: Date.now(), title, detail }, ...current].slice(0, 8));
+  };
+
   const handleCreateRoom = (event) => {
     event.preventDefault();
     const cleanName = roomDraft.trim();
@@ -112,10 +116,7 @@ function App() {
     setRoomName(cleanName);
     setActiveTab("Office");
     setRoomDraft("");
-    setNotifications((current) => [
-      { id: Date.now(), title: `${cleanName} ready`, detail: `Your avatar is now positioned inside ${cleanName}.` },
-      ...current,
-    ]);
+    addNotification(`${cleanName} ready`, `Your avatar is now positioned inside ${cleanName}.`);
   };
 
   const handleSendMessage = (event) => {
@@ -124,10 +125,12 @@ function App() {
     if (!trimmed) return;
     setChatMessages((current) => [...current, { id: Date.now(), sender: "You", text: trimmed, time: "Now" }]);
     setDraftMessage("");
+    addNotification("Message sent", "Your message was shared to the office chat.");
   };
 
   const handleToggleSetting = (key) => {
     setSettings((current) => ({ ...current, [key]: !current[key] }));
+    addNotification("Preference updated", `Updated ${key.replace(/([A-Z])/g, " $1").trim()}.`);
   };
 
   const renderTabContent = () => {
@@ -350,6 +353,24 @@ function App() {
       <div className="workspace-panel">
         <header className="main-header">
           <div className="header-pills">
+            <button
+              type="button"
+              className="toolbar-icon volume-btn"
+              aria-label="Volume down"
+              onClick={() => setVolumeLevel((current) => Math.max(0, current - 10))}
+              title="Volume down — lower the active microphone level."
+            >
+              −
+            </button>
+            <button
+              type="button"
+              className="toolbar-icon volume-btn"
+              aria-label="Volume up"
+              onClick={() => setVolumeLevel((current) => Math.min(100, current + 10))}
+              title="Volume up — increase the active microphone level."
+            >
+              +
+            </button>
             <AudioControls
               isMuted={isMuted}
               toggleMute={toggleMute}
@@ -371,23 +392,9 @@ function App() {
             <button
               className="toolbar-icon"
               type="button"
-              aria-label="Search"
-              onClick={() => {
-                setSearchOpen((current) => !current);
-                setNotificationOpen(false);
-                setProfileOpen(false);
-              }}
-              title="Search — find teammates or workspace items quickly."
-            >
-              ⌕
-            </button>
-            <button
-              className="toolbar-icon"
-              type="button"
               aria-label="Notifications"
               onClick={() => {
                 setNotificationOpen((current) => !current);
-                setSearchOpen(false);
                 setProfileOpen(false);
               }}
               title="Notifications — review the latest office updates."
@@ -400,7 +407,6 @@ function App() {
               aria-label="Profile"
               onClick={() => {
                 setProfileOpen((current) => !current);
-                setSearchOpen(false);
                 setNotificationOpen(false);
               }}
               title={`Profile — manage your ${username} account and workspace details.`}
@@ -410,24 +416,21 @@ function App() {
           </div>
         </header>
 
-        {searchOpen && (
-          <div className="top-panel-popover">
-            <strong>Quick search</strong>
-            <input type="text" value="Search teammates..." readOnly />
-          </div>
-        )}
-
         {notificationOpen && (
           <div className="top-panel-popover">
             <strong>Notifications</strong>
-            <div className="popover-list">
-              {notifications.map((item) => (
-                <div key={item.id} className="popover-row">
-                  <strong>{item.title}</strong>
-                  <small>{item.detail}</small>
-                </div>
-              ))}
-            </div>
+            {notifications.length > 0 ? (
+              <div className="popover-list">
+                {notifications.map((item) => (
+                  <div key={item.id} className="popover-row">
+                    <strong>{item.title}</strong>
+                    <small>{item.detail}</small>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="empty-state">No new notifications.</div>
+            )}
           </div>
         )}
 
@@ -474,11 +477,17 @@ function App() {
 
             <div className="presence-search">
               <span>⌕</span>
-              <input type="text" value="Search teammates..." readOnly title="Search teammates — filter the live office list." />
+              <input
+                type="text"
+                value={presenceSearch}
+                onChange={(event) => setPresenceSearch(event.target.value)}
+                placeholder="Search teammates..."
+                title="Search teammates — filter the live office list."
+              />
             </div>
 
             <div className="presence-list">
-              {presenceUsers.map((user, index) => {
+              {filteredUsers.map((user, index) => {
                 const displayName = user.username || `Guest ${index + 1}`;
                 const accent = user.isSelf ? "purple" : palette[index % palette.length];
                 return (

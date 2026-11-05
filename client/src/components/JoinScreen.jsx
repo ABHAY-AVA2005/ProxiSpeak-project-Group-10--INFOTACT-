@@ -190,7 +190,7 @@ export function JoinScreen({ onJoin }) {
               fontWeight: 700
             }}>
               <span>Team office</span>
-              <span>4 here</span>
+              <span>Ready</span>
             </div>
 
             <div style={{
