@@ -21,6 +21,13 @@ const ROOM_BORDERS = [
   { name: "Open Work", x: 660, y: 360, width: 255, height: 150, fill: "rgba(214, 219, 208, 0.9)" }
 ];
 
+function roomCenter(room) {
+  return {
+    x: room.x + room.width / 2,
+    y: room.y + room.height / 2,
+  };
+}
+
 const OBSTACLES = [
   { x: 120, y: 140, width: 160, height: 70, label: "Desk" },
   { x: 290, y: 140, width: 150, height: 70, label: "Desk" },
@@ -139,10 +146,11 @@ function drawAvatar(ctx, x, y, { name, colour, isLocal, inEarshot }) {
   }
 }
 
-function VirtualOffice({ username = "You", earshotRadius = 100, localStream = null, onUsersChange }) {
+function VirtualOffice({ username = "You", earshotRadius = 100, localStream = null, onUsersChange, meetingRooms = [], spawnRoom = null }) {
   const canvasRef = useRef(null);
   const earshotRef = useRef(earshotRadius);
   const localStreamRef = useRef(localStream);
+  const roomSet = Array.isArray(meetingRooms) ? meetingRooms : [];
 
   useEffect(() => { localStreamRef.current = localStream; }, [localStream]);
   useEffect(() => { earshotRef.current = earshotRadius; }, [earshotRadius]);
@@ -154,7 +162,14 @@ function VirtualOffice({ username = "You", earshotRadius = 100, localStream = nu
 
   useEffect(() => {
     player.current.username = username;
-  }, [username]);
+    if (!spawnRoom) return;
+    const targetRoom = [...ROOM_BORDERS, ...roomSet].find((room) => room.name === spawnRoom);
+    if (targetRoom) {
+      const center = roomCenter(targetRoom);
+      player.current.x = center.x;
+      player.current.y = center.y;
+    }
+  }, [username, spawnRoom, roomSet]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -478,13 +493,13 @@ function VirtualOffice({ username = "You", earshotRadius = 100, localStream = nu
         ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(WORLD_W, gy); ctx.stroke();
       }
 
-      ROOM_BORDERS.forEach((room) => {
-        ctx.fillStyle = room.fill;
+      [...ROOM_BORDERS, ...roomSet].forEach((room) => {
+        ctx.fillStyle = room.fill || "rgba(148, 174, 196, 0.72)";
         ctx.fillRect(room.x, room.y, room.width, room.height);
         ctx.strokeStyle = "#000000";
         ctx.lineWidth = 2.2;
         ctx.strokeRect(room.x, room.y, room.width, room.height);
-        ctx.fillStyle = room.name === "Focus Room" ? "#294f42" : room.name === "Lounge" ? "#6a4f3d" : "#464b45";
+        ctx.fillStyle = room.name === "Focus Room" ? "#294f42" : room.name === "Lounge" ? "#6a4f3d" : room.name === "Open Work" ? "#464b45" : "#2c4b5a";
         ctx.font = "700 12px Inter, Arial";
         ctx.textAlign = "center";
         ctx.fillText(room.name.toUpperCase(), room.x + room.width / 2, room.y + 24);

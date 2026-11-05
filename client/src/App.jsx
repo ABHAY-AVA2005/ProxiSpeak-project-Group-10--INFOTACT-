@@ -1,36 +1,63 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { JoinScreen } from "./components/JoinScreen";
 import VirtualOffice from "./VirtualOffice";
 import { AudioControls } from "./components/AudioControls";
 import { useMediaStream } from "./hooks/useMediaStream";
 
 const navItems = [
-  { id: "Office", icon: "◉", label: "Office" },
-  { id: "Team", icon: "◎", label: "Team" },
-  { id: "Chat", icon: "◌", label: "Chat" },
-  { id: "Meetings", icon: "▣", label: "Meetings" },
-  { id: "Settings", icon: "⚙", label: "Settings" },
+  { id: "Office", icon: "◉", label: "Office", description: "Open the live office floor" },
+  { id: "Team", icon: "◎", label: "Team", description: "Review the active office members" },
+  { id: "Chat", icon: "◌", label: "Chat", description: "Send quick team messages" },
+  { id: "Meetings", icon: "▣", label: "Meetings", description: "Create or join room-based meetings" },
+  { id: "Settings", icon: "⚙", label: "Settings", description: "Update preferences and workspace mode" },
 ];
 
 const palette = ["purple", "pink", "gold", "mint", "amber", "teal", "salmon", "sky", "lavender"];
+const baseRooms = [
+  { id: "Focus Room", name: "Focus Room", x: 450, y: 96, width: 250, height: 220, fill: "rgba(194, 220, 201, 0.92)" },
+  { id: "Lounge", name: "Lounge", x: 85, y: 360, width: 255, height: 150, fill: "rgba(214, 199, 177, 0.95)" },
+  { id: "Open Work", name: "Open Work", x: 660, y: 360, width: 255, height: 150, fill: "rgba(214, 219, 208, 0.9)" },
+];
+
+const baseNotifications = [
+  { id: 1, title: "Design sync reminder", detail: "Starts in 10 minutes in Focus Room" },
+  { id: 2, title: "New teammate joined", detail: "Ava just entered the office" },
+  { id: 3, title: "Silent mode enabled", detail: "Quiet hours is active for your workspace" },
+];
 
 function App() {
   const [username, setUsername] = useState(() => sessionStorage.getItem("proxispeak_username") || "");
   const [roomName, setRoomName] = useState(() => sessionStorage.getItem("proxispeak_room") || "Team Alpha");
   const [activeTab, setActiveTab] = useState("Office");
+  const [activeRoom, setActiveRoom] = useState("Focus Room");
+  const [officeRooms, setOfficeRooms] = useState(baseRooms);
+  const [roomDraft, setRoomDraft] = useState("");
+  const [themeMode, setThemeMode] = useState("dark");
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [notificationOpen, setNotificationOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
   const [onlineUsers, setOnlineUsers] = useState([]);
   const [chatMessages, setChatMessages] = useState([
     { id: 1, sender: "System", text: "Welcome to the virtual office. Start a conversation nearby.", time: "Now" },
     { id: 2, sender: "Ava", text: "Morning! I’m setting up the design review in the focus room.", time: "2m ago" },
   ]);
   const [draftMessage, setDraftMessage] = useState("");
-  const [settings, setSettings] = useState({ autoJoinAudio: true, focusMode: false, quietHours: false });
+  const [settings, setSettings] = useState({
+    autoJoinAudio: true,
+    focusMode: false,
+    quietHours: false,
+    desktopAlerts: true,
+    screenShare: false,
+    doNotDisturb: false,
+  });
+  const [notifications, setNotifications] = useState(baseNotifications);
   const { localStream, isMuted, permissionGranted, error, startAudio, toggleMute } = useMediaStream();
 
   const activeRoomName = roomName.trim() || "Team Alpha";
-  const presenceUsers = onlineUsers.length > 0
-    ? onlineUsers
-    : [{ username, isSelf: true, status: "In office" }];
+  const presenceUsers = useMemo(() => {
+    if (onlineUsers.length > 0) return onlineUsers;
+    return [{ username, isSelf: true, status: "In office" }];
+  }, [onlineUsers, username]);
 
   const handleJoin = (name, room) => {
     const cleanRoom = (room || "Team Alpha").trim() || "Team Alpha";
@@ -39,6 +66,7 @@ function App() {
     sessionStorage.setItem("proxispeak_room", cleanRoom);
     setUsername(cleanName);
     setRoomName(cleanRoom);
+    setActiveRoom(cleanRoom);
   };
 
   const handleLeave = () => {
@@ -46,6 +74,7 @@ function App() {
     sessionStorage.removeItem("proxispeak_room");
     setUsername("");
     setRoomName("Team Alpha");
+    setActiveRoom("Focus Room");
     setActiveTab("Office");
   };
 
@@ -58,15 +87,47 @@ function App() {
     setOnlineUsers(nextUsers);
   };
 
+  const handleCreateRoom = (event) => {
+    event.preventDefault();
+    const cleanName = roomDraft.trim();
+    if (!cleanName) return;
+
+    const customRoom = {
+      id: cleanName,
+      name: cleanName,
+      x: 220 + ((officeRooms.length % 3) * 135),
+      y: 140 + ((officeRooms.length % 2) * 95),
+      width: 220,
+      height: 150,
+      fill: "rgba(177, 212, 227, 0.82)",
+    };
+
+    setOfficeRooms((current) => {
+      const existing = current.some((room) => room.name.toLowerCase() === cleanName.toLowerCase());
+      if (existing) return current;
+      return [...current, customRoom];
+    });
+
+    setActiveRoom(cleanName);
+    setRoomName(cleanName);
+    setActiveTab("Office");
+    setRoomDraft("");
+    setNotifications((current) => [
+      { id: Date.now(), title: `${cleanName} ready`, detail: `Your avatar is now positioned inside ${cleanName}.` },
+      ...current,
+    ]);
+  };
+
   const handleSendMessage = (event) => {
     event.preventDefault();
     const trimmed = draftMessage.trim();
     if (!trimmed) return;
-    setChatMessages((current) => [
-      ...current,
-      { id: Date.now(), sender: "You", text: trimmed, time: "Now" },
-    ]);
+    setChatMessages((current) => [...current, { id: Date.now(), sender: "You", text: trimmed, time: "Now" }]);
     setDraftMessage("");
+  };
+
+  const handleToggleSetting = (key) => {
+    setSettings((current) => ({ ...current, [key]: !current[key] }));
   };
 
   const renderTabContent = () => {
@@ -94,7 +155,7 @@ function App() {
                     <strong>{user.isSelf ? `${displayName} (you)` : displayName}</strong>
                     <span>{user.isSelf ? "In office" : user.status || "In office"}</span>
                   </div>
-                  <button type="button" className="secondary-button">Message</button>
+                  <button type="button" className="secondary-button" title="Message teammate — start a direct note with this person." >Message</button>
                 </div>
               );
             })}
@@ -110,6 +171,7 @@ function App() {
             <h2>Workspace chat</h2>
             <span>Live</span>
           </div>
+
           <div className="chat-list">
             {chatMessages.map((message) => (
               <div key={message.id} className={`chat-item ${message.sender === "You" ? "self" : ""}`}>
@@ -121,14 +183,16 @@ function App() {
               </div>
             ))}
           </div>
+
           <form onSubmit={handleSendMessage} className="chat-form">
             <input
               type="text"
               value={draftMessage}
               onChange={(event) => setDraftMessage(event.target.value)}
               placeholder="Write a message..."
+              title="Message composer — send a quick team update."
             />
-            <button type="submit">Send</button>
+            <button type="submit" title="Send message — share your note with the office.">Send</button>
           </form>
         </div>
       );
@@ -141,21 +205,42 @@ function App() {
             <h2>Meetings</h2>
             <span>Today</span>
           </div>
+
+          <form onSubmit={handleCreateRoom} className="meeting-form">
+            <label className="meeting-room-field">
+              <span>Create office room</span>
+              <input
+                type="text"
+                value={roomDraft}
+                onChange={(event) => setRoomDraft(event.target.value)}
+                placeholder="e.g. Design Review"
+                title="Create room — type a room name and place your avatar there instantly."
+              />
+            </label>
+            <button type="submit" title="Create room — add a workspace room to the office map.">Create room</button>
+          </form>
+
           <div className="meeting-list">
-            <div className="meeting-item">
-              <div>
-                <strong>Design sync</strong>
-                <small>Focus Room • 10:30 AM</small>
+            {officeRooms.map((room) => (
+              <div className="meeting-item" key={room.id}>
+                <div>
+                  <strong>{room.name}</strong>
+                  <small>{room.name === activeRoom ? "Active location" : "Available"}</small>
+                </div>
+                <button
+                  type="button"
+                  className="primary-button"
+                  onClick={() => {
+                    setActiveRoom(room.name);
+                    setRoomName(room.name);
+                    setActiveTab("Office");
+                  }}
+                  title={`Open ${room.name} — jump your avatar directly into this room.`}
+                >
+                  {room.name === activeRoom ? "Selected" : "Open"}
+                </button>
               </div>
-              <button type="button" className="primary-button">Join</button>
-            </div>
-            <div className="meeting-item">
-              <div>
-                <strong>Team standup</strong>
-                <small>Open Work • 12:00 PM</small>
-              </div>
-              <button type="button" className="primary-button">Join</button>
-            </div>
+            ))}
           </div>
         </div>
       );
@@ -168,23 +253,33 @@ function App() {
             <h2>Settings</h2>
             <span>Preferences</span>
           </div>
+
           <div className="setting-list">
+            <label className="setting-row" title="Theme mode — switch between light and dark workspace layouts.">
+              <span>Theme mode</span>
+              <button
+                type="button"
+                className="theme-toggle"
+                onClick={() => setThemeMode((current) => (current === "dark" ? "light" : "dark"))}
+              >
+                {themeMode === "dark" ? "Dark" : "Light"}
+              </button>
+            </label>
+
             {[
-              ["autoJoinAudio", "Auto-join audio"],
-              ["focusMode", "Focus mode"],
-              ["quietHours", "Quiet hours"],
-            ].map(([key, label]) => (
-              <label key={key} className="setting-row">
+              ["autoJoinAudio", "Auto-join audio", "Enable microphone automatically when you enter the office."],
+              ["focusMode", "Focus mode", "Reduce distractions and keep notifications minimal."],
+              ["quietHours", "Quiet hours", "Mute non-urgent reminders during focused work."],
+              ["desktopAlerts", "Desktop alerts", "Show alert banners from the office workspace."],
+              ["screenShare", "Screen share", "Let teammates view your current workspace."],
+              ["doNotDisturb", "Do not disturb", "Pause incoming chat and call notifications."],
+            ].map(([key, label, description]) => (
+              <label key={key} className="setting-row" title={`${label} — ${description}`}>
                 <span>{label}</span>
                 <input
                   type="checkbox"
                   checked={settings[key]}
-                  onChange={() =>
-                    setSettings((current) => ({
-                      ...current,
-                      [key]: !current[key],
-                    }))
-                  }
+                  onChange={() => handleToggleSetting(key)}
                 />
               </label>
             ))}
@@ -201,7 +296,7 @@ function App() {
   }
 
   return (
-    <div className="proxi-app-shell">
+    <div className={`proxi-app-shell theme-${themeMode}`}>
       <aside className="proxi-sidebar">
         <div className="brand-block">
           <div className="brand-signal" aria-hidden="true">
@@ -223,6 +318,7 @@ function App() {
               type="button"
               className={`nav-item ${activeTab === item.id ? "active" : ""}`}
               onClick={() => setActiveTab(item.id)}
+              title={`${item.label} — ${item.description}`}
             >
               <span className="nav-icon">{item.icon}</span>
               {item.label}
@@ -230,7 +326,7 @@ function App() {
           ))}
         </nav>
 
-        <button className="sidebar-collapse" type="button" aria-label="Collapse sidebar">
+        <button className="sidebar-collapse" type="button" aria-label="Collapse sidebar" title="Collapse sidebar — hide the left navigation panel.">
           ‹
         </button>
 
@@ -261,28 +357,96 @@ function App() {
               startAudio={startAudio}
               error={error}
             />
-            <button className="pill-button fill" type="button">
+            <button className="pill-button fill" type="button" title={`Current room — ${activeRoomName}.`}>
               <span className="tiny-dot" />
               {activeRoomName}
             </button>
-            <button className="pill-button" type="button">
+            <button className="pill-button" type="button" title={`Occupancy — ${presenceUsers.length} member(s) online.`}>
               <span className="tiny-dot green" />
               {presenceUsers.length} Online
             </button>
           </div>
 
           <div className="header-tools">
-            <button className="toolbar-icon" type="button" aria-label="Search">
+            <button
+              className="toolbar-icon"
+              type="button"
+              aria-label="Search"
+              onClick={() => {
+                setSearchOpen((current) => !current);
+                setNotificationOpen(false);
+                setProfileOpen(false);
+              }}
+              title="Search — find teammates or workspace items quickly."
+            >
               ⌕
             </button>
-            <button className="toolbar-icon" type="button" aria-label="Notifications">
+            <button
+              className="toolbar-icon"
+              type="button"
+              aria-label="Notifications"
+              onClick={() => {
+                setNotificationOpen((current) => !current);
+                setSearchOpen(false);
+                setProfileOpen(false);
+              }}
+              title="Notifications — review the latest office updates."
+            >
               🔔
             </button>
-            <button className="profile-pill" type="button" aria-label="Profile">
+            <button
+              className="profile-pill"
+              type="button"
+              aria-label="Profile"
+              onClick={() => {
+                setProfileOpen((current) => !current);
+                setSearchOpen(false);
+                setNotificationOpen(false);
+              }}
+              title={`Profile — manage your ${username} account and workspace details.`}
+            >
               <span className="profile-avatar">{username.charAt(0).toUpperCase()}</span>
             </button>
           </div>
         </header>
+
+        {searchOpen && (
+          <div className="top-panel-popover">
+            <strong>Quick search</strong>
+            <input type="text" value="Search teammates..." readOnly />
+          </div>
+        )}
+
+        {notificationOpen && (
+          <div className="top-panel-popover">
+            <strong>Notifications</strong>
+            <div className="popover-list">
+              {notifications.map((item) => (
+                <div key={item.id} className="popover-row">
+                  <strong>{item.title}</strong>
+                  <small>{item.detail}</small>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {profileOpen && (
+          <div className="top-panel-popover profile-panel">
+            <strong>Profile</strong>
+            <div className="profile-summary">
+              <span className="profile-avatar large">{username.charAt(0).toUpperCase()}</span>
+              <div>
+                <strong>{username}</strong>
+                <small>{activeRoomName}</small>
+              </div>
+            </div>
+            <div className="profile-meta">
+              <span>Theme: {themeMode}</span>
+              <span>status: online</span>
+            </div>
+          </div>
+        )}
 
         <main className="workspace-grid">
           <section className="office-stage">
@@ -293,6 +457,8 @@ function App() {
                   earshotRadius={120}
                   localStream={localStream}
                   onUsersChange={handleUsersChange}
+                  meetingRooms={officeRooms}
+                  spawnRoom={activeRoom}
                 />
               ) : (
                 renderTabContent()
@@ -308,7 +474,7 @@ function App() {
 
             <div className="presence-search">
               <span>⌕</span>
-              <input type="text" value="Search teammates..." readOnly />
+              <input type="text" value="Search teammates..." readOnly title="Search teammates — filter the live office list." />
             </div>
 
             <div className="presence-list">
@@ -316,7 +482,7 @@ function App() {
                 const displayName = user.username || `Guest ${index + 1}`;
                 const accent = user.isSelf ? "purple" : palette[index % palette.length];
                 return (
-                  <div className="presence-item" key={user.socketId || `${displayName}-${index}`}>
+                  <div className="presence-item" key={user.socketId || `${displayName}-${index}`} title={`${displayName} — ${user.isSelf ? "You are in office" : user.status || "In office"}`}>
                     <div className={`presence-avatar avatar-${accent}`}>
                       {displayName
                         .split(" ")
@@ -344,16 +510,7 @@ function App() {
         </main>
 
         <footer className="bottom-controls">
-          <div className="controls-left">
-            <button className="compact-action mic" type="button" aria-label="Microphone">
-              <span>🎙</span>
-            </button>
-            <button className="compact-action muted" type="button" aria-label="Muted microphone">
-              <span>🔇</span>
-            </button>
-          </div>
-
-          <div className="proximity-box" aria-label="Proximity settings">
+          <div className="proximity-box" aria-label="Proximity settings" title="Proximity — adjust your local listening radius.">
             <span className="signal-bars" aria-hidden="true">
               <i />
               <i />
@@ -364,7 +521,7 @@ function App() {
           </div>
 
           <div className="controls-right">
-            <button className="compact-action end-call" type="button" aria-label="End call" onClick={handleLeave}>
+            <button className="compact-action end-call" type="button" aria-label="End call" onClick={handleLeave} title="End call — leave the office and return to join screen.">
               <span>✕</span>
             </button>
           </div>

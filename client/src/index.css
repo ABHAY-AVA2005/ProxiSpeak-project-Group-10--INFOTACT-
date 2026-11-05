@@ -40,6 +40,45 @@ button {
   color: #edf3ff;
 }
 
+.proxi-app-shell.theme-light {
+  background: #f4f7fb;
+  color: #1a2336;
+}
+
+.theme-light .proxi-sidebar {
+  background: linear-gradient(180deg, #edf2ff 0%, #e6ebff 100%);
+  color: #1b2337;
+}
+
+.theme-light .brand-text h1,
+.theme-light .brand-text span,
+.theme-light .nav-item,
+.theme-light .online-card,
+.theme-light .footer-copy,
+.theme-light .presence-panel,
+.theme-light .presence-item,
+.theme-light .main-header,
+.theme-light .pill-button,
+.theme-light .profile-pill,
+.theme-light .toolbar-icon,
+.theme-light .proximity-box,
+.theme-light .workspace-card,
+.theme-light .chat-bubble,
+.theme-light .meeting-item,
+.theme-light .detail-row,
+.theme-light .setting-row {
+  color: #1b2337;
+}
+
+.theme-light .nav-item {
+  background: rgba(255,255,255,0.4);
+}
+
+.theme-light .nav-item.active {
+  background: linear-gradient(90deg, #4f5ee6, #5d72f7);
+  color: #fff;
+}
+
 .proxi-sidebar {
   width: 220px;
   background: linear-gradient(180deg, #1d1d3a 0%, #1b1d36 100%);
@@ -242,6 +281,102 @@ button {
   align-items: center;
   gap: 20px;
   padding: 2px 4px 0;
+  position: relative;
+  z-index: 3;
+}
+
+.top-panel-popover {
+  position: relative;
+  z-index: 5;
+  margin: -6px 0 10px;
+  background: rgba(19, 25, 39, 0.96);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 16px;
+  padding: 12px 14px;
+  color: #edf5ff;
+  box-shadow: 0 18px 38px rgba(9, 13, 24, 0.28);
+}
+
+.theme-light .top-panel-popover {
+  background: rgba(255, 255, 255, 0.92);
+  color: #1a2336;
+}
+
+.top-panel-popover strong {
+  display: block;
+  margin-bottom: 10px;
+  font-size: 0.9rem;
+}
+
+.top-panel-popover input {
+  width: 100%;
+  border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(255,255,255,0.04);
+  border-radius: 10px;
+  padding: 10px 12px;
+  color: inherit;
+}
+
+.popover-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.popover-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 4px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+
+.popover-row:last-child {
+  border-bottom: none;
+}
+
+.popover-row strong {
+  margin: 0;
+  font-size: 0.82rem;
+}
+
+.popover-row small {
+  color: rgba(237,245,255,0.7);
+}
+
+.profile-panel {
+  max-width: 320px;
+}
+
+.profile-summary {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.profile-summary strong,
+.profile-meta {
+  display: block;
+}
+
+.profile-summary small {
+  display: block;
+  color: rgba(237,245,255,0.7);
+}
+
+.profile-avatar.large {
+  width: 42px;
+  height: 42px;
+  font-size: 1rem;
+}
+
+.profile-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 0.76rem;
+  color: rgba(237,245,255,0.7);
 }
 
 .header-pills {
@@ -473,6 +608,29 @@ button {
   border-radius: 16px;
 }
 
+.meeting-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.meeting-room-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-weight: 700;
+  color: #1b2337;
+}
+
+.meeting-room-field input {
+  width: 100%;
+  border: 1px solid rgba(17, 21, 33, 0.12);
+  border-radius: 12px;
+  background: rgba(255,255,255,0.7);
+  padding: 10px 12px;
+  font-size: 0.95rem;
+}
+
 .detail-copy {
   flex: 1;
   display: flex;
@@ -589,6 +747,16 @@ button {
 
 .setting-row span {
   font-weight: 600;
+}
+
+.theme-toggle {
+  border: none;
+  border-radius: 999px;
+  padding: 8px 12px;
+  background: linear-gradient(135deg, #4f5ee6, #7b61ff);
+  color: white;
+  font-weight: 700;
+  cursor: pointer;
 }
 
 .setting-row input {
