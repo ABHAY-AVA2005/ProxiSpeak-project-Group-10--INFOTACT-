@@ -139,7 +139,7 @@ function drawAvatar(ctx, x, y, { name, colour, isLocal, inEarshot }) {
   }
 }
 
-function VirtualOffice({ username = "You", earshotRadius = 100, localStream = null }) {
+function VirtualOffice({ username = "You", earshotRadius = 100, localStream = null, onUsersChange }) {
   const canvasRef = useRef(null);
   const earshotRef = useRef(earshotRadius);
   const localStreamRef = useRef(localStream);
@@ -162,6 +162,22 @@ function VirtualOffice({ username = "You", earshotRadius = 100, localStream = nu
     canvas.width = WORLD_W;
     canvas.height = WORLD_H;
 
+    const emitUsersSnapshot = () => {
+      if (typeof onUsersChange !== "function") return;
+      const users = [{
+        username: username || "You",
+        isSelf: true,
+        status: "In office",
+        socketId: "self"
+      }, ...Object.values(remotePlayers.current).map((player) => ({
+        username: player.username || "Guest",
+        isSelf: false,
+        status: "In office",
+        socketId: player.socketId || player.id || Math.random().toString(16).slice(2)
+      }))];
+      onUsersChange(users);
+    };
+
     const socket = io(SERVER_URL, { transports: ["websocket"], reconnectionAttempts: 5 });
 
     socket.on("connect", () => {
@@ -173,15 +189,17 @@ function VirtualOffice({ username = "You", earshotRadius = 100, localStream = nu
       (Array.isArray(list) ? list : Object.values(list || {})).forEach((u) => {
         const id = u.socketId || u.id;
         if (id && id !== socket.id) {
-          remotePlayers.current[id] = { x: u.x, y: u.y, targetX: u.x, targetY: u.y, username: u.username };
+          remotePlayers.current[id] = { x: u.x, y: u.y, targetX: u.x, targetY: u.y, username: u.username, socketId: id, id };
         }
       });
+      emitUsersSnapshot();
     });
 
     socket.on("user:joined", (u) => {
       const id = u.socketId || u.id;
       if (id && id !== socket.id) {
-        remotePlayers.current[id] = { x: u.x, y: u.y, targetX: u.x, targetY: u.y, username: u.username };
+        remotePlayers.current[id] = { x: u.x, y: u.y, targetX: u.x, targetY: u.y, username: u.username, socketId: id, id };
+        emitUsersSnapshot();
       }
     });
 
@@ -200,6 +218,7 @@ function VirtualOffice({ username = "You", earshotRadius = 100, localStream = nu
         delete colourCache[id];
         const audioEl = document.getElementById(`audio-${id}`);
         if (audioEl) audioEl.remove();
+        emitUsersSnapshot();
       }
     });
 
