@@ -944,17 +944,11 @@ function VirtualOffice({
         }
       });
 
-      // 2. Premium room separators and entrances
-      ctx.strokeStyle = "rgba(15, 23, 42, 0.12)";
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(250, 22); ctx.lineTo(250, 560); ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(690, 22); ctx.lineTo(690, 560); ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(250, 276); ctx.lineTo(690, 276); ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(250, 476); ctx.lineTo(690, 476); ctx.stroke();
+      // 2. Black room boundaries with a single entry point per room
+      ctx.fillStyle = "#000000";
+      [...WALLS, ...ROOM_BOUNDARIES].forEach((w) => {
+        ctx.fillRect(w.x, w.y, w.width, w.height);
+      });
 
       // 3. Obstacle fills (Tanvi Day 6 — world obstacles)
       OBSTACLES.forEach((obs) => {
@@ -970,13 +964,6 @@ function VirtualOffice({
           ctx.fillText(obs.label, obs.x + obs.width / 2, obs.y + obs.height / 2 + 5);
         }
       });
-
-      // 4. Room doorway markers
-      ctx.fillStyle = "rgba(15, 23, 42, 0.5)";
-      ctx.fillRect(330, 250, 100, 12);
-      ctx.fillRect(595, 250, 100, 12);
-      ctx.fillRect(330, 500, 100, 12);
-      ctx.fillRect(595, 500, 100, 12);
 
       // 4. Click-to-move target indicator and path preview
       if (clickTarget.current || routeRef.current.length > 0) {
