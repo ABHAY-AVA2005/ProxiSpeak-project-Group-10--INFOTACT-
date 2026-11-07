@@ -91,6 +91,8 @@ This separation will make the application easier to extend and maintain.
 
 My final recommendation: Prioritize A* navigation, spatial audio, real-time presence, collaborative whiteboards and private communication. These provide the strongest combination of practical usefulness, engineering depth and demonstration value.
 
+Implementation decision for this build: the primary collaboration workflow is screen sharing, while the brainstorming room remains in the office map as a room context but is no longer treated as the main feature endpoint. This keeps the dashboard cleaner, reduces overlapping UI complexity, and aligns the product with the required real-time meetings and presentation workflow.
+
 
 3. Critical technical risks
 1. Private-room security

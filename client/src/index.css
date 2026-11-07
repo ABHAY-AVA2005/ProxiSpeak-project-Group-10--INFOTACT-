@@ -66,7 +66,8 @@ button {
 .theme-light .chat-bubble,
 .theme-light .meeting-item,
 .theme-light .detail-row,
-.theme-light .setting-row {
+.theme-light .setting-row,
+.theme-light .screen-share-card {
   color: #1b2337;
 }
 
@@ -430,13 +431,6 @@ button {
   font-size: 1.15rem;
 }
 
-.theme-switch,
-.screen-share-toggle {
-  background: linear-gradient(135deg, rgba(94, 91, 255, 0.18), rgba(52, 211, 153, 0.12));
-  border-color: rgba(94, 91, 255, 0.2);
-  font-weight: 800;
-}
-
 .profile-pill {
   border: 1px solid rgba(17, 21, 33, 0.12);
   background: rgba(255,255,255,0.3);
@@ -466,24 +460,20 @@ button {
   gap: 18px;
   flex: 1;
   min-height: 0;
-  align-items: stretch;
 }
 
 .office-stage {
-  flex: 1 1 auto;
+  flex: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 10px;
-  min-height: 0;
 }
 
 .office-map-frame {
   position: relative;
   flex: 1;
   min-height: 560px;
-  height: 100%;
-  display: flex;
   background: linear-gradient(180deg, rgba(241,240,247,0.85), rgba(227,222,245,0.95));
   border: 1px solid rgba(17, 21, 33, 0.1);
   border-radius: 30px;
@@ -501,7 +491,6 @@ button {
 
 .presence-panel {
   width: 300px;
-  flex-shrink: 0;
   background: linear-gradient(180deg, rgba(26,32,54,0.96), rgba(19,22,41,0.94));
   border: 1px solid rgba(255,255,255,0.06);
   border-radius: 24px;
@@ -1010,13 +999,6 @@ button {
   border: 1px solid rgba(15, 23, 42, 0.08);
 }
 
-.secondary-toolbar-group {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
 .tool-group,
 .color-picker {
   display: flex;
@@ -1035,6 +1017,11 @@ button {
   color: #1f2937;
   font-weight: 700;
   cursor: pointer;
+}
+
+.clear-button:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
 }
 
 .tool-group .tool-selected {
@@ -1085,7 +1072,7 @@ button {
 .sticky-note {
   position: relative;
   min-height: 84px;
-  padding: 10px 28px 10px 12px;
+  padding: 10px 12px;
   border-radius: 14px;
   border: 1px solid rgba(15, 23, 42, 0.08);
   box-shadow: 0 12px 22px rgba(15, 23, 42, 0.08);
@@ -1101,15 +1088,108 @@ button {
   position: absolute;
   top: 6px;
   right: 6px;
-  width: 22px;
-  height: 22px;
   border: none;
-  border-radius: 50%;
   background: rgba(15, 23, 42, 0.12);
   color: #1f2937;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
   font-size: 1rem;
   line-height: 1;
   cursor: pointer;
+}
+
+.screen-share-card {
+  min-height: 460px;
+}
+
+.screen-share-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-height: 0;
+}
+
+.screen-share-stage {
+  border-radius: 22px;
+  border: 1px solid rgba(17, 21, 33, 0.1);
+  background: linear-gradient(180deg, rgba(21, 31, 54, 0.96), rgba(11, 15, 27, 0.98));
+  min-height: 330px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.screen-share-stage.idle {
+  background: linear-gradient(180deg, rgba(242, 246, 255, 0.9), rgba(229, 234, 249, 0.92));
+}
+
+.share-preview-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #edf5ff;
+  font-size: 0.9rem;
+}
+
+.screen-share-stage.idle .share-preview-header {
+  color: #1b2337;
+}
+
+.share-status-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #30d57b;
+  box-shadow: 0 0 0 5px rgba(48, 213, 123, 0.18);
+}
+
+.share-preview-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 2.1fr) minmax(190px, 0.9fr);
+  gap: 14px;
+  flex: 1;
+}
+
+.share-window {
+  min-height: 200px;
+  border-radius: 18px;
+  border: 1px solid rgba(255,255,255,0.1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 0.8rem;
+  color: rgba(232, 238, 255, 0.78);
+  background: rgba(255,255,255,0.05);
+}
+
+.screen-share-stage.idle .share-window {
+  background: rgba(255,255,255,0.48);
+  color: rgba(27,35,55,0.78);
+  border-color: rgba(17,21,33,0.08);
+}
+
+.main-window {
+  min-height: 240px;
+}
+
+.share-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.theme-toggle-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #1a2336;
+  font-size: 1rem;
+  font-weight: 700;
 }
 
 @media (max-width: 920px) {

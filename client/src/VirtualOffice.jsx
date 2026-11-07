@@ -11,8 +11,9 @@ const SERVER_URL =
 // ─── World constants (match server WORLD_BOUNDS) ─────────────────────────────
 const WORLD_W = 1000;
 const WORLD_H = 600;
-const GRID_SIZE = 40; // floor tile size in px
+const GRID_SIZE = 20;
 const AVATAR_RADIUS = 18;
+const PATH_STEP = 18;
 
 // ─── Wall / obstacle definitions ─────────────────────────────────────────────
 // Each rect: { x, y, width, height, label? }
@@ -50,6 +51,96 @@ function checkCollision(cx, cy, radius = AVATAR_RADIUS) {
   return false;
 }
 
+function pointToCell(x, y) {
+  return {
+    x: Math.max(0, Math.min(Math.floor(x / GRID_SIZE), Math.ceil(WORLD_W / GRID_SIZE) - 1)),
+    y: Math.max(0, Math.min(Math.floor(y / GRID_SIZE), Math.ceil(WORLD_H / GRID_SIZE) - 1)),
+  };
+}
+
+function cellToPoint(cell) {
+  return {
+    x: cell.x * GRID_SIZE + GRID_SIZE / 2,
+    y: cell.y * GRID_SIZE + GRID_SIZE / 2,
+  };
+}
+
+function isCellBlocked(cellX, cellY) {
+  if (cellX < 0 || cellY < 0 || cellX >= Math.ceil(WORLD_W / GRID_SIZE) || cellY >= Math.ceil(WORLD_H / GRID_SIZE)) {
+    return true;
+  }
+
+  const pointX = cellX * GRID_SIZE + GRID_SIZE / 2;
+  const pointY = cellY * GRID_SIZE + GRID_SIZE / 2;
+  return checkCollision(pointX, pointY, AVATAR_RADIUS + 8);
+}
+
+function findPath(start, goal) {
+  const startCell = pointToCell(start.x, start.y);
+  const goalCell = pointToCell(goal.x, goal.y);
+
+  if (isCellBlocked(startCell.x, startCell.y) || isCellBlocked(goalCell.x, goalCell.y)) {
+    return [];
+  }
+
+  const openSet = new Set([`${startCell.x},${startCell.y}`]);
+  const cameFrom = new Map();
+  const gScore = new Map([[`${startCell.x},${startCell.y}`, 0]]);
+  const fScore = new Map([[`${startCell.x},${startCell.y}`, Math.abs(startCell.x - goalCell.x) + Math.abs(startCell.y - goalCell.y)]]);
+
+  while (openSet.size > 0) {
+    let currentKey = null;
+    let currentScore = Infinity;
+    for (const key of openSet) {
+      const score = fScore.get(key) ?? Infinity;
+      if (score < currentScore) {
+        currentScore = score;
+        currentKey = key;
+      }
+    }
+
+    if (!currentKey) break;
+    const [cx, cy] = currentKey.split(",").map(Number);
+    if (cx === goalCell.x && cy === goalCell.y) {
+      const path = [{ x: cellToPoint({ x: cx, y: cy }).x, y: cellToPoint({ x: cx, y: cy }).y }];
+      let cursor = currentKey;
+      while (cameFrom.has(cursor)) {
+        cursor = cameFrom.get(cursor);
+        const [px, py] = cursor.split(",").map(Number);
+        path.unshift({ x: cellToPoint({ x: px, y: py }).x, y: cellToPoint({ x: px, y: py }).y });
+      }
+      return path;
+    }
+
+    openSet.delete(currentKey);
+    const neighbors = [
+      [0, -1], [1, 0], [0, 1], [-1, 0],
+      [-1, -1], [-1, 1], [1, -1], [1, 1],
+    ];
+
+    for (const [dx, dy] of neighbors) {
+      const nextX = cx + dx;
+      const nextY = cy + dy;
+      if (nextX < 0 || nextY < 0 || nextX >= Math.ceil(WORLD_W / GRID_SIZE) || nextY >= Math.ceil(WORLD_H / GRID_SIZE)) {
+        continue;
+      }
+      if (isCellBlocked(nextX, nextY)) continue;
+
+      const nextKey = `${nextX},${nextY}`;
+      const tentative = (gScore.get(currentKey) ?? Infinity) + (dx === 0 || dy === 0 ? 1 : 1.4);
+      if (tentative < (gScore.get(nextKey) ?? Infinity)) {
+        cameFrom.set(nextKey, currentKey);
+        gScore.set(nextKey, tentative);
+        const heuristic = Math.abs(nextX - goalCell.x) + Math.abs(nextY - goalCell.y);
+        fScore.set(nextKey, tentative + heuristic);
+        openSet.add(nextKey);
+      }
+    }
+  }
+
+  return [];
+}
+
 // ─── Colour helpers ───────────────────────────────────────────────────────────
 const REMOTE_COLOURS = [
   "#f97316", "#a855f7", "#ec4899", "#14b8a6",
@@ -64,12 +155,21 @@ function colourForId(id) {
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
-function VirtualOffice({ username = "You", earshotRadius = 100, localStream = null }) {
+function VirtualOffice({
+  username = "You",
+  earshotRadius = 100,
+  localStream = null,
+  onUsersChange = () => {},
+  meetingRooms = [],
+  spawnRoom = "Open Workspace",
+}) {
   const canvasRef = useRef(null);
   const earshotRef = useRef(earshotRadius);
   const localStreamRef = useRef(localStream);
   const peerConnectionsRef = useRef({});
   const pendingCandidatesRef = useRef({});
+  const routeRef = useRef([]);
+  const clickTargetRef = useRef(null);
 
   useEffect(() => { earshotRef.current = earshotRadius; }, [earshotRadius]);
 
@@ -81,6 +181,19 @@ function VirtualOffice({ username = "You", earshotRadius = 100, localStream = nu
   useEffect(() => {
     player.current.username = username;
   }, [username]);
+
+  useEffect(() => {
+    if (!meetingRooms.length) return;
+    const targetRoom = meetingRooms.find((room) => room.name === spawnRoom) || meetingRooms[0];
+    const x = targetRoom.x + targetRoom.width / 2;
+    const y = targetRoom.y + targetRoom.height / 2;
+    if (!Number.isNaN(x) && !Number.isNaN(y)) {
+      player.current.x = Math.max(30, Math.min(WORLD_W - 30, x));
+      player.current.y = Math.max(30, Math.min(WORLD_H - 30, y));
+      routeRef.current = [];
+      clickTargetRef.current = null;
+    }
+  }, [meetingRooms, spawnRoom]);
 
   // Handle local microphone track updates without reconnecting the socket
   useEffect(() => {
@@ -136,9 +249,23 @@ function VirtualOffice({ username = "You", earshotRadius = 100, localStream = nu
     // ── Socket.IO ──────────────────────────────────────────────────────────
     const socket = io(SERVER_URL, { transports: ["websocket"], reconnectionAttempts: 5 });
 
+    const notifyPresence = () => {
+      const entries = Object.entries(remotePlayers.current).map(([id, user]) => ({
+        socketId: id,
+        username: user.username || "Guest",
+        status: "In office",
+      }));
+
+      onUsersChange([
+        { socketId: socket.id || "local-user", username, status: "In office", isSelf: true },
+        ...entries,
+      ]);
+    };
+
     socket.on("connect", () => {
       console.log("[ProxiSpeak] Connected:", socket.id);
       socket.emit("join", { username, x: player.current.x, y: player.current.y });
+      notifyPresence();
     });
 
     socket.on("users:list", (list) => {
@@ -149,6 +276,7 @@ function VirtualOffice({ username = "You", earshotRadius = 100, localStream = nu
           remotePlayers.current[id] = { x: u.x, y: u.y, targetX: u.x, targetY: u.y, username: u.username };
         }
       });
+      notifyPresence();
     });
 
     socket.on("user:joined", (u) => {
@@ -156,6 +284,7 @@ function VirtualOffice({ username = "You", earshotRadius = 100, localStream = nu
       if (id && id !== socket.id) {
         remotePlayers.current[id] = { x: u.x, y: u.y, targetX: u.x, targetY: u.y, username: u.username };
       }
+      notifyPresence();
     });
 
     socket.on("user:moved", (data) => {
@@ -177,6 +306,7 @@ function VirtualOffice({ username = "You", earshotRadius = 100, localStream = nu
           username: data.username || ""
         };
       }
+      notifyPresence();
     });
 
     socket.on("user:left", (data) => {
@@ -196,6 +326,7 @@ function VirtualOffice({ username = "You", earshotRadius = 100, localStream = nu
           audioEl.remove();
         }
       }
+      notifyPresence();
     });
 
     // ── WebRTC Signaling & Spatial Audio Handshake ────────────────────────
@@ -517,9 +648,21 @@ function VirtualOffice({ username = "You", earshotRadius = 100, localStream = nu
       const scaleY = WORLD_H / rect.height;
       const tx = Math.round((e.clientX - rect.left) * scaleX);
       const ty = Math.round((e.clientY - rect.top) * scaleY);
-      if (!checkCollision(tx, ty)) {
-        clickTarget.current = { x: tx, y: ty };
+      const target = { x: tx, y: ty };
+      if (checkCollision(tx, ty)) {
+        const path = findPath({ x: player.current.x, y: player.current.y }, target);
+        if (path.length > 1) {
+          routeRef.current = path;
+          clickTargetRef.current = target;
+          return;
+        }
+        return;
       }
+
+      const path = findPath({ x: player.current.x, y: player.current.y }, target);
+      routeRef.current = path.length > 1 ? path : [{ x: target.x, y: target.y }];
+      clickTargetRef.current = target;
+      clickTarget.current = { x: tx, y: ty };
     };
     canvas.addEventListener("click", onCanvasClick);
 
@@ -546,7 +689,24 @@ function VirtualOffice({ username = "You", earshotRadius = 100, localStream = nu
       if (k["arrowleft"] || k["a"]) dx -= SPEED;
       if (k["arrowright"] || k["d"]) dx += SPEED;
 
-      // Click-to-move (only when no key held)
+      if (dx === 0 && dy === 0 && routeRef.current.length > 0) {
+        const nextPoint = routeRef.current[0];
+        const tdx = nextPoint.x - player.current.x;
+        const tdy = nextPoint.y - player.current.y;
+        const dist = Math.hypot(tdx, tdy);
+
+        if (dist <= PATH_STEP) {
+          routeRef.current.shift();
+          if (routeRef.current.length === 0) {
+            clickTarget.current = null;
+          }
+        } else {
+          dx = (tdx / dist) * CLICK_SPEED;
+          dy = (tdy / dist) * CLICK_SPEED;
+        }
+      }
+
+      // Click-to-move fallback when no path route is available
       if (dx === 0 && dy === 0 && clickTarget.current) {
         const tdx = clickTarget.current.x - player.current.x;
         const tdy = clickTarget.current.y - player.current.y;
@@ -555,6 +715,7 @@ function VirtualOffice({ username = "You", earshotRadius = 100, localStream = nu
           player.current.x = clickTarget.current.x;
           player.current.y = clickTarget.current.y;
           clickTarget.current = null;
+          clickTargetRef.current = null;
         } else {
           dx = (tdx / dist) * CLICK_SPEED;
           dy = (tdy / dist) * CLICK_SPEED;
@@ -564,12 +725,20 @@ function VirtualOffice({ username = "You", earshotRadius = 100, localStream = nu
       if (dx !== 0) {
         const nx = Math.max(20, Math.min(WORLD_W - 20, player.current.x + dx));
         if (!checkCollision(nx, player.current.y)) player.current.x = nx;
-        else clickTarget.current = null;
+        else {
+          clickTarget.current = null;
+          clickTargetRef.current = null;
+          routeRef.current = [];
+        }
       }
       if (dy !== 0) {
         const ny = Math.max(20, Math.min(WORLD_H - 20, player.current.y + dy));
         if (!checkCollision(player.current.x, ny)) player.current.y = ny;
-        else clickTarget.current = null;
+        else {
+          clickTarget.current = null;
+          clickTargetRef.current = null;
+          routeRef.current = [];
+        }
       }
 
       // ─── Throttled emit (~30/sec) ─────────────────────────────────────
@@ -645,15 +814,34 @@ function VirtualOffice({ username = "You", earshotRadius = 100, localStream = nu
       ctx.font = "10px Inter, Arial";
       ctx.fillText("DOOR", 650, 316);
 
-      // 4. Click-to-move target indicator
-      if (clickTarget.current) {
-        ctx.beginPath();
-        ctx.arc(clickTarget.current.x, clickTarget.current.y, 8, 0, Math.PI * 2);
-        ctx.strokeStyle = "rgba(99,179,237,0.8)";
-        ctx.lineWidth = 2;
-        ctx.setLineDash([3, 3]);
-        ctx.stroke();
-        ctx.setLineDash([]);
+      // 4. Click-to-move target indicator and path preview
+      if (clickTarget.current || routeRef.current.length > 0) {
+        const route = routeRef.current.length > 1 ? routeRef.current : [];
+        if (route.length > 1) {
+          ctx.beginPath();
+          route.forEach((point, index) => {
+            if (index === 0) {
+              ctx.moveTo(point.x, point.y);
+            } else {
+              ctx.lineTo(point.x, point.y);
+            }
+          });
+          ctx.strokeStyle = "rgba(96,165,250,0.9)";
+          ctx.lineWidth = 2;
+          ctx.setLineDash([6, 4]);
+          ctx.stroke();
+          ctx.setLineDash([]);
+        }
+
+        if (clickTarget.current) {
+          ctx.beginPath();
+          ctx.arc(clickTarget.current.x, clickTarget.current.y, 8, 0, Math.PI * 2);
+          ctx.strokeStyle = "rgba(99,179,237,0.8)";
+          ctx.lineWidth = 2;
+          ctx.setLineDash([3, 3]);
+          ctx.stroke();
+          ctx.setLineDash([]);
+        }
       }
 
       // 5. Earshot circle (Tanvi Day 5 — visual feedback)

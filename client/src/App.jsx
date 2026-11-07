@@ -2,15 +2,16 @@ import { useMemo, useState } from "react";
 import { JoinScreen } from "./components/JoinScreen";
 import VirtualOffice from "./VirtualOffice";
 import { AudioControls } from "./components/AudioControls";
-import { CollaborativeWhiteboard } from "./components/CollaborativeWhiteboard";
 import { useMediaStream } from "./hooks/useMediaStream";
+import { CollaborativeWhiteboard } from "./components/CollaborativeWhiteboard";
 
 const navItems = [
   { id: "Office", icon: "◉", label: "Office", description: "Open the live office floor" },
   { id: "Team", icon: "◎", label: "Team", description: "Review the active office members" },
   { id: "Chat", icon: "◌", label: "Chat", description: "Send quick team messages" },
+  { id: "Brainstorming", icon: "✦", label: "Brainstorming", description: "Use the collaborative whiteboard and notes" },
   { id: "Meetings", icon: "▣", label: "Meetings", description: "Create or join room-based meetings" },
-  { id: "Brainstorming", icon: "▤", label: "Brainstorming", description: "Use the collaborative idea board" },
+  { id: "Screen Share", icon: "▤", label: "Screen Share", description: "Share your workspace or presentation" },
   { id: "Settings", icon: "⚙", label: "Settings", description: "Update preferences and workspace mode" },
 ];
 
@@ -147,6 +148,52 @@ function App() {
   const renderTabContent = () => {
     if (activeTab === "Brainstorming") {
       return <CollaborativeWhiteboard />;
+    }
+
+    if (activeTab === "Screen Share") {
+      return (
+        <div className="workspace-card screen-share-card">
+          <div className="card-header-row">
+            <h2>Screen share</h2>
+            <span>{settings.screenShare ? "Live session" : "Ready to share"}</span>
+          </div>
+
+          <div className="screen-share-shell">
+            <div className={`screen-share-stage ${settings.screenShare ? "active" : "idle"}`}>
+              <div className="share-preview-header">
+                <span className="share-status-dot" />
+                <strong>{settings.screenShare ? "Sharing your workspace" : "No active share"}</strong>
+              </div>
+
+              <div className="share-preview-grid">
+                <div className="share-window main-window">
+                  <span>Workspace preview</span>
+                </div>
+                <div className="share-window side-window">
+                  <span>Presenter notes</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="share-actions">
+              <button
+                type="button"
+                className="primary-button"
+                onClick={() => handleToggleSetting("screenShare")}
+              >
+                {settings.screenShare ? "Stop sharing" : "Start sharing"}
+              </button>
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => addNotification("Share linked", "Screen share is available to the active office room.")}
+              >
+                Share link
+              </button>
+            </div>
+          </div>
+        </div>
+      );
     }
 
     if (activeTab === "Team") {
@@ -401,6 +448,21 @@ function App() {
               startAudio={startAudio}
               error={error}
             />
+            <button
+              type="button"
+              className="toolbar-icon theme-toggle-button"
+              aria-label="Toggle light and dark mode"
+              onClick={() => {
+                setThemeMode((current) => {
+                  const next = current === "dark" ? "light" : "dark";
+                  addNotification("Theme updated", `Switched to ${next} mode.`);
+                  return next;
+                });
+              }}
+              title="Theme — switch between light and dark dashboard mode."
+            >
+              {themeMode === "dark" ? "☀" : "☾"}
+            </button>
             <button className="pill-button fill" type="button" title={`Current room — ${activeRoomName}.`}>
               <span className="tiny-dot" />
               {activeRoomName}
@@ -413,15 +475,6 @@ function App() {
 
           <div className="header-tools">
             <button
-              className="toolbar-icon theme-switch"
-              type="button"
-              aria-label="Toggle theme"
-              onClick={() => setThemeMode((current) => current === "dark" ? "light" : "dark")}
-              title={`Theme — switch to ${themeMode === "dark" ? "light" : "dark"} mode.`}
-            >
-              {themeMode === "dark" ? "☀" : "☾"}
-            </button>
-            <button
               className="toolbar-icon"
               type="button"
               aria-label="Notifications"
@@ -433,16 +486,6 @@ function App() {
             >
               🔔
             </button>
-            {settings.screenShare && (
-              <button
-                className="toolbar-icon screen-share-toggle"
-                type="button"
-                aria-label="Screen sharing"
-                title="Screen share is active — your workspace is visible to colleagues."
-              >
-                ◉
-              </button>
-            )}
             <button
               className="profile-pill"
               type="button"
