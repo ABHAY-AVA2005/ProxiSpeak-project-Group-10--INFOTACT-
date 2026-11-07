@@ -413,6 +413,15 @@ function App() {
 
           <div className="header-tools">
             <button
+              className="toolbar-icon theme-switch"
+              type="button"
+              aria-label="Toggle theme"
+              onClick={() => setThemeMode((current) => current === "dark" ? "light" : "dark")}
+              title={`Theme — switch to ${themeMode === "dark" ? "light" : "dark"} mode.`}
+            >
+              {themeMode === "dark" ? "☀" : "☾"}
+            </button>
+            <button
               className="toolbar-icon"
               type="button"
               aria-label="Notifications"
@@ -424,6 +433,16 @@ function App() {
             >
               🔔
             </button>
+            {settings.screenShare && (
+              <button
+                className="toolbar-icon screen-share-toggle"
+                type="button"
+                aria-label="Screen sharing"
+                title="Screen share is active — your workspace is visible to colleagues."
+              >
+                ◉
+              </button>
+            )}
             <button
               className="profile-pill"
               type="button"

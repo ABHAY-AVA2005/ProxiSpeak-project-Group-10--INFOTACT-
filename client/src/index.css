@@ -430,6 +430,13 @@ button {
   font-size: 1.15rem;
 }
 
+.theme-switch,
+.screen-share-toggle {
+  background: linear-gradient(135deg, rgba(94, 91, 255, 0.18), rgba(52, 211, 153, 0.12));
+  border-color: rgba(94, 91, 255, 0.2);
+  font-weight: 800;
+}
+
 .profile-pill {
   border: 1px solid rgba(17, 21, 33, 0.12);
   background: rgba(255,255,255,0.3);
@@ -459,20 +466,24 @@ button {
   gap: 18px;
   flex: 1;
   min-height: 0;
+  align-items: stretch;
 }
 
 .office-stage {
-  flex: 1;
+  flex: 1 1 auto;
   min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 10px;
+  min-height: 0;
 }
 
 .office-map-frame {
   position: relative;
   flex: 1;
   min-height: 560px;
+  height: 100%;
+  display: flex;
   background: linear-gradient(180deg, rgba(241,240,247,0.85), rgba(227,222,245,0.95));
   border: 1px solid rgba(17, 21, 33, 0.1);
   border-radius: 30px;
@@ -490,6 +501,7 @@ button {
 
 .presence-panel {
   width: 300px;
+  flex-shrink: 0;
   background: linear-gradient(180deg, rgba(26,32,54,0.96), rgba(19,22,41,0.94));
   border: 1px solid rgba(255,255,255,0.06);
   border-radius: 24px;
@@ -998,6 +1010,13 @@ button {
   border: 1px solid rgba(15, 23, 42, 0.08);
 }
 
+.secondary-toolbar-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .tool-group,
 .color-picker {
   display: flex;
@@ -1064,8 +1083,9 @@ button {
 }
 
 .sticky-note {
+  position: relative;
   min-height: 84px;
-  padding: 10px 12px;
+  padding: 10px 28px 10px 12px;
   border-radius: 14px;
   border: 1px solid rgba(15, 23, 42, 0.08);
   box-shadow: 0 12px 22px rgba(15, 23, 42, 0.08);
@@ -1075,6 +1095,21 @@ button {
   align-items: center;
   justify-content: center;
   text-align: center;
+}
+
+.note-delete {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(15, 23, 42, 0.12);
+  color: #1f2937;
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
 }
 
 @media (max-width: 920px) {
