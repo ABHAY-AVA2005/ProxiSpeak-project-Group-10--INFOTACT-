@@ -5,11 +5,44 @@ export function useMediaStream() {
   const [isMuted, setIsMuted] = useState(false);
   const [permissionGranted, setPermissionGranted] = useState(false);
   const [error, setError] = useState(null);
+  const [speakerVolume, setSpeakerVolume] = useState(80);
+  const [speakerEnabled, setSpeakerEnabled] = useState(true);
 
   const streamRef = useRef(null);
+  const audioContextRef = useRef(null);
+  const outputGainRef = useRef(null);
+  const sourceRef = useRef(null);
+
   useEffect(() => {
     streamRef.current = localStream;
-  }, [localStream]);
+
+    if (!localStream) {
+      sourceRef.current = null;
+      return;
+    }
+
+    if (!audioContextRef.current) {
+      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+      if (AudioContextClass) {
+        audioContextRef.current = new AudioContextClass();
+        outputGainRef.current = audioContextRef.current.createGain();
+        outputGainRef.current.gain.value = speakerEnabled ? speakerVolume / 100 : 0;
+        outputGainRef.current.connect(audioContextRef.current.destination);
+      }
+    }
+
+    if (audioContextRef.current && outputGainRef.current && !sourceRef.current) {
+      const sourceNode = audioContextRef.current.createMediaStreamSource(localStream);
+      sourceNode.connect(outputGainRef.current);
+      sourceRef.current = sourceNode;
+    }
+  }, [localStream, speakerEnabled, speakerVolume]);
+
+  useEffect(() => {
+    if (outputGainRef.current) {
+      outputGainRef.current.gain.value = speakerEnabled ? speakerVolume / 100 : 0;
+    }
+  }, [speakerEnabled, speakerVolume]);
 
   const startAudio = useCallback(async () => {
     try {
@@ -52,9 +85,28 @@ export function useMediaStream() {
     }
   }, [localStream]);
 
-  // Cleanup tracks only when component unmounts
+  const toggleSpeakerMute = useCallback(() => {
+    setSpeakerEnabled((current) => !current);
+  }, []);
+
+  const updateSpeakerVolume = useCallback((nextVolume) => {
+    const clampedValue = Math.max(0, Math.min(100, Number(nextVolume) || 0));
+    setSpeakerVolume(clampedValue);
+  }, []);
+
   useEffect(() => {
     return () => {
+      if (sourceRef.current) {
+        sourceRef.current.disconnect();
+        sourceRef.current = null;
+      }
+
+      if (audioContextRef.current) {
+        audioContextRef.current.close().catch(() => undefined);
+        audioContextRef.current = null;
+        outputGainRef.current = null;
+      }
+
       if (streamRef.current) {
         streamRef.current.getTracks().forEach((track) => {
           console.log(`[MediaStream] Stopping local track ${track.id} on unmount`);
@@ -71,5 +123,9 @@ export function useMediaStream() {
     error,
     startAudio,
     toggleMute,
+    speakerEnabled,
+    speakerVolume,
+    setSpeakerVolume: updateSpeakerVolume,
+    toggleSpeakerMute,
   };
 }

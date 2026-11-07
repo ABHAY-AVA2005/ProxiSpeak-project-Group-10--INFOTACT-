@@ -47,7 +47,18 @@ function App() {
   const [notifications, setNotifications] = useState([]);
   const [screenShareStream, setScreenShareStream] = useState(null);
   const screenShareVideoRef = useRef(null);
-  const { localStream, isMuted, permissionGranted, error, startAudio, toggleMute, volumeLevel, setVolumeLevel } = useMediaStream();
+  const {
+    localStream,
+    isMuted,
+    permissionGranted,
+    error,
+    startAudio,
+    toggleMute,
+    speakerEnabled,
+    speakerVolume,
+    setSpeakerVolume,
+    toggleSpeakerMute,
+  } = useMediaStream();
 
   useEffect(() => {
     const video = screenShareVideoRef.current;
@@ -480,30 +491,15 @@ function App() {
       <div className="workspace-panel">
         <header className="main-header">
           <div className="header-pills">
-            <button
-              type="button"
-              className="toolbar-icon volume-btn"
-              aria-label="Volume down"
-              onClick={() => setVolumeLevel((current) => Math.max(0, current - 10))}
-              title="Volume down — lower the active microphone level."
-            >
-              −
-            </button>
-            <button
-              type="button"
-              className="toolbar-icon volume-btn"
-              aria-label="Volume up"
-              onClick={() => setVolumeLevel((current) => Math.min(100, current + 10))}
-              title="Volume up — increase the active microphone level."
-            >
-              +
-            </button>
             <AudioControls
               isMuted={isMuted}
               toggleMute={toggleMute}
               permissionGranted={permissionGranted}
               startAudio={startAudio}
-              error={error}
+              speakerEnabled={speakerEnabled}
+              speakerVolume={speakerVolume}
+              setSpeakerVolume={setSpeakerVolume}
+              toggleSpeakerMute={toggleSpeakerMute}
             />
             <button
               type="button"

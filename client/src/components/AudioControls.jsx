@@ -1,43 +1,75 @@
-export function AudioControls({ isMuted, toggleMute, permissionGranted, startAudio }) {
-  if (!permissionGranted) {
-    return (
-      <div style={{ position: 'fixed', bottom: 20, right: 20, zIndex: 100 }}>
-        <button
-          onClick={startAudio}
-          style={{
-            padding: '10px 18px',
-            backgroundColor: '#2563eb',
-            color: '#fff',
-            borderRadius: '8px',
-            border: 'none',
-            cursor: 'pointer',
-            fontWeight: '600',
-            boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
-          }}
-        >
-          🎙️ Enable Microphone
-        </button>
-      </div>
-    );
-  }
+export function AudioControls({
+  isMuted,
+  toggleMute,
+  permissionGranted,
+  startAudio,
+  speakerEnabled,
+  speakerVolume,
+  setSpeakerVolume,
+  toggleSpeakerMute,
+}) {
+  const speakerLabel = speakerEnabled ? `${speakerVolume}%` : 'Muted';
 
   return (
-    <div style={{ position: 'fixed', bottom: 20, right: 20, zIndex: 100 }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
       <button
-        onClick={toggleMute}
-        style={{
-          padding: '10px 18px',
-          backgroundColor: isMuted ? '#ef4444' : '#10b981',
-          color: '#fff',
-          borderRadius: '8px',
-          border: 'none',
-          cursor: 'pointer',
-          fontWeight: '600',
-          boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
-        }}
+        type="button"
+        className="toolbar-icon"
+        aria-label={speakerEnabled ? 'Mute audio output' : 'Enable audio output'}
+        onClick={toggleSpeakerMute}
+        title={speakerEnabled ? 'Mute system sound' : 'Enable system sound'}
       >
-        {isMuted ? '🔇 Mic Muted' : '🎙️ Mic Active'}
+        {speakerEnabled ? '🔊' : '🔇'}
       </button>
+
+      <button
+        type="button"
+        className="toolbar-icon volume-btn"
+        aria-label="Decrease sound"
+        onClick={() => setSpeakerVolume(Math.max(0, speakerVolume - 10))}
+        title="Decrease system sound."
+      >
+        −
+      </button>
+
+      <button
+        type="button"
+        className="toolbar-icon volume-btn"
+        aria-label="Increase sound"
+        onClick={() => setSpeakerVolume(Math.min(100, speakerVolume + 10))}
+        title="Increase system sound."
+      >
+        +
+      </button>
+
+      <span
+        className="pill-button"
+        style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minWidth: '82px' }}
+        title={`Sound output: ${speakerLabel}`}
+      >
+        {speakerLabel}
+      </span>
+
+      {permissionGranted ? (
+        <button
+          type="button"
+          className="pill-button"
+          onClick={toggleMute}
+          title={isMuted ? 'Enable microphone input' : 'Disable microphone input'}
+        >
+          {isMuted ? 'Mic Off' : 'Mic On'}
+        </button>
+      ) : (
+        <button
+          type="button"
+          className="primary-button"
+          onClick={startAudio}
+          title="Enable microphone input for office calls."
+          style={{ padding: '0.7rem 1rem', minWidth: '140px' }}
+        >
+          Enable Mic
+        </button>
+      )}
     </div>
   );
 }
