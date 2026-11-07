@@ -15,11 +15,12 @@ const navItems = [
 
 const palette = ["purple", "pink", "gold", "mint", "amber", "teal", "salmon", "sky", "lavender"];
 const baseRooms = [
-  { id: "Reception", name: "Reception", x: 42, y: 38, width: 210, height: 160, fill: "rgba(255, 240, 210, 0.9)" },
-  { id: "Open Workspace", name: "Open Workspace", x: 285, y: 38, width: 350, height: 220, fill: "rgba(175, 212, 220, 0.9)" },
-  { id: "Conference Room", name: "Conference Room", x: 675, y: 38, width: 250, height: 220, fill: "rgba(203, 211, 212, 0.9)" },
-  { id: "Cafeteria", name: "Cafeteria", x: 675, y: 320, width: 250, height: 190, fill: "rgba(214, 192, 170, 0.96)" },
-  { id: "Private Meeting Room", name: "Private Meeting Room", x: 42, y: 320, width: 210, height: 190, fill: "rgba(194, 220, 201, 0.9)" },
+  { id: "Reception", name: "Reception", x: 34, y: 24, width: 210, height: 150, fill: "rgba(255, 240, 210, 0.9)" },
+  { id: "Open Workspace", name: "Open Workspace", x: 270, y: 24, width: 420, height: 220, fill: "rgba(175, 212, 220, 0.9)" },
+  { id: "Conference Room", name: "Conference Room", x: 710, y: 24, width: 250, height: 220, fill: "rgba(203, 211, 212, 0.9)" },
+  { id: "Brainstorming Room", name: "Brainstorming Room", x: 270, y: 286, width: 420, height: 190, fill: "rgba(212, 208, 248, 0.92)" },
+  { id: "Cafeteria", name: "Cafeteria", x: 710, y: 286, width: 250, height: 190, fill: "rgba(214, 192, 170, 0.96)" },
+  { id: "Private Meeting Room", name: "Private Meeting Room", x: 34, y: 286, width: 210, height: 190, fill: "rgba(194, 220, 201, 0.9)" },
 ];
 
 function App() {
@@ -230,7 +231,9 @@ function App() {
               </div>
 
               {screenShareStream ? (
-                <video ref={screenShareVideoRef} autoPlay muted playsInline className="screen-share-video" />
+                <div className="screen-share-video-wrap">
+                  <video ref={screenShareVideoRef} autoPlay muted playsInline className="screen-share-video" />
+                </div>
               ) : (
                 <div className="share-preview-grid">
                   <div className="share-window main-window">

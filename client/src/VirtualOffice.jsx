@@ -65,6 +65,21 @@ function cellToPoint(cell) {
   };
 }
 
+function drawRoundedRect(ctx, x, y, width, height, radius) {
+  const r = Math.min(radius, width / 2, height / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + width - r, y);
+  ctx.quadraticCurveTo(x + width, y, x + width, y + r);
+  ctx.lineTo(x + width, y + height - r);
+  ctx.quadraticCurveTo(x + width, y + height, x + width - r, y + height);
+  ctx.lineTo(x + r, y + height);
+  ctx.quadraticCurveTo(x, y + height, x, y + height - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+}
+
 function isCellBlocked(cellX, cellY) {
   if (cellX < 0 || cellY < 0 || cellX >= Math.ceil(WORLD_W / GRID_SIZE) || cellY >= Math.ceil(WORLD_H / GRID_SIZE)) {
     return true;
@@ -764,11 +779,11 @@ function VirtualOffice({
       // ─── Render ───────────────────────────────────────────────────────
       ctx.clearRect(0, 0, WORLD_W, WORLD_H);
 
-      // 1. Floor grid (Tanvi Day 2)
-      ctx.fillStyle = "#1e2533";
+      // 1. Floor base and premium room layout
+      ctx.fillStyle = "#edf1f7";
       ctx.fillRect(0, 0, WORLD_W, WORLD_H);
 
-      ctx.strokeStyle = "rgba(255,255,255,0.045)";
+      ctx.strokeStyle = "rgba(15, 23, 42, 0.06)";
       ctx.lineWidth = 1;
       for (let gx = 0; gx <= WORLD_W; gx += GRID_SIZE) {
         ctx.beginPath(); ctx.moveTo(gx, 0); ctx.lineTo(gx, WORLD_H); ctx.stroke();
@@ -777,7 +792,123 @@ function VirtualOffice({
         ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(WORLD_W, gy); ctx.stroke();
       }
 
-      // 2. Obstacle fills (Tanvi Day 6 — world obstacles)
+      const roomLayout = Array.isArray(meetingRooms) && meetingRooms.length > 0 ? meetingRooms : [
+        { id: "Reception", name: "Reception", x: 34, y: 22, width: 210, height: 154, fill: "rgba(255,234,196,0.9)" },
+        { id: "Open Workspace", name: "Open Workspace", x: 270, y: 22, width: 420, height: 210, fill: "rgba(175,214,220,0.9)" },
+        { id: "Conference Room", name: "Conference Room", x: 710, y: 22, width: 250, height: 210, fill: "rgba(203,211,212,0.9)" },
+        { id: "Brainstorming Room", name: "Brainstorming Room", x: 270, y: 286, width: 420, height: 190, fill: "rgba(212,208,248,0.92)" },
+        { id: "Cafeteria", name: "Cafeteria", x: 710, y: 286, width: 250, height: 190, fill: "rgba(214,192,170,0.96)" },
+        { id: "Private Meeting Room", name: "Private Meeting Room", x: 34, y: 286, width: 210, height: 190, fill: "rgba(194,220,201,0.9)" },
+      ];
+
+      roomLayout.forEach((room) => {
+        const x = room.x;
+        const y = room.y;
+        const width = room.width;
+        const height = room.height;
+
+        ctx.save();
+        drawRoundedRect(ctx, x, y, width, height, 18);
+        ctx.fillStyle = room.fill || "rgba(255,255,255,0.85)";
+        ctx.fill();
+        ctx.strokeStyle = "rgba(15, 23, 42, 0.12)";
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        ctx.restore();
+
+        ctx.fillStyle = "rgba(15, 23, 42, 0.8)";
+        ctx.font = "bold 12px Inter, Arial";
+        ctx.textAlign = "center";
+        ctx.fillText(room.name, x + width / 2, y + 20);
+
+        if (room.name === "Reception") {
+          ctx.fillStyle = "rgba(255,255,255,0.55)";
+          drawRoundedRect(ctx, x + 18, y + 32, width - 36, 42, 12);
+          ctx.fill();
+          ctx.fillStyle = "#9a6f3e";
+          ctx.fillRect(x + 34, y + 90, width - 68, 26);
+          ctx.fillStyle = "#f4e7d5";
+          for (let i = 0; i < 4; i += 1) {
+            const chairX = x + 32 + i * 40;
+            ctx.fillRect(chairX, y + 118, 18, 20);
+          }
+        }
+
+        if (room.name === "Open Workspace") {
+          ctx.fillStyle = "rgba(255,255,255,0.55)";
+          for (let i = 0; i < 4; i += 1) {
+            const deskX = x + 40 + i * 86;
+            drawRoundedRect(ctx, deskX, y + 52, 52, 26, 8);
+            ctx.fill();
+            drawRoundedRect(ctx, deskX + 8, y + 82, 36, 44, 8);
+            ctx.fill();
+          }
+        }
+
+        if (room.name === "Conference Room") {
+          ctx.fillStyle = "rgba(255,255,255,0.55)";
+          drawRoundedRect(ctx, x + 58, y + 58, width - 110, 50, 14);
+          ctx.fill();
+          ctx.fillStyle = "rgba(28,39,53,0.72)";
+          for (let i = 0; i < 5; i += 1) {
+            const chairX = x + 50 + i * 35;
+            ctx.fillRect(chairX, y + 120, 20, 18);
+          }
+          ctx.fillStyle = "#5b6478";
+          ctx.fillRect(x + 90, y + 150, width - 180, 18);
+        }
+
+        if (room.name === "Brainstorming Room") {
+          ctx.fillStyle = "rgba(255,255,255,0.54)";
+          drawRoundedRect(ctx, x + 30, y + 36, width - 60, 62, 16);
+          ctx.fill();
+          drawRoundedRect(ctx, x + 48, y + 112, width - 96, 34, 10);
+          ctx.fill();
+          ctx.fillStyle = "rgba(255,255,255,0.9)";
+          ctx.fillRect(x + 72, y + 52, 46, 28);
+          ctx.fillRect(x + 140, y + 52, 46, 28);
+          ctx.fillRect(x + 208, y + 52, 46, 28);
+          ctx.fillRect(x + 276, y + 52, 46, 28);
+        }
+
+        if (room.name === "Cafeteria") {
+          ctx.fillStyle = "rgba(255,255,255,0.52)";
+          drawRoundedRect(ctx, x + 26, y + 38, width - 52, 36, 12);
+          ctx.fill();
+          ctx.fillStyle = "#8d5d3f";
+          ctx.fillRect(x + 40, y + 94, width - 80, 20);
+          ctx.fillStyle = "#f4e7d5";
+          for (let i = 0; i < 4; i += 1) {
+            const seatX = x + 48 + i * 42;
+            ctx.fillRect(seatX, y + 118, 18, 20);
+          }
+        }
+
+        if (room.name === "Private Meeting Room") {
+          ctx.fillStyle = "rgba(255,255,255,0.52)";
+          drawRoundedRect(ctx, x + 36, y + 50, width - 72, 54, 12);
+          ctx.fill();
+          ctx.fillStyle = "rgba(20, 39, 30, 0.72)";
+          ctx.fillRect(x + 56, y + 120, width - 112, 16);
+          ctx.fillStyle = "#edf5ef";
+          ctx.fillRect(x + 58, y + 140, 26, 18);
+          ctx.fillRect(x + 98, y + 140, 26, 18);
+        }
+      });
+
+      // 2. Premium room separators and entrances
+      ctx.strokeStyle = "rgba(15, 23, 42, 0.12)";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(250, 22); ctx.lineTo(250, 560); ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(690, 22); ctx.lineTo(690, 560); ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(250, 276); ctx.lineTo(690, 276); ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(250, 476); ctx.lineTo(690, 476); ctx.stroke();
+
+      // 3. Obstacle fills (Tanvi Day 6 — world obstacles)
       OBSTACLES.forEach((obs) => {
         ctx.fillStyle = "#4b3f2a";
         ctx.fillRect(obs.x, obs.y, obs.width, obs.height);
@@ -792,27 +923,12 @@ function VirtualOffice({
         }
       });
 
-      // 3. Wall rectangles (Tanvi Day 6)
-      ctx.fillStyle = "#334155";
-      WALLS.forEach((w) => {
-        ctx.fillRect(w.x, w.y, w.width, w.height);
-      });
-
-      // Meeting room label
-      ctx.fillStyle = "#94a3b8";
-      ctx.font = "14px Inter, Arial";
-      ctx.textAlign = "center";
-      ctx.fillText("Meeting Room", 650, 105);
-
-      // Doorway dashed threshold
-      ctx.strokeStyle = "#64748b";
-      ctx.lineWidth = 1.5;
-      ctx.setLineDash([5, 4]);
-      ctx.beginPath(); ctx.moveTo(610, 300); ctx.lineTo(690, 300); ctx.stroke();
-      ctx.setLineDash([]);
-      ctx.fillStyle = "#64748b";
-      ctx.font = "10px Inter, Arial";
-      ctx.fillText("DOOR", 650, 316);
+      // 4. Room doorway markers
+      ctx.fillStyle = "rgba(15, 23, 42, 0.5)";
+      ctx.fillRect(330, 250, 100, 12);
+      ctx.fillRect(595, 250, 100, 12);
+      ctx.fillRect(330, 500, 100, 12);
+      ctx.fillRect(595, 500, 100, 12);
 
       // 4. Click-to-move target indicator and path preview
       if (clickTarget.current || routeRef.current.length > 0) {
