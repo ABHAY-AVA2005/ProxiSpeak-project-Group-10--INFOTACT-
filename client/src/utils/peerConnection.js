@@ -1,14 +1,12 @@
 const RTC_CONFIG = {
-    iceServers: [
+  iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
-    ],
+  ],
 };
 
 const peerConnections = new Map();
-
-
- //Creates or gets an existing RTCPeerConnection for a remote peer socket ID
+const audioElements = new Map();
 
 export function createPeerConnection(peerSocketId, { onIceCandidate, onTrack, onConnectionStateChange }) {
   if (peerConnections.has(peerSocketId)) {
@@ -24,41 +22,43 @@ export function createPeerConnection(peerSocketId, { onIceCandidate, onTrack, on
   };
 
   pc.ontrack = (event) => {
-    if (onTrack) {
-      onTrack(peerSocketId, event.streams[0] || event.track);
+    const stream = event.streams[0] || new MediaStream([event.track]);
+    if (!audioElements.has(peerSocketId)) {
+      const audio = new Audio();
+      audio.srcObject = stream;
+      audio.autoplay = true;
+      audioElements.set(peerSocketId, audio);
     }
+    if (onTrack) onTrack(peerSocketId, stream);
   };
 
-    pc.onconnectionstatechange = () => {
-    if (onConnectionStateChange) {
-        onConnectionStateChange(peerSocketId, pc.connectionState);
-    }
+  pc.onconnectionstatechange = () => {
+    if (onConnectionStateChange) onConnectionStateChange(peerSocketId, pc.connectionState);
     if (pc.connectionState === 'failed' || pc.connectionState === 'closed') {
-        closePeerConnection(peerSocketId);
+      closePeerConnection(peerSocketId);
     }
-    };
+  };
 
   peerConnections.set(peerSocketId, pc);
   return pc;
 }
 
-//Closes and cleans up a peer connection
-
 export function closePeerConnection(peerSocketId) {
-    const pc = peerConnections.get(peerSocketId);
-    if (pc) {
-    pc.ontrack = null;
-    pc.onicecandidate = null;
-    pc.onconnectionstatechange = null;
+  const pc = peerConnections.get(peerSocketId);
+  if (pc) {
     pc.close();
     peerConnections.delete(peerSocketId);
   }
+  const audio = audioElements.get(peerSocketId);
+  if (audio) {
+    audio.pause();
+    audio.srcObject = null;
+    audioElements.delete(peerSocketId);
+  }
 }
 
-//Closes all peer connections on disconnect/leave
-
 export function closeAllPeerConnections() {
-    for (const peerSocketId of peerConnections.keys()) {
+  for (const peerSocketId of peerConnections.keys()) {
     closePeerConnection(peerSocketId);
   }
 }

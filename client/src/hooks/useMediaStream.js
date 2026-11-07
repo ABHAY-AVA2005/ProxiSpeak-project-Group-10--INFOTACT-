@@ -1,11 +1,12 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 
 export function useMediaStream() {
   const [localStream, setLocalStream] = useState(null);
   const [isMuted, setIsMuted] = useState(false);
   const [permissionGranted, setPermissionGranted] = useState(false);
   const [error, setError] = useState(null);
-  const [volumeLevel, setVolumeLevel] = useState(100);
+  const [volumeLevel, setVolumeLevelState] = useState(100);
+  const streamRef = useRef(null);
 
   const startAudio = useCallback(async () => {
     if (!navigator?.mediaDevices?.getUserMedia) {
@@ -16,8 +17,8 @@ export function useMediaStream() {
     }
 
     try {
-      if (localStream) {
-        localStream.getTracks().forEach((track) => track.stop());
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((track) => track.stop());
       }
 
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -29,10 +30,11 @@ export function useMediaStream() {
         video: false,
       });
 
+      streamRef.current = stream;
       setLocalStream(stream);
       setPermissionGranted(true);
       setIsMuted(false);
-      setVolumeLevel(100);
+      setVolumeLevelState(100);
       setError(null);
       return stream;
     } catch (err) {
@@ -44,48 +46,50 @@ export function useMediaStream() {
       setPermissionGranted(false);
       return null;
     }
-  }, [localStream]);
+  }, []);
 
   const updateVolume = useCallback((nextValue) => {
-    const clamped = Math.min(100, Math.max(0, Number(nextValue) || 0));
-    setVolumeLevel(clamped);
+    setVolumeLevelState((current) => {
+      const value = typeof nextValue === 'function' ? nextValue(current) : nextValue;
+      const clamped = Math.min(100, Math.max(0, Number(value) || 0));
 
-    if (!localStream) return;
-    const audioTrack = localStream.getAudioTracks()[0];
-    if (!audioTrack) return;
+      if (streamRef.current) {
+        const audioTrack = streamRef.current.getAudioTracks()[0];
+        if (audioTrack) {
+          const shouldBeEnabled = clamped > 0 && !isMuted;
+          audioTrack.enabled = shouldBeEnabled;
+        }
+      }
 
-    if (clamped <= 0 || isMuted) {
-      audioTrack.enabled = false;
-      setIsMuted(true);
-      return;
-    }
-
-    audioTrack.enabled = true;
-    setIsMuted(false);
-  }, [isMuted, localStream]);
+      setIsMuted(clamped <= 0);
+      return clamped;
+    });
+  }, [isMuted]);
 
   const toggleMute = useCallback(() => {
-    if (!localStream) return;
-    const audioTrack = localStream.getAudioTracks()[0];
-    if (audioTrack) {
-      const nextMuted = !audioTrack.enabled;
-      audioTrack.enabled = nextMuted;
-      setIsMuted(!nextMuted);
-      if (nextMuted) {
-        setVolumeLevel(0);
-      } else if (volumeLevel === 0) {
-        setVolumeLevel(50);
-      }
+    if (!streamRef.current) return;
+    const audioTrack = streamRef.current.getAudioTracks()[0];
+    if (!audioTrack) return;
+
+    const nextMuted = !audioTrack.enabled;
+    audioTrack.enabled = !nextMuted;
+    setIsMuted(nextMuted);
+
+    if (nextMuted) {
+      setVolumeLevelState(0);
+    } else if (volumeLevel === 0) {
+      setVolumeLevelState(50);
     }
-  }, [localStream, volumeLevel]);
+  }, [volumeLevel]);
 
   useEffect(() => {
     return () => {
-      if (localStream) {
-        localStream.getTracks().forEach((track) => track.stop());
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((track) => track.stop());
+        streamRef.current = null;
       }
     };
-  }, [localStream]);
+  }, []);
 
   return {
     localStream,
