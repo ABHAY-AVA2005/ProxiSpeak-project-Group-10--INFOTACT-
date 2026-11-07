@@ -31,6 +31,7 @@ function App() {
   const [officeRooms, setOfficeRooms] = useState(baseRooms);
   const [roomDraft, setRoomDraft] = useState("");
   const [themeMode, setThemeMode] = useState("dark");
+  const [avatarColor, setAvatarColor] = useState("#2563eb");
   const [notificationOpen, setNotificationOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [onlineUsers, setOnlineUsers] = useState([]);
@@ -427,6 +428,33 @@ function App() {
                 />
               </label>
             ))}
+
+            <div className="setting-row avatar-row" title="Avatar colour — change the colour of your office avatar.">
+              <span>Avatar colour</span>
+              <div className="avatar-colour-picker">
+                {[
+                  "#2563eb",
+                  "#8b5cf6",
+                  "#f97316",
+                  "#10b981",
+                  "#ec4899",
+                  "#facc15",
+                  "#ef4444",
+                ].map((colour) => (
+                  <button
+                    key={colour}
+                    type="button"
+                    className={`avatar-color-swatch ${avatarColor === colour ? "selected" : ""}`}
+                    style={{ background: colour }}
+                    aria-label={`Set avatar colour to ${colour}`}
+                    onClick={() => {
+                      setAvatarColor(colour);
+                      addNotification("Avatar updated", `Your avatar colour is now ${colour}.`);
+                    }}
+                  />
+                ))}
+              </div>
+            </div>
           </div>
         </div>
       );
@@ -603,6 +631,7 @@ function App() {
                   onUsersChange={handleUsersChange}
                   meetingRooms={officeRooms}
                   spawnRoom={activeRoom}
+                  avatarColor={avatarColor}
                 />
               ) : (
                 renderTabContent()

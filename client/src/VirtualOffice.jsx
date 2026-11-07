@@ -17,19 +17,66 @@ const PATH_STEP = 18;
 
 // ─── Wall / obstacle definitions ─────────────────────────────────────────────
 // Each rect: { x, y, width, height, label? }
+const buildRoomBoundary = (room, doorSide, doorWidth = 86) => {
+  const { x, y, width, height } = room;
+  const left = x;
+  const right = x + width;
+  const top = y;
+  const bottom = y + height;
+  const wallThickness = 8;
+  const doorStart = Math.max(x + 22, x + (width - doorWidth) / 2);
+  const doorEnd = doorStart + doorWidth;
+
+  const walls = [];
+
+  const addWall = (wallX, wallY, wallW, wallH) => {
+    walls.push({ x: wallX, y: wallY, width: wallW, height: wallH, label: null });
+  };
+
+  if (doorSide !== "top") addWall(left, top, width, wallThickness);
+  if (doorSide !== "bottom") addWall(left, bottom - wallThickness, width, wallThickness);
+  if (doorSide !== "left") addWall(left, top, wallThickness, height);
+  if (doorSide !== "right") addWall(right - wallThickness, top, wallThickness, height);
+
+  if (doorSide === "top") {
+    const cut = Math.min(width - doorWidth, Math.max(20, width / 3));
+    addWall(left, top, cut, wallThickness);
+    addWall(left + cut + doorWidth, top, width - cut - doorWidth, wallThickness);
+  }
+  if (doorSide === "bottom") {
+    const cut = Math.min(width - doorWidth, Math.max(20, width / 3));
+    addWall(left, bottom - wallThickness, cut, wallThickness);
+    addWall(left + cut + doorWidth, bottom - wallThickness, width - cut - doorWidth, wallThickness);
+  }
+  if (doorSide === "left") {
+    const cut = Math.min(height - doorWidth, Math.max(20, height / 3));
+    addWall(left, top, wallThickness, cut);
+    addWall(left, top + cut + doorWidth, wallThickness, height - cut - doorWidth);
+  }
+  if (doorSide === "right") {
+    const cut = Math.min(height - doorWidth, Math.max(20, height / 3));
+    addWall(right - wallThickness, top, wallThickness, cut);
+    addWall(right - wallThickness, top + cut + doorWidth, wallThickness, height - cut - doorWidth);
+  }
+
+  return walls;
+};
+
 const WALLS = [
   // Outer boundary walls (inset 10px)
-  { x: 10, y: 10, width: WORLD_W - 20, height: 6, label: null },   // top
-  { x: 10, y: WORLD_H - 16, width: WORLD_W - 20, height: 6, label: null }, // bottom
-  { x: 10, y: 10, width: 6, height: WORLD_H - 20, label: null },  // left
-  { x: WORLD_W - 16, y: 10, width: 6, height: WORLD_H - 20, label: null }, // right
+  { x: 10, y: 10, width: WORLD_W - 20, height: 6, label: null },
+  { x: 10, y: WORLD_H - 16, width: WORLD_W - 20, height: 6, label: null },
+  { x: 10, y: 10, width: 6, height: WORLD_H - 20, label: null },
+  { x: WORLD_W - 16, y: 10, width: 6, height: WORLD_H - 20, label: null },
+];
 
-  // Meeting room walls (with doorway gap on south side)
-  { x: 500, y: 80, width: 300, height: 6, label: null },  // north
-  { x: 500, y: 80, width: 6, height: 220, label: null },  // west
-  { x: 794, y: 80, width: 6, height: 220, label: null },  // east
-  { x: 500, y: 294, width: 110, height: 6, label: null }, // south-left
-  { x: 690, y: 294, width: 110, height: 6, label: null }, // south-right
+const ROOM_BOUNDARIES = [
+  ...buildRoomBoundary({ x: 34, y: 24, width: 210, height: 150 }, "bottom"),
+  ...buildRoomBoundary({ x: 270, y: 24, width: 420, height: 220 }, "bottom"),
+  ...buildRoomBoundary({ x: 710, y: 24, width: 250, height: 220 }, "bottom"),
+  ...buildRoomBoundary({ x: 270, y: 286, width: 420, height: 190 }, "top"),
+  ...buildRoomBoundary({ x: 710, y: 286, width: 250, height: 190 }, "top"),
+  ...buildRoomBoundary({ x: 34, y: 286, width: 210, height: 190 }, "top"),
 ];
 
 // Solid obstacles (desk, etc.)
@@ -40,7 +87,7 @@ const OBSTACLES = [
 ];
 
 // Combined for collision
-const ALL_SOLID = [...WALLS, ...OBSTACLES];
+const ALL_SOLID = [...WALLS, ...ROOM_BOUNDARIES, ...OBSTACLES];
 
 function checkCollision(cx, cy, radius = AVATAR_RADIUS) {
   for (const rect of ALL_SOLID) {
@@ -177,6 +224,7 @@ function VirtualOffice({
   onUsersChange = () => {},
   meetingRooms = [],
   spawnRoom = "Open Workspace",
+  avatarColor = "#2563eb",
 }) {
   const canvasRef = useRef(null);
   const earshotRef = useRef(earshotRadius);
@@ -1022,7 +1070,7 @@ function VirtualOffice({
       // 7. Local player avatar with username (Tanvi Day 3)
       ctx.beginPath();
       ctx.arc(player.current.x, player.current.y, AVATAR_RADIUS, 0, Math.PI * 2);
-      ctx.fillStyle = "#2563eb";
+      ctx.fillStyle = avatarColor || "#2563eb";
       ctx.fill();
       ctx.strokeStyle = "#93c5fd";
       ctx.lineWidth = 2.5;

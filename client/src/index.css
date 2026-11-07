@@ -750,6 +750,35 @@ button {
   font-weight: 600;
 }
 
+.avatar-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.avatar-colour-picker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.avatar-color-swatch {
+  width: 22px;
+  height: 22px;
+  border: 2px solid rgba(255,255,255,0.8);
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.18);
+  cursor: pointer;
+}
+
+.avatar-color-swatch.selected {
+  transform: scale(1.12);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.22), 0 0 0 1px rgba(15, 23, 42, 0.3);
+}
+
 .theme-toggle {
   border: none;
   border-radius: 999px;
