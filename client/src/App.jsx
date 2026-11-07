@@ -1,15 +1,13 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { JoinScreen } from "./components/JoinScreen";
 import VirtualOffice from "./VirtualOffice";
 import { AudioControls } from "./components/AudioControls";
 import { useMediaStream } from "./hooks/useMediaStream";
-import { CollaborativeWhiteboard } from "./components/CollaborativeWhiteboard";
 
 const navItems = [
   { id: "Office", icon: "◉", label: "Office", description: "Open the live office floor" },
   { id: "Team", icon: "◎", label: "Team", description: "Review the active office members" },
   { id: "Chat", icon: "◌", label: "Chat", description: "Send quick team messages" },
-  { id: "Brainstorming", icon: "✦", label: "Brainstorming", description: "Use the collaborative whiteboard and notes" },
   { id: "Meetings", icon: "▣", label: "Meetings", description: "Create or join room-based meetings" },
   { id: "Screen Share", icon: "▤", label: "Screen Share", description: "Share your workspace or presentation" },
   { id: "Settings", icon: "⚙", label: "Settings", description: "Update preferences and workspace mode" },
@@ -20,7 +18,6 @@ const baseRooms = [
   { id: "Reception", name: "Reception", x: 42, y: 38, width: 210, height: 160, fill: "rgba(255, 240, 210, 0.9)" },
   { id: "Open Workspace", name: "Open Workspace", x: 285, y: 38, width: 350, height: 220, fill: "rgba(175, 212, 220, 0.9)" },
   { id: "Conference Room", name: "Conference Room", x: 675, y: 38, width: 250, height: 220, fill: "rgba(203, 211, 212, 0.9)" },
-  { id: "Brainstorming Room", name: "Brainstorming Room", x: 285, y: 320, width: 350, height: 190, fill: "rgba(212, 208, 248, 0.92)" },
   { id: "Cafeteria", name: "Cafeteria", x: 675, y: 320, width: 250, height: 190, fill: "rgba(214, 192, 170, 0.96)" },
   { id: "Private Meeting Room", name: "Private Meeting Room", x: 42, y: 320, width: 210, height: 190, fill: "rgba(194, 220, 201, 0.9)" },
 ];
@@ -48,7 +45,29 @@ function App() {
     doNotDisturb: false,
   });
   const [notifications, setNotifications] = useState([]);
+  const [screenShareStream, setScreenShareStream] = useState(null);
+  const screenShareVideoRef = useRef(null);
   const { localStream, isMuted, permissionGranted, error, startAudio, toggleMute, volumeLevel, setVolumeLevel } = useMediaStream();
+
+  useEffect(() => {
+    const video = screenShareVideoRef.current;
+    if (!video) return;
+
+    if (screenShareStream) {
+      video.srcObject = screenShareStream;
+      video.play().catch(() => undefined);
+    } else {
+      video.srcObject = null;
+    }
+  }, [screenShareStream]);
+
+  useEffect(() => {
+    return () => {
+      if (screenShareStream) {
+        screenShareStream.getTracks().forEach((track) => track.stop());
+      }
+    };
+  }, [screenShareStream]);
 
   const selfStatus = settings.doNotDisturb ? "Do Not Disturb" : settings.focusMode ? "Focus" : "Available";
   const activeRoomName = roomName.trim() || "Team Alpha";
@@ -140,16 +159,50 @@ function App() {
     addNotification("Message sent", "Your message was shared to the office chat.");
   };
 
+  const handleToggleScreenShare = async () => {
+    if (settings.screenShare && screenShareStream) {
+      screenShareStream.getTracks().forEach((track) => track.stop());
+      setScreenShareStream(null);
+      setSettings((current) => ({ ...current, screenShare: false }));
+      addNotification("Screen share stopped", "Your workspace is no longer being broadcast.");
+      return;
+    }
+
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
+      addNotification("Screen share unavailable", "This browser does not support live screen capture.");
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getDisplayMedia({
+        video: { frameRate: 30 },
+        audio: true,
+      });
+
+      stream.getVideoTracks()[0]?.addEventListener("ended", () => {
+        setScreenShareStream(null);
+        setSettings((current) => ({ ...current, screenShare: false }));
+      });
+
+      setScreenShareStream(stream);
+      setSettings((current) => ({ ...current, screenShare: true }));
+      addNotification("Screen share live", "Your workspace is now streaming to the office.");
+    } catch (error) {
+      addNotification("Screen share blocked", "Permission to capture the screen was denied.");
+    }
+  };
+
   const handleToggleSetting = (key) => {
+    if (key === "screenShare") {
+      handleToggleScreenShare();
+      return;
+    }
+
     setSettings((current) => ({ ...current, [key]: !current[key] }));
     addNotification("Preference updated", `Updated ${key.replace(/([A-Z])/g, " $1").trim()}.`);
   };
 
   const renderTabContent = () => {
-    if (activeTab === "Brainstorming") {
-      return <CollaborativeWhiteboard />;
-    }
-
     if (activeTab === "Screen Share") {
       return (
         <div className="workspace-card screen-share-card">
@@ -165,21 +218,25 @@ function App() {
                 <strong>{settings.screenShare ? "Sharing your workspace" : "No active share"}</strong>
               </div>
 
-              <div className="share-preview-grid">
-                <div className="share-window main-window">
-                  <span>Workspace preview</span>
+              {screenShareStream ? (
+                <video ref={screenShareVideoRef} autoPlay muted playsInline className="screen-share-video" />
+              ) : (
+                <div className="share-preview-grid">
+                  <div className="share-window main-window">
+                    <span>Workspace preview</span>
+                  </div>
+                  <div className="share-window side-window">
+                    <span>Presenter notes</span>
+                  </div>
                 </div>
-                <div className="share-window side-window">
-                  <span>Presenter notes</span>
-                </div>
-              </div>
+              )}
             </div>
 
             <div className="share-actions">
               <button
                 type="button"
                 className="primary-button"
-                onClick={() => handleToggleSetting("screenShare")}
+                onClick={handleToggleScreenShare}
               >
                 {settings.screenShare ? "Stop sharing" : "Start sharing"}
               </button>
