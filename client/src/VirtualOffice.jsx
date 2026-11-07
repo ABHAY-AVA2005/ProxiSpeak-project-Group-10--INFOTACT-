@@ -1,147 +1,45 @@
 import { useEffect, useRef } from "react";
 import { io } from "socket.io-client";
 
-const SERVER_URL = import.meta.env.VITE_SERVER_URL || "http://localhost:5000";
+const serverPort = new URLSearchParams(window.location.search).get("server");
 
+const SERVER_URL =
+  serverPort === "5001"
+    ? "http://localhost:5001"
+    : import.meta.env.VITE_SERVER_URL || "http://localhost:5000";
+
+// ─── World constants (match server WORLD_BOUNDS) ─────────────────────────────
 const WORLD_W = 1000;
 const WORLD_H = 600;
-const GRID_SIZE = 40;
+const GRID_SIZE = 40; // floor tile size in px
 const AVATAR_RADIUS = 18;
 
+// ─── Wall / obstacle definitions ─────────────────────────────────────────────
+// Each rect: { x, y, width, height, label? }
 const WALLS = [
-  { x: 18, y: 18, width: WORLD_W - 36, height: 8, label: null },
-  { x: 18, y: WORLD_H - 26, width: WORLD_W - 36, height: 8, label: null },
-  { x: 18, y: 18, width: 8, height: WORLD_H - 36, label: null },
-  { x: WORLD_W - 26, y: 18, width: 8, height: WORLD_H - 36, label: null },
+  // Outer boundary walls (inset 10px)
+  { x: 10, y: 10, width: WORLD_W - 20, height: 6, label: null },   // top
+  { x: 10, y: WORLD_H - 16, width: WORLD_W - 20, height: 6, label: null }, // bottom
+  { x: 10, y: 10, width: 6, height: WORLD_H - 20, label: null },  // left
+  { x: WORLD_W - 16, y: 10, width: 6, height: WORLD_H - 20, label: null }, // right
+
+  // Meeting room walls (with doorway gap on south side)
+  { x: 500, y: 80, width: 300, height: 6, label: null },  // north
+  { x: 500, y: 80, width: 6, height: 220, label: null },  // west
+  { x: 794, y: 80, width: 6, height: 220, label: null },  // east
+  { x: 500, y: 294, width: 110, height: 6, label: null }, // south-left
+  { x: 690, y: 294, width: 110, height: 6, label: null }, // south-right
 ];
 
-const ROOM_BORDERS = [
-  { name: "Reception", x: 42, y: 38, width: 210, height: 160, fill: "rgba(255, 240, 210, 0.9)" },
-  { name: "Open Workspace", x: 285, y: 38, width: 350, height: 220, fill: "rgba(175, 212, 220, 0.9)" },
-  { name: "Conference Room", x: 675, y: 38, width: 250, height: 220, fill: "rgba(203, 211, 212, 0.9)" },
-  { name: "Brainstorming Room", x: 285, y: 320, width: 350, height: 190, fill: "rgba(212, 208, 248, 0.92)" },
-  { name: "Cafeteria", x: 675, y: 320, width: 250, height: 190, fill: "rgba(214, 192, 170, 0.96)" },
-  { name: "Private Meeting Room", x: 42, y: 320, width: 210, height: 190, fill: "rgba(194, 220, 201, 0.9)" },
-];
-
-function roomCenter(room) {
-  return {
-    x: room.x + room.width / 2,
-    y: room.y + room.height / 2,
-  };
-}
-
+// Solid obstacles (desk, etc.)
 const OBSTACLES = [
-  { x: 120, y: 140, width: 160, height: 70, label: "Desk" },
-  { x: 290, y: 140, width: 150, height: 70, label: "Desk" },
-  { x: 680, y: 135, width: 170, height: 68, label: "Desk" },
-  { x: 860, y: 135, width: 110, height: 68, label: "Desk" },
-  { x: 110, y: 430, width: 180, height: 58, label: "Desk" },
-  { x: 720, y: 430, width: 190, height: 58, label: "Desk" }
+  { x: 150, y: 150, width: 180, height: 70, label: "Desk" },
+  { x: 380, y: 420, width: 160, height: 70, label: "Desk" },
+  { x: 560, y: 120, width: 220, height: 60, label: "Table" },
 ];
+
+// Combined for collision
 const ALL_SOLID = [...WALLS, ...OBSTACLES];
-
-function worldToGrid(x, y, cellSize = 20) {
-  return {
-    x: Math.floor(x / cellSize),
-    y: Math.floor(y / cellSize),
-  };
-}
-
-function gridToWorld(cellX, cellY, cellSize = 20) {
-  return {
-    x: cellX * cellSize + cellSize / 2,
-    y: cellY * cellSize + cellSize / 2,
-  };
-}
-
-function pointInRect(x, y, rect) {
-  return x >= rect.x && x <= rect.x + rect.width && y >= rect.y && y <= rect.y + rect.height;
-}
-
-function gridHasObstacle(gridX, gridY, cellSize = 20, radius = 1) {
-  const px = gridX * cellSize + cellSize / 2;
-  const py = gridY * cellSize + cellSize / 2;
-  for (const rect of ALL_SOLID) {
-    for (let offsetX = -radius; offsetX <= radius; offsetX += 1) {
-      for (let offsetY = -radius; offsetY <= radius; offsetY += 1) {
-        const x = px + offsetX * cellSize;
-        const y = py + offsetY * cellSize;
-        if (pointInRect(x, y, rect)) return true;
-      }
-    }
-  }
-  return false;
-}
-
-function findPathAStar(start, goal, cellSize = 20) {
-  const cols = Math.ceil(WORLD_W / cellSize);
-  const rows = Math.ceil(WORLD_H / cellSize);
-  const startCell = worldToGrid(start.x, start.y, cellSize);
-  const goalCell = worldToGrid(goal.x, goal.y, cellSize);
-
-  const startKey = `${startCell.x},${startCell.y}`;
-  const goalKey = `${goalCell.x},${goalCell.y}`;
-  const open = new Map();
-  const cameFrom = new Map();
-  const gScore = new Map();
-  const fScore = new Map();
-
-  open.set(startKey, 0);
-  gScore.set(startKey, 0);
-  fScore.set(startKey, heuristic(startCell, goalCell));
-
-  while (open.size > 0) {
-    let currentKey = null;
-    let bestValue = Number.POSITIVE_INFINITY;
-    for (const [key, score] of open.entries()) {
-      const value = fScore.get(key) ?? Number.POSITIVE_INFINITY;
-      if (value < bestValue) {
-        bestValue = value;
-        currentKey = key;
-      }
-    }
-
-    if (!currentKey) break;
-    if (currentKey === goalKey) {
-      const path = [];
-      let cursor = currentKey;
-      while (cursor) {
-        const [cx, cy] = cursor.split(',').map(Number);
-        path.push(gridToWorld(cx, cy, cellSize));
-        if (cursor === startKey) break;
-        cursor = cameFrom.get(cursor) ?? null;
-      }
-      return path.reverse();
-    }
-
-    open.delete(currentKey);
-    const [cx, cy] = currentKey.split(',').map(Number);
-    const neighbors = [
-      [cx + 1, cy], [cx - 1, cy], [cx, cy + 1], [cx, cy - 1],
-      [cx + 1, cy + 1], [cx - 1, cy - 1], [cx + 1, cy - 1], [cx - 1, cy + 1],
-    ];
-
-    for (const [nx, ny] of neighbors) {
-      if (nx < 0 || ny < 0 || nx >= cols || ny >= rows) continue;
-      if (gridHasObstacle(nx, ny, cellSize, 1)) continue;
-      const key = `${nx},${ny}`;
-      const tentative = (gScore.get(currentKey) ?? Infinity) + ((nx === cx || ny === cy) ? 1 : 1.4);
-      if (tentative < (gScore.get(key) ?? Infinity)) {
-        cameFrom.set(key, currentKey);
-        gScore.set(key, tentative);
-        fScore.set(key, tentative + heuristic({ x: nx, y: ny }, goalCell));
-        if (!open.has(key)) open.set(key, tentative);
-      }
-    }
-  }
-
-  return [start];
-}
-
-function heuristic(a, b) {
-  return Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
-}
 
 function checkCollision(cx, cy, radius = AVATAR_RADIUS) {
   for (const rect of ALL_SOLID) {
@@ -152,31 +50,11 @@ function checkCollision(cx, cy, radius = AVATAR_RADIUS) {
   return false;
 }
 
-function resolveAvoidanceTarget(x, y, size = 20) {
-  let nearest = null;
-  let nearestDist = Number.POSITIVE_INFINITY;
-  for (const rect of ALL_SOLID) {
-    const centerX = rect.x + rect.width / 2;
-    const centerY = rect.y + rect.height / 2;
-    const dist = Math.hypot(x - centerX, y - centerY);
-    if (dist < nearestDist) {
-      nearest = rect;
-      nearestDist = dist;
-    }
-  }
-
-  if (!nearest) return { x, y };
-  const offsetX = x - (nearest.x + nearest.width / 2);
-  const offsetY = y - (nearest.y + nearest.height / 2);
-  const safeX = x + (Math.abs(offsetX) < 1 ? size : (offsetX / Math.abs(offsetX)) * size);
-  const safeY = y + (Math.abs(offsetY) < 1 ? size : (offsetY / Math.abs(offsetY)) * size);
-  return {
-    x: Math.max(20, Math.min(WORLD_W - 20, safeX)),
-    y: Math.max(20, Math.min(WORLD_H - 20, safeY)),
-  };
-}
-
-const REMOTE_COLOURS = ["#f97316", "#a855f7", "#ec4899", "#14b8a6", "#f59e0b", "#64748b", "#06b6d4", "#84cc16"];
+// ─── Colour helpers ───────────────────────────────────────────────────────────
+const REMOTE_COLOURS = [
+  "#f97316", "#a855f7", "#ec4899", "#14b8a6",
+  "#f59e0b", "#64748b", "#06b6d4", "#84cc16",
+];
 const colourCache = {};
 function colourForId(id) {
   if (!colourCache[id]) {
@@ -185,131 +63,69 @@ function colourForId(id) {
   return colourCache[id];
 }
 
-function drawDesk(ctx, x, y, w = 90, h = 48, tone = "#d2b48a") {
-  ctx.fillStyle = "rgba(24, 33, 29, 0.08)";
-  ctx.fillRect(x + 8, y + h + 8, w, 10);
-  ctx.fillStyle = tone;
-  ctx.fillRect(x, y, w, h);
-  ctx.strokeStyle = "rgba(0, 0, 0, 0.8)";
-  ctx.lineWidth = 1.3;
-  ctx.strokeRect(x, y, w, h);
-  ctx.fillStyle = "rgba(102, 74, 48, 0.25)";
-  ctx.fillRect(x + 8, y + 8, w - 16, 8);
-  ctx.fillStyle = "rgba(96, 70, 48, 0.22)";
-  ctx.fillRect(x + 10, y + h - 8, w - 20, 8);
-}
-
-function drawPlant(ctx, x, y) {
-  ctx.fillStyle = "#73ac88";
-  ctx.beginPath();
-  ctx.arc(x, y, 12, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = "#4d7a5d";
-  ctx.fillRect(x - 2, y + 12, 4, 12);
-  ctx.fillStyle = "#5f8c63";
-  for (let i = 0; i < 5; i++) {
-    const ox = x + (i - 2) * 7;
-    ctx.beginPath();
-    ctx.moveTo(x, y + 2);
-    ctx.quadraticCurveTo(ox, y - 12, ox, y + 12);
-    ctx.strokeStyle = "#91c29d";
-    ctx.lineWidth = 2;
-    ctx.stroke();
-  }
-}
-
-function drawAvatar(ctx, x, y, { name, colour, isLocal, inEarshot, direction = { x: 0, y: -1 } }) {
-  const skin = isLocal ? "#f3d0b5" : "#ebc9a7";
-  const shirt = isLocal ? "#2469d6" : colour;
-  const initial = (name || (isLocal ? "YOU" : "U")).trim().charAt(0).toUpperCase() || "Y";
-
-  ctx.save();
-  ctx.translate(x, y);
-
-  ctx.fillStyle = "rgba(16, 22, 18, 0.18)";
-  ctx.beginPath();
-  ctx.ellipse(0, 22, 18, 9, 0, 0, Math.PI * 2);
-  ctx.fill();
-
-  ctx.fillStyle = skin;
-  ctx.beginPath();
-  ctx.arc(0, -10, 10, 0, Math.PI * 2);
-  ctx.fill();
-
-  ctx.fillStyle = shirt;
-  ctx.fillRect(-12, 2, 24, 18);
-  ctx.fillStyle = "rgba(255,255,255,0.18)";
-  ctx.fillRect(-7, 5, 14, 6);
-
-  ctx.fillStyle = "#ffffff";
-  ctx.font = "700 10px Inter, Arial";
-  ctx.textAlign = "center";
-  ctx.fillText(initial, 0, 8);
-
-  ctx.strokeStyle = isLocal ? "#9ec5ff" : inEarshot ? "#d5f2d8" : "#6d7373";
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(-8, 20);
-  ctx.lineTo(-6, 30);
-  ctx.moveTo(8, 20);
-  ctx.lineTo(6, 30);
-  ctx.moveTo(-5, 20);
-  ctx.lineTo(-9, 30);
-  ctx.moveTo(5, 20);
-  ctx.lineTo(9, 30);
-  ctx.stroke();
-
-  const angle = Math.atan2(direction.y, direction.x) || -Math.PI / 2;
-  ctx.strokeStyle = isLocal ? "#1d4ed8" : "rgba(255,255,255,0.8)";
-  ctx.lineWidth = 2.6;
-  ctx.beginPath();
-  ctx.moveTo(0, 0);
-  ctx.lineTo(Math.cos(angle) * 18, Math.sin(angle) * 18);
-  ctx.stroke();
-
-  ctx.restore();
-
-  ctx.fillStyle = inEarshot ? "#244d43" : "#4b5b59";
-  ctx.font = "600 11px Inter, Arial";
-  ctx.textAlign = "center";
-  ctx.fillText(name || (isLocal ? "You" : "User"), x, y - 26);
-
-  if (inEarshot && !isLocal) {
-    ctx.fillStyle = "rgba(27, 148, 96, 0.9)";
-    ctx.fillRect(x - 18, y + 26, 36, 10);
-    ctx.fillStyle = "#fff";
-    ctx.font = "700 8px Inter, Arial";
-    ctx.fillText("LIVE", x, y + 34);
-  }
-}
-
-function VirtualOffice({ username = "You", earshotRadius = 100, localStream = null, onUsersChange, meetingRooms = [], spawnRoom = null }) {
+// ─── Component ────────────────────────────────────────────────────────────────
+function VirtualOffice({ username = "You", earshotRadius = 100, localStream = null }) {
   const canvasRef = useRef(null);
   const earshotRef = useRef(earshotRadius);
   const localStreamRef = useRef(localStream);
-  const roomSet = Array.isArray(meetingRooms) ? meetingRooms : [];
+  const peerConnectionsRef = useRef({});
+  const pendingCandidatesRef = useRef({});
 
-  useEffect(() => { localStreamRef.current = localStream; }, [localStream]);
   useEffect(() => { earshotRef.current = earshotRadius; }, [earshotRadius]);
 
   const player = useRef({ x: 400, y: 400, username });
   const keys = useRef({});
-  const clickTarget = useRef(null);
-  const remotePlayers = useRef({});
+  const clickTarget = useRef(null);    // { x, y } for click-to-move
+  const remotePlayers = useRef({});    // id -> { x, y, targetX, targetY, username }
 
   useEffect(() => {
     player.current.username = username;
-    if (!spawnRoom) return;
-    const targetRoom = [...ROOM_BORDERS, ...roomSet].find((room) => room.name === spawnRoom);
-    if (targetRoom) {
-      const center = roomCenter(targetRoom);
-      player.current.x = center.x;
-      player.current.y = center.y;
-    }
-  }, [username, spawnRoom, roomSet]);
+  }, [username]);
 
-  const pathRef = useRef([]);
-  const lastDirection = useRef({ x: 0, y: -1 });
+  // Handle local microphone track updates without reconnecting the socket
+  useEffect(() => {
+    localStreamRef.current = localStream;
+    const audioTrack = localStream?.getAudioTracks()[0] || null;
+
+    if (audioTrack) {
+      console.log(`[WebRTC] Local microphone stream updated: trackId=${audioTrack.id}, enabled=${audioTrack.enabled}, readyState=${audioTrack.readyState}`);
+    } else {
+      console.log("[WebRTC] Local microphone stopped or unavailable");
+    }
+
+    // Update senders for all active peer connections
+    Object.entries(peerConnectionsRef.current).forEach(([peerId, pc]) => {
+      try {
+        const transceivers = pc.getTransceivers ? pc.getTransceivers() : [];
+        const audioTransceiver = transceivers.find(
+          (t) => (t.sender?.track?.kind === "audio") || (t.receiver?.track?.kind === "audio")
+        );
+
+        if (audioTransceiver && audioTransceiver.sender) {
+          audioTransceiver.sender.replaceTrack(audioTrack).then(() => {
+            console.log(`[WebRTC] Replaced local audio track on PC for ${peerId} (track=${audioTrack?.id})`);
+          }).catch((err) => {
+            console.error(`[WebRTC] Failed to replace track for ${peerId}:`, err);
+          });
+        } else {
+          const senders = pc.getSenders();
+          const audioSender = senders.find((s) => !s.track || s.track.kind === "audio");
+          if (audioSender) {
+            audioSender.replaceTrack(audioTrack).then(() => {
+              console.log(`[WebRTC] Replaced local audio track on audio sender for ${peerId} (track=${audioTrack?.id})`);
+            }).catch((err) => {
+              console.error(`[WebRTC] Failed to replace track for ${peerId}:`, err);
+            });
+          } else if (audioTrack) {
+            pc.addTrack(audioTrack, localStream);
+            console.log(`[WebRTC] Added local audio track on PC for ${peerId}`);
+          }
+        }
+      } catch (err) {
+        console.error(`[WebRTC] Error attaching local track to ${peerId}:`, err);
+      }
+    });
+  }, [localStream]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -317,25 +133,11 @@ function VirtualOffice({ username = "You", earshotRadius = 100, localStream = nu
     canvas.width = WORLD_W;
     canvas.height = WORLD_H;
 
-    const emitUsersSnapshot = () => {
-      if (typeof onUsersChange !== "function") return;
-      const users = [{
-        username: username || "You",
-        isSelf: true,
-        status: "In office",
-        socketId: "self"
-      }, ...Object.values(remotePlayers.current).map((player) => ({
-        username: player.username || "Guest",
-        isSelf: false,
-        status: "In office",
-        socketId: player.socketId || player.id || Math.random().toString(16).slice(2)
-      }))];
-      onUsersChange(users);
-    };
-
+    // ── Socket.IO ──────────────────────────────────────────────────────────
     const socket = io(SERVER_URL, { transports: ["websocket"], reconnectionAttempts: 5 });
 
     socket.on("connect", () => {
+      console.log("[ProxiSpeak] Connected:", socket.id);
       socket.emit("join", { username, x: player.current.x, y: player.current.y });
     });
 
@@ -344,17 +146,15 @@ function VirtualOffice({ username = "You", earshotRadius = 100, localStream = nu
       (Array.isArray(list) ? list : Object.values(list || {})).forEach((u) => {
         const id = u.socketId || u.id;
         if (id && id !== socket.id) {
-          remotePlayers.current[id] = { x: u.x, y: u.y, targetX: u.x, targetY: u.y, username: u.username, socketId: id, id };
+          remotePlayers.current[id] = { x: u.x, y: u.y, targetX: u.x, targetY: u.y, username: u.username };
         }
       });
-      emitUsersSnapshot();
     });
 
     socket.on("user:joined", (u) => {
       const id = u.socketId || u.id;
       if (id && id !== socket.id) {
-        remotePlayers.current[id] = { x: u.x, y: u.y, targetX: u.x, targetY: u.y, username: u.username, socketId: id, id };
-        emitUsersSnapshot();
+        remotePlayers.current[id] = { x: u.x, y: u.y, targetX: u.x, targetY: u.y, username: u.username };
       }
     });
 
@@ -362,8 +162,21 @@ function VirtualOffice({ username = "You", earshotRadius = 100, localStream = nu
       const id = data.socketId || data.id;
       if (!id || id === socket.id) return;
       const p = remotePlayers.current[id];
-      if (p) { p.targetX = data.x; p.targetY = data.y; }
-      else remotePlayers.current[id] = { x: data.x, y: data.y, targetX: data.x, targetY: data.y, username: "" };
+      if (p) {
+        p.targetX = data.x;
+        p.targetY = data.y;
+        if (data.username && (!p.username || p.username === "?")) {
+          p.username = data.username;
+        }
+      } else {
+        remotePlayers.current[id] = {
+          x: data.x,
+          y: data.y,
+          targetX: data.x,
+          targetY: data.y,
+          username: data.username || ""
+        };
+      }
     });
 
     socket.on("user:left", (data) => {
@@ -371,26 +184,136 @@ function VirtualOffice({ username = "You", earshotRadius = 100, localStream = nu
       if (id) {
         delete remotePlayers.current[id];
         delete colourCache[id];
+        if (peerConnectionsRef.current[id]) {
+          try { peerConnectionsRef.current[id].close(); } catch (err) { console.debug("[WebRTC] Peer close note:", err); }
+          delete peerConnectionsRef.current[id];
+        }
+        delete pendingCandidatesRef.current[id];
         const audioEl = document.getElementById(`audio-${id}`);
-        if (audioEl) audioEl.remove();
-        emitUsersSnapshot();
+        if (audioEl) {
+          audioEl.pause();
+          audioEl.srcObject = null;
+          audioEl.remove();
+        }
       }
     });
 
-    const peerConnections = {};
-    const audioNodes = {};
+    // ── WebRTC Signaling & Spatial Audio Handshake ────────────────────────
+    const peerConnections = peerConnectionsRef.current;
+    const pendingCandidates = pendingCandidatesRef.current;
 
-    function getOrCreatePC(peerId) {
-      if (peerConnections[peerId]) return peerConnections[peerId];
+    const drainPendingCandidates = async (peerId, pc) => {
+      if (pendingCandidates[peerId] && pendingCandidates[peerId].length > 0) {
+        console.log(`[WebRTC] Draining ${pendingCandidates[peerId].length} queued ICE candidate(s) for ${peerId}`);
+        const candidates = [...pendingCandidates[peerId]];
+        pendingCandidates[peerId] = [];
+        for (const cand of candidates) {
+          try {
+            await pc.addIceCandidate(new RTCIceCandidate(cand));
+          } catch (err) {
+            console.error(`[WebRTC] Error adding queued ICE candidate for ${peerId}:`, err);
+          }
+        }
+      }
+    };
 
+    function setupRemoteAudio(peerId, track, stream = null) {
+      if (!track || track.kind !== "audio") return;
+      console.log(`[WebRTC] Setting up remote audio playback for ${peerId} (trackId: ${track.id}, readyState: ${track.readyState})`);
+
+      track.onmute = () => {
+        console.log(`[WebRTC] Track muted for ${peerId} (waiting for packets)`);
+      };
+      track.onunmute = () => {
+        console.log(`[WebRTC] Track unmuted for ${peerId} (audio packets actively arriving)`);
+        const el = document.getElementById(`audio-${peerId}`);
+        if (el && el.paused) {
+          el.play().catch((err) => console.warn(`[WebRTC] Autoplay on unmute failed for ${peerId}:`, err));
+        }
+      };
+      track.onended = () => {
+        console.log(`[WebRTC] Track ended for ${peerId}`);
+      };
+
+      let audioEl = document.getElementById(`audio-${peerId}`);
+      if (!audioEl) {
+        audioEl = document.createElement("audio");
+        audioEl.id = `audio-${peerId}`;
+        audioEl.style.display = "none";
+        document.body.appendChild(audioEl);
+      }
+
+      audioEl.autoplay = true;
+      audioEl.playsInline = true;
+      audioEl.muted = false; // CRITICAL: Remote audio must be unmuted to be heard
+
+      // Initial distance volume
+      const peer = remotePlayers.current[peerId];
+      const myX = player.current.x;
+      const myY = player.current.y;
+      let gain = 1.0;
+      if (peer) {
+        const dist = Math.hypot(peer.x - myX, peer.y - myY);
+        const maxDist = earshotRef.current || 100;
+        gain = Math.max(0, Math.min(1, 1 - dist / maxDist));
+      }
+      audioEl.volume = Math.max(0.01, gain); // Ensure volume is greater than 0
+
+      let mediaStream = stream;
+      if (!mediaStream) {
+        if (audioEl.srcObject instanceof MediaStream) {
+          mediaStream = audioEl.srcObject;
+        } else {
+          mediaStream = new MediaStream();
+        }
+      }
+      if (!mediaStream.getTracks().includes(track)) {
+        mediaStream.addTrack(track);
+      }
+
+      if (audioEl.srcObject !== mediaStream) {
+        audioEl.srcObject = mediaStream;
+      }
+
+      const playPromise = audioEl.play();
+      if (playPromise !== undefined) {
+        playPromise
+          .then(() => {
+            console.log(`[WebRTC] Audio playback active for ${peerId} (volume: ${audioEl.volume.toFixed(2)}, muted: ${audioEl.muted})`);
+          })
+          .catch((err) => {
+            console.warn(`[WebRTC] Audio playback blocked by autoplay policy for ${peerId}. Audio will resume on user interaction:`, err);
+          });
+      }
+    }
+
+    function getOrCreatePC(peerId, isInitiator = false) {
+      if (peerConnections[peerId]) {
+        const existing = peerConnections[peerId];
+        if (existing.signalingState !== "closed" && existing.connectionState !== "closed" && existing.connectionState !== "failed") {
+          return existing;
+        }
+        try { existing.close(); } catch (err) { console.debug("[WebRTC] Stale PC close note:", err); }
+        delete peerConnections[peerId];
+      }
+
+      console.log(`[WebRTC] Creating new RTCPeerConnection for ${peerId} (isInitiator=${isInitiator})`);
       const pc = new RTCPeerConnection({
-        iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+        iceServers: [
+          { urls: "stun:stun.l.google.com:19302" },
+          { urls: "stun:stun1.l.google.com:19302" },
+        ],
       });
 
-      if (localStreamRef.current) {
-        localStreamRef.current.getTracks().forEach((track) => {
+      // Send local audio track if mic is enabled, or add transceiver for offerer
+      if (localStreamRef.current && localStreamRef.current.getAudioTracks().length > 0) {
+        localStreamRef.current.getAudioTracks().forEach((track) => {
+          console.log(`[WebRTC] Adding local audio track (${track.id}, enabled=${track.enabled}) to PC for ${peerId}`);
           pc.addTrack(track, localStreamRef.current);
         });
+      } else if (isInitiator) {
+        console.log(`[WebRTC] Local mic not active yet, adding audio transceiver for offerer ${peerId}`);
+        pc.addTransceiver("audio", { direction: "sendrecv" });
       }
 
       pc.onicecandidate = (event) => {
@@ -399,77 +322,68 @@ function VirtualOffice({ username = "You", earshotRadius = 100, localStream = nu
         }
       };
 
+      pc.onconnectionstatechange = () => {
+        console.log(`[WebRTC] Connection state with ${peerId}: ${pc.connectionState}`);
+      };
+
+      pc.oniceconnectionstatechange = () => {
+        console.log(`[WebRTC] ICE connection state with ${peerId}: ${pc.iceConnectionState}`);
+      };
+
+      pc.onicegatheringstatechange = () => {
+        console.log(`[WebRTC] ICE gathering state with ${peerId}: ${pc.iceGatheringState}`);
+      };
+
       pc.ontrack = (event) => {
-        const stream = event.streams[0] || new MediaStream([event.track]);
-        let audioEl = document.getElementById(`audio-${peerId}`);
-        if (!audioEl) {
-          audioEl = document.createElement("audio");
-          audioEl.id = `audio-${peerId}`;
-          audioEl.autoplay = true;
-          audioEl.style.display = "none";
-          document.body.appendChild(audioEl);
-        }
-        audioEl.srcObject = stream;
-        audioEl.play().catch(() => {});
-
-        try {
-          if (!window._proxAudioCtx) {
-            window._proxAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
-          }
-          const ctxAudio = window._proxAudioCtx;
-          if (ctxAudio.state === "suspended") ctxAudio.resume();
-          if (!audioNodes[peerId]) {
-            const source = ctxAudio.createMediaStreamSource(stream);
-            const gainNode = ctxAudio.createGain();
-            const pannerNode = ctxAudio.createStereoPanner ? ctxAudio.createStereoPanner() : null;
-
-            if (pannerNode) {
-              source.connect(gainNode);
-              gainNode.connect(pannerNode);
-              pannerNode.connect(ctxAudio.destination);
-            } else {
-              source.connect(gainNode);
-              gainNode.connect(ctxAudio.destination);
-            }
-            audioNodes[peerId] = { source, gainNode, pannerNode };
-            audioEl.muted = true;
-          }
-        } catch (e) {
-          console.warn("[WebAudio] Spatial mixer fallback to HTML audio:", e);
-        }
+        console.log(`[WebRTC] Received audio stream ontrack from: ${peerId}`);
+        const stream = (event.streams && event.streams[0]) ? event.streams[0] : null;
+        setupRemoteAudio(peerId, event.track, stream);
       };
 
       peerConnections[peerId] = pc;
       return pc;
     }
 
+    // Helper to dynamically update volume as avatars move
     function updateAudioSpatialMixer() {
-      if (!window._proxAudioCtx || !Object.keys(audioNodes).length) return;
       const myX = player.current.x;
       const myY = player.current.y;
-      Object.entries(audioNodes).forEach(([peerId, nodes]) => {
-        const peer = remotePlayers.current[peerId];
-        if (!peer || !nodes.gainNode) return;
+      const maxDist = earshotRef.current || 100;
+
+      Object.entries(remotePlayers.current).forEach(([peerId, peer]) => {
+        const audioEl = document.getElementById(`audio-${peerId}`);
+        if (!audioEl) return;
+
         const dist = Math.hypot(peer.x - myX, peer.y - myY);
-        const gain = Math.max(0, Math.min(1, 1 - dist / earshotRef.current));
-        nodes.gainNode.gain.setValueAtTime(gain, window._proxAudioCtx.currentTime);
-        if (nodes.pannerNode) {
-          const pan = Math.max(-1, Math.min(1, (peer.x - myX) / earshotRef.current));
-          nodes.pannerNode.pan.setValueAtTime(pan, window._proxAudioCtx.currentTime);
-        }
+        // Linear falloff: 1 at dist=0, 0 at dist >= maxDist
+        const gain = Math.max(0, Math.min(1, 1 - dist / maxDist));
+        audioEl.volume = gain;
       });
     }
 
-    socket.on("nearby:enter", async ({ socketId, id, shouldInitiateOffer }) => {
+    socket.on("nearby:enter", async ({ socketId, id, username, shouldInitiateOffer }) => {
       const peerId = socketId || id;
       if (!peerId) return;
+      if (username && remotePlayers.current[peerId] && (!remotePlayers.current[peerId].username || remotePlayers.current[peerId].username === "?")) {
+        remotePlayers.current[peerId].username = username;
+      }
+      console.log(`[ProxiSpeak] nearby:enter from ${peerId}, initiateOffer=${shouldInitiateOffer}`);
+      const pc = getOrCreatePC(peerId, shouldInitiateOffer);
 
-      const pc = getOrCreatePC(peerId);
       if (shouldInitiateOffer) {
+        if (pc.signalingState !== "stable") {
+          console.log(`[WebRTC] Skipping offer creation for ${peerId}: signalingState is '${pc.signalingState}'`);
+          return;
+        }
+        if (pc.connectionState === "connected") {
+          console.log(`[WebRTC] Skipping offer creation for ${peerId}: connectionState is already 'connected'`);
+          return;
+        }
         try {
           const offer = await pc.createOffer();
           await pc.setLocalDescription(offer);
           socket.emit("webrtc:offer", { targetId: peerId, offer });
+          console.log(`[WebRTC] Sent offer to ${peerId}`);
         } catch (err) {
           console.error("[WebRTC] Create offer error:", err);
         }
@@ -478,40 +392,73 @@ function VirtualOffice({ username = "You", earshotRadius = 100, localStream = nu
 
     socket.on("nearby:leave", ({ socketId, id }) => {
       const peerId = socketId || id;
-      if (!peerId) return;
+      console.log(`[ProxiSpeak] nearby:leave from ${peerId}`);
       if (peerConnections[peerId]) {
-        peerConnections[peerId].close();
+        try { peerConnections[peerId].close(); } catch (err) { console.debug("[WebRTC] Peer close note:", err); }
         delete peerConnections[peerId];
       }
-      if (audioNodes[peerId]) {
-        try {
-          audioNodes[peerId].source.disconnect();
-          audioNodes[peerId].gainNode.disconnect();
-          if (audioNodes[peerId].pannerNode) audioNodes[peerId].pannerNode.disconnect();
-        } catch (_) {}
-        delete audioNodes[peerId];
-      }
+      delete pendingCandidates[peerId];
       const audioEl = document.getElementById(`audio-${peerId}`);
-      if (audioEl) audioEl.remove();
+      if (audioEl) {
+        audioEl.pause();
+        audioEl.srcObject = null;
+        audioEl.remove();
+      }
     });
 
     socket.on("webrtc:offer", async ({ senderId, offer }) => {
-      const pc = getOrCreatePC(senderId);
+      console.log("[WebRTC] Received offer from:", senderId);
+      const pc = getOrCreatePC(senderId, false);
       try {
         await pc.setRemoteDescription(new RTCSessionDescription(offer));
+        await drainPendingCandidates(senderId, pc);
+
+        // Ensure the transceiver negotiated from the offer is set to sendrecv
+        const transceivers = pc.getTransceivers ? pc.getTransceivers() : [];
+        const audioTransceiver = transceivers.find(
+          (t) => (t.sender?.track?.kind === "audio") || (t.receiver?.track?.kind === "audio")
+        );
+        if (audioTransceiver) {
+          if (audioTransceiver.direction !== "sendrecv") {
+            audioTransceiver.direction = "sendrecv";
+          }
+          if (localStreamRef.current && localStreamRef.current.getAudioTracks().length > 0) {
+            const track = localStreamRef.current.getAudioTracks()[0];
+            await audioTransceiver.sender.replaceTrack(track);
+          }
+        }
+
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
         socket.emit("webrtc:answer", { targetId: senderId, answer });
+        console.log(`[WebRTC] Sent answer to ${senderId}`);
+
+        // Ensure remote audio playback is attached for the answerer
+        pc.getReceivers().forEach((receiver) => {
+          if (receiver.track && receiver.track.kind === "audio") {
+            setupRemoteAudio(senderId, receiver.track);
+          }
+        });
       } catch (err) {
         console.error("[WebRTC] Error handling offer:", err);
       }
     });
 
     socket.on("webrtc:answer", async ({ senderId, answer }) => {
+      console.log("[WebRTC] Received answer from:", senderId);
       const pc = peerConnections[senderId];
       if (pc) {
         try {
           await pc.setRemoteDescription(new RTCSessionDescription(answer));
+          await drainPendingCandidates(senderId, pc);
+          console.log(`[WebRTC] Remote description set for answer from ${senderId}`);
+
+          // Ensure remote audio playback is attached for the offerer
+          pc.getReceivers().forEach((receiver) => {
+            if (receiver.track && receiver.track.kind === "audio") {
+              setupRemoteAudio(senderId, receiver.track);
+            }
+          });
         } catch (err) {
           console.error("[WebRTC] Error handling answer:", err);
         }
@@ -519,21 +466,43 @@ function VirtualOffice({ username = "You", earshotRadius = 100, localStream = nu
     });
 
     socket.on("webrtc:ice-candidate", async ({ senderId, candidate }) => {
+      if (!candidate) return;
       const pc = peerConnections[senderId];
-      if (pc && candidate) {
-        try {
-          await pc.addIceCandidate(new RTCIceCandidate(candidate));
-        } catch (err) {
-          console.error("[WebRTC] Error adding ICE candidate:", err);
-        }
+      if (!pc || !pc.remoteDescription) {
+        if (!pendingCandidates[senderId]) pendingCandidates[senderId] = [];
+        pendingCandidates[senderId].push(candidate);
+        return;
+      }
+      try {
+        await pc.addIceCandidate(new RTCIceCandidate(candidate));
+      } catch (err) {
+        console.error("[WebRTC] Error adding ICE candidate:", err);
       }
     });
 
+    // ── Unlock blocked audio on user interactions ───────────────────────────
+    const unlockAudio = () => {
+      document.querySelectorAll('audio[id^="audio-"]').forEach((el) => {
+        if (el.paused && el.srcObject) {
+          el.play().catch((err) => {
+            console.warn("[WebRTC] Autoplay unlock retry:", err);
+          });
+        }
+      });
+      if (window._proxAudioCtx && window._proxAudioCtx.state === "suspended") {
+        window._proxAudioCtx.resume().catch((err) => { console.debug("[WebAudio] Resume note:", err); });
+      }
+    };
+    window.addEventListener("click", unlockAudio);
+    window.addEventListener("keydown", unlockAudio);
+    window.addEventListener("touchstart", unlockAudio);
+
+    // ── Keyboard ───────────────────────────────────────────────────────────
     const onKeyDown = (e) => {
       const k = e.key.toLowerCase();
       if (["arrowup", "arrowdown", "arrowleft", "arrowright", "w", "a", "s", "d"].includes(k)) {
         e.preventDefault();
-        clickTarget.current = null;
+        clickTarget.current = null; // cancel click-to-move when key pressed
       }
       keys.current[k] = true;
     };
@@ -541,21 +510,20 @@ function VirtualOffice({ username = "You", earshotRadius = 100, localStream = nu
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("keyup", onKeyUp);
 
+    // ── Click-to-move ──────────────────────────────────────────────────────
     const onCanvasClick = (e) => {
       const rect = canvas.getBoundingClientRect();
       const scaleX = WORLD_W / rect.width;
       const scaleY = WORLD_H / rect.height;
       const tx = Math.round((e.clientX - rect.left) * scaleX);
       const ty = Math.round((e.clientY - rect.top) * scaleY);
-      const safeTarget = resolveAvoidanceTarget(tx, ty, 24);
       if (!checkCollision(tx, ty)) {
-        const computed = findPathAStar(player.current, safeTarget, 20);
-        pathRef.current = computed.length > 1 ? computed : [player.current, safeTarget];
-        clickTarget.current = { x: safeTarget.x, y: safeTarget.y };
+        clickTarget.current = { x: tx, y: ty };
       }
     };
     canvas.addEventListener("click", onCanvasClick);
 
+    // ── Game loop ──────────────────────────────────────────────────────────
     let rafId;
     let isRunning = true;
     let lastEmitTime = 0;
@@ -568,67 +536,43 @@ function VirtualOffice({ username = "You", earshotRadius = 100, localStream = nu
     function gameLoop() {
       if (!isRunning) return;
 
+      // ─── Movement ─────────────────────────────────────────────────────
       let dx = 0;
       let dy = 0;
-      const k = keys.current;
 
+      const k = keys.current;
       if (k["arrowup"] || k["w"]) dy -= SPEED;
       if (k["arrowdown"] || k["s"]) dy += SPEED;
       if (k["arrowleft"] || k["a"]) dx -= SPEED;
       if (k["arrowright"] || k["d"]) dx += SPEED;
 
-      if (pathRef.current.length > 1) {
-        const nextStep = pathRef.current[1];
-        const tdx = nextStep.x - player.current.x;
-        const tdy = nextStep.y - player.current.y;
+      // Click-to-move (only when no key held)
+      if (dx === 0 && dy === 0 && clickTarget.current) {
+        const tdx = clickTarget.current.x - player.current.x;
+        const tdy = clickTarget.current.y - player.current.y;
         const dist = Math.hypot(tdx, tdy);
-
-        if (dist <= CLICK_SPEED) {
-          player.current.x = nextStep.x;
-          player.current.y = nextStep.y;
-          pathRef.current = pathRef.current.slice(1);
-          if (pathRef.current.length <= 1) {
-            clickTarget.current = null;
-          }
+        if (dist < CLICK_SPEED) {
+          player.current.x = clickTarget.current.x;
+          player.current.y = clickTarget.current.y;
+          clickTarget.current = null;
         } else {
           dx = (tdx / dist) * CLICK_SPEED;
           dy = (tdy / dist) * CLICK_SPEED;
         }
       }
 
-      if (dx !== 0 || dy !== 0) {
-        const directionX = dx || 1;
-        const directionY = dy || 0;
-        lastDirection.current = { x: directionX, y: directionY };
-      }
-
       if (dx !== 0) {
         const nx = Math.max(20, Math.min(WORLD_W - 20, player.current.x + dx));
         if (!checkCollision(nx, player.current.y)) player.current.x = nx;
-        else {
-          pathRef.current = [];
-          clickTarget.current = null;
-        }
+        else clickTarget.current = null;
       }
       if (dy !== 0) {
         const ny = Math.max(20, Math.min(WORLD_H - 20, player.current.y + dy));
         if (!checkCollision(player.current.x, ny)) player.current.y = ny;
-        else {
-          pathRef.current = [];
-          clickTarget.current = null;
-        }
+        else clickTarget.current = null;
       }
 
-      if (pathRef.current.length <= 1 && clickTarget.current) {
-        const targetRoom = [...ROOM_BORDERS, ...roomSet].find((room) => {
-          const center = roomCenter(room);
-          return Math.hypot(center.x - clickTarget.current.x, center.y - clickTarget.current.y) < 55;
-        });
-        if (targetRoom) {
-          clickTarget.current = null;
-        }
-      }
-
+      // ─── Throttled emit (~30/sec) ─────────────────────────────────────
       const now = performance.now();
       if ((player.current.x !== lastSentX || player.current.y !== lastSentY) && now - lastEmitTime >= 33) {
         lastSentX = player.current.x;
@@ -637,6 +581,7 @@ function VirtualOffice({ username = "You", earshotRadius = 100, localStream = nu
         socket.emit("move", { x: player.current.x, y: player.current.y });
       }
 
+      // ─── Lerp remote avatars ──────────────────────────────────────────
       Object.values(remotePlayers.current).forEach((rp) => {
         rp.x += (rp.targetX - rp.x) * LERP;
         rp.y += (rp.targetY - rp.y) * LERP;
@@ -644,17 +589,17 @@ function VirtualOffice({ username = "You", earshotRadius = 100, localStream = nu
         if (Math.abs(rp.targetY - rp.y) < 0.1) rp.y = rp.targetY;
       });
 
+      // Update volume in real time as players move
       updateAudioSpatialMixer();
+
+      // ─── Render ───────────────────────────────────────────────────────
       ctx.clearRect(0, 0, WORLD_W, WORLD_H);
 
-      const earshot = earshotRef.current;
-      const background = ctx.createLinearGradient(0, 0, 0, WORLD_H);
-      background.addColorStop(0, "#f2f0ea");
-      background.addColorStop(1, "#e8e2d7");
-      ctx.fillStyle = background;
+      // 1. Floor grid (Tanvi Day 2)
+      ctx.fillStyle = "#1e2533";
       ctx.fillRect(0, 0, WORLD_W, WORLD_H);
 
-      ctx.strokeStyle = "rgba(92, 102, 96, 0.08)";
+      ctx.strokeStyle = "rgba(255,255,255,0.045)";
       ctx.lineWidth = 1;
       for (let gx = 0; gx <= WORLD_W; gx += GRID_SIZE) {
         ctx.beginPath(); ctx.moveTo(gx, 0); ctx.lineTo(gx, WORLD_H); ctx.stroke();
@@ -663,93 +608,143 @@ function VirtualOffice({ username = "You", earshotRadius = 100, localStream = nu
         ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(WORLD_W, gy); ctx.stroke();
       }
 
-      [...ROOM_BORDERS, ...roomSet].forEach((room) => {
-        ctx.fillStyle = room.fill || "rgba(148, 174, 196, 0.72)";
-        ctx.fillRect(room.x, room.y, room.width, room.height);
-        ctx.strokeStyle = "#000000";
-        ctx.lineWidth = 2.2;
-        ctx.strokeRect(room.x, room.y, room.width, room.height);
-        ctx.fillStyle = room.name === "Focus Room" ? "#294f42" : room.name === "Lounge" ? "#6a4f3d" : room.name === "Open Work" ? "#464b45" : "#2c4b5a";
-        ctx.font = "700 12px Inter, Arial";
-        ctx.textAlign = "center";
-        ctx.fillText(room.name.toUpperCase(), room.x + room.width / 2, room.y + 24);
+      // 2. Obstacle fills (Tanvi Day 6 — world obstacles)
+      OBSTACLES.forEach((obs) => {
+        ctx.fillStyle = "#4b3f2a";
+        ctx.fillRect(obs.x, obs.y, obs.width, obs.height);
+        ctx.strokeStyle = "#78604a";
+        ctx.lineWidth = 2;
+        ctx.strokeRect(obs.x, obs.y, obs.width, obs.height);
+        if (obs.label) {
+          ctx.fillStyle = "#d4b896";
+          ctx.font = "bold 12px Inter, Arial";
+          ctx.textAlign = "center";
+          ctx.fillText(obs.label, obs.x + obs.width / 2, obs.y + obs.height / 2 + 5);
+        }
       });
 
-      drawDesk(ctx, 120, 140, 150, 72, "#d9c5a1");
-      drawDesk(ctx, 280, 140, 150, 72, "#d9c5a1");
-      drawDesk(ctx, 680, 135, 175, 72, "#d5b58b");
-      drawDesk(ctx, 860, 135, 120, 72, "#d5b58b");
-      drawDesk(ctx, 110, 430, 180, 58, "#d9c5a1");
-      drawDesk(ctx, 710, 430, 200, 58, "#d7d0c0");
-
-      drawPlant(ctx, 360, 90);
-      drawPlant(ctx, 845, 90);
-      drawPlant(ctx, 100, 500);
-      drawPlant(ctx, 850, 500);
-
-      const wallPalette = ["#eae4d9", "#dfe6d3", "#d3d5c6"];
-      WALLS.forEach((w, i) => {
-        ctx.fillStyle = wallPalette[i % wallPalette.length];
+      // 3. Wall rectangles (Tanvi Day 6)
+      ctx.fillStyle = "#334155";
+      WALLS.forEach((w) => {
         ctx.fillRect(w.x, w.y, w.width, w.height);
-        ctx.strokeStyle = "rgba(0, 0, 0, 0.8)";
-        ctx.lineWidth = 1.4;
-        ctx.strokeRect(w.x, w.y, w.width, w.height);
       });
 
+      // Meeting room label
+      ctx.fillStyle = "#94a3b8";
+      ctx.font = "14px Inter, Arial";
+      ctx.textAlign = "center";
+      ctx.fillText("Meeting Room", 650, 105);
+
+      // Doorway dashed threshold
+      ctx.strokeStyle = "#64748b";
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([5, 4]);
+      ctx.beginPath(); ctx.moveTo(610, 300); ctx.lineTo(690, 300); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = "#64748b";
+      ctx.font = "10px Inter, Arial";
+      ctx.fillText("DOOR", 650, 316);
+
+      // 4. Click-to-move target indicator
       if (clickTarget.current) {
         ctx.beginPath();
         ctx.arc(clickTarget.current.x, clickTarget.current.y, 8, 0, Math.PI * 2);
-        ctx.strokeStyle = "rgba(25, 122, 108, 0.8)";
+        ctx.strokeStyle = "rgba(99,179,237,0.8)";
         ctx.lineWidth = 2;
-        ctx.setLineDash([3, 4]);
+        ctx.setLineDash([3, 3]);
         ctx.stroke();
         ctx.setLineDash([]);
-
-        if (pathRef.current.length > 1) {
-          ctx.beginPath();
-          ctx.moveTo(pathRef.current[0].x, pathRef.current[0].y);
-          pathRef.current.slice(1).forEach((step) => ctx.lineTo(step.x, step.y));
-          ctx.strokeStyle = "rgba(41, 92, 255, 0.6)";
-          ctx.lineWidth = 2;
-          ctx.setLineDash([8, 6]);
-          ctx.stroke();
-          ctx.setLineDash([]);
-        }
       }
 
+      // 5. Earshot circle (Tanvi Day 5 — visual feedback)
+      const earshot = earshotRef.current;
       ctx.beginPath();
       ctx.arc(player.current.x, player.current.y, earshot, 0, Math.PI * 2);
-      ctx.fillStyle = "rgba(54, 110, 103, 0.08)";
+      ctx.fillStyle = "rgba(59,130,246,0.06)";
       ctx.fill();
-      ctx.strokeStyle = "rgba(54, 110, 103, 0.35)";
+      ctx.strokeStyle = "rgba(59,130,246,0.3)";
       ctx.lineWidth = 1.5;
-      ctx.setLineDash([6, 6]);
+      ctx.setLineDash([6, 4]);
       ctx.stroke();
       ctx.setLineDash([]);
 
+      // 6. Remote avatars with username (Tanvi Day 3 + Day 5)
       Object.entries(remotePlayers.current).forEach(([id, rp]) => {
         const dist = Math.hypot(rp.x - player.current.x, rp.y - player.current.y);
         const inEarshot = dist <= earshot;
         const colour = colourForId(id);
-        drawAvatar(ctx, rp.x, rp.y, { name: rp.username || id.slice(0, 6), colour, isLocal: false, inEarshot });
+
+        // Avatar circle
+        ctx.beginPath();
+        ctx.arc(rp.x, rp.y, AVATAR_RADIUS, 0, Math.PI * 2);
+        ctx.fillStyle = inEarshot ? colour : "rgba(100,100,100,0.4)";
+        ctx.fill();
+        ctx.strokeStyle = inEarshot ? "#fff" : "#555";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        ctx.closePath();
+
+        // Earshot ring
+        if (inEarshot) {
+          ctx.beginPath();
+          ctx.arc(rp.x, rp.y, AVATAR_RADIUS + 5, 0, Math.PI * 2);
+          ctx.strokeStyle = "rgba(34,197,94,0.6)";
+          ctx.lineWidth = 2;
+          ctx.stroke();
+          ctx.closePath();
+        }
+
+        // Initial letter inside avatar
+        const displayName = rp.username && rp.username.trim() ? rp.username : "?";
+        ctx.fillStyle = "#fff";
+        ctx.font = `bold 13px Inter, Arial`;
+        ctx.textAlign = "center";
+        ctx.fillText(displayName[0].toUpperCase(), rp.x, rp.y + 5);
+
+        // Username label above avatar
+        ctx.fillStyle = inEarshot ? "#e5e7eb" : "#6b7280";
+        ctx.font = "11px Inter, Arial";
+        ctx.textAlign = "center";
+        ctx.fillText(displayName !== "?" ? displayName : id.slice(0, 6), rp.x, rp.y - AVATAR_RADIUS - 6);
+
+        // Earshot distance badge
+        if (inEarshot) {
+          ctx.fillStyle = "rgba(34,197,94,0.85)";
+          ctx.font = "9px Inter, Arial";
+          ctx.fillText(`${Math.round(dist)}px`, rp.x, rp.y + AVATAR_RADIUS + 12);
+        }
       });
 
-      drawAvatar(ctx, player.current.x, player.current.y, {
-        name: username,
-        colour: "#7f6fe9",
-        isLocal: true,
-        inEarshot: true
-      });
+      // 7. Local player avatar with username (Tanvi Day 3)
+      ctx.beginPath();
+      ctx.arc(player.current.x, player.current.y, AVATAR_RADIUS, 0, Math.PI * 2);
+      ctx.fillStyle = "#2563eb";
+      ctx.fill();
+      ctx.strokeStyle = "#93c5fd";
+      ctx.lineWidth = 2.5;
+      ctx.stroke();
+      ctx.closePath();
 
+      ctx.fillStyle = "#fff";
+      ctx.font = `bold 13px Inter, Arial`;
+      ctx.textAlign = "center";
+      ctx.fillText((username[0] || "Y").toUpperCase(), player.current.x, player.current.y + 5);
+
+      ctx.fillStyle = "#bfdbfe";
+      ctx.font = "bold 11px Inter, Arial";
+      ctx.textAlign = "center";
+      ctx.fillText(username, player.current.x, player.current.y - AVATAR_RADIUS - 6);
+
+      // 8. HUD overlay
       ctx.textAlign = "left";
-      ctx.fillStyle = "rgba(255, 255, 255, 0.74)";
-      ctx.fillRect(18, 14, 210, 56);
-      ctx.strokeStyle = "rgba(94, 103, 98, 0.15)";
-      ctx.strokeRect(18, 14, 210, 56);
-      ctx.fillStyle = "#2a3d3c";
-      ctx.font = "600 11px Inter, Arial";
-      ctx.fillText(`👤 ${username}`, 28, 34);
-      ctx.fillText(`📡 ${earshot}px earshot`, 28, 52);
+      ctx.fillStyle = "rgba(0,0,0,0.45)";
+      ctx.fillRect(14, 14, 210, 50);
+      ctx.fillStyle = "#94a3b8";
+      ctx.font = "11px Inter, Arial";
+      ctx.fillText(`👤 ${username}`, 22, 32);
+      ctx.fillText(`📡 Earshot: ${earshot}px`, 22, 50);
+      ctx.fillText(`🧑 Online: ${Object.keys(remotePlayers.current).length + 1}`, 130, 32);
+      ctx.fillText(`📍 ${Math.round(player.current.x)}, ${Math.round(player.current.y)}`, 130, 50);
 
       rafId = requestAnimationFrame(gameLoop);
     }
@@ -761,25 +756,38 @@ function VirtualOffice({ username = "You", earshotRadius = 100, localStream = nu
       cancelAnimationFrame(rafId);
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
+      window.removeEventListener("click", unlockAudio);
+      window.removeEventListener("keydown", unlockAudio);
+      window.removeEventListener("touchstart", unlockAudio);
       canvas.removeEventListener("click", onCanvasClick);
+
+      Object.values(peerConnections).forEach((pc) => {
+        try { pc.close(); } catch (err) { console.debug("[WebRTC] PC close note:", err); }
+      });
+      peerConnectionsRef.current = {};
+      pendingCandidatesRef.current = {};
+
+      document.querySelectorAll('audio[id^="audio-"]').forEach((el) => {
+        try {
+          el.pause();
+          el.srcObject = null;
+          el.remove();
+        } catch (err) { console.debug("[WebRTC] Audio cleanup note:", err); }
+      });
+
       socket.disconnect();
     };
-  }, [username, localStream]);
+  }, [username]);
 
   return (
     <canvas
       ref={canvasRef}
       style={{
-        width: "100%",
-        maxWidth: "100%",
-        height: "clamp(420px, 72vh, 760px)",
-        aspectRatio: "1000 / 600",
-        border: "1px solid rgba(0, 0, 0, 0.8)",
-        borderRadius: "24px",
+        border: "2px solid #334155",
+        borderRadius: "8px",
         display: "block",
-        background: "#f1efe9",
-        boxShadow: "0 24px 38px rgba(17, 24, 20, 0.08)",
         cursor: "crosshair",
+        maxWidth: "100%",
       }}
     />
   );

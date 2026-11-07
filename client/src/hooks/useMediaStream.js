@@ -5,22 +5,17 @@ export function useMediaStream() {
   const [isMuted, setIsMuted] = useState(false);
   const [permissionGranted, setPermissionGranted] = useState(false);
   const [error, setError] = useState(null);
-  const [volumeLevel, setVolumeLevelState] = useState(100);
+
   const streamRef = useRef(null);
+  useEffect(() => {
+    streamRef.current = localStream;
+  }, [localStream]);
 
   const startAudio = useCallback(async () => {
-    if (!navigator?.mediaDevices?.getUserMedia) {
-      const message = 'This browser does not support microphone access.';
-      setError(message);
-      setPermissionGranted(false);
-      return null;
-    }
-
     try {
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach((track) => track.stop());
+      if (!navigator?.mediaDevices?.getUserMedia) {
+        throw new Error("navigator.mediaDevices.getUserMedia is not supported");
       }
-
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: true,
@@ -30,63 +25,41 @@ export function useMediaStream() {
         video: false,
       });
 
-      streamRef.current = stream;
+      const audioTracks = stream.getAudioTracks();
+      if (audioTracks.length > 0) {
+        audioTracks[0].enabled = true;
+        console.log(`[MediaStream] Acquired audio track: id=${audioTracks[0].id}, enabled=${audioTracks[0].enabled}, state=${audioTracks[0].readyState}`);
+      }
+
       setLocalStream(stream);
       setPermissionGranted(true);
-      setIsMuted(false);
-      setVolumeLevelState(100);
       setError(null);
       return stream;
     } catch (err) {
       console.error('Failed to access microphone:', err);
-      const message = err && err.name === 'NotAllowedError'
-        ? 'Microphone access was blocked. Please allow access and try again.'
-        : 'Unable to enable microphone. Please check browser permissions and try again.';
-      setError(message);
+      setError(err.name || 'Microphone access denied');
       setPermissionGranted(false);
       return null;
     }
   }, []);
 
-  const updateVolume = useCallback((nextValue) => {
-    setVolumeLevelState((current) => {
-      const value = typeof nextValue === 'function' ? nextValue(current) : nextValue;
-      const clamped = Math.min(100, Math.max(0, Number(value) || 0));
-
-      if (streamRef.current) {
-        const audioTrack = streamRef.current.getAudioTracks()[0];
-        if (audioTrack) {
-          const shouldBeEnabled = clamped > 0 && !isMuted;
-          audioTrack.enabled = shouldBeEnabled;
-        }
-      }
-
-      setIsMuted(clamped <= 0);
-      return clamped;
-    });
-  }, [isMuted]);
-
   const toggleMute = useCallback(() => {
-    if (!streamRef.current) return;
-    const audioTrack = streamRef.current.getAudioTracks()[0];
-    if (!audioTrack) return;
-
-    const nextMuted = !audioTrack.enabled;
-    audioTrack.enabled = !nextMuted;
-    setIsMuted(nextMuted);
-
-    if (nextMuted) {
-      setVolumeLevelState(0);
-    } else if (volumeLevel === 0) {
-      setVolumeLevelState(50);
+    if (!localStream) return;
+    const audioTrack = localStream.getAudioTracks()[0];
+    if (audioTrack) {
+      audioTrack.enabled = !audioTrack.enabled;
+      setIsMuted(!audioTrack.enabled);
     }
-  }, [volumeLevel]);
+  }, [localStream]);
 
+  // Cleanup tracks only when component unmounts
   useEffect(() => {
     return () => {
       if (streamRef.current) {
-        streamRef.current.getTracks().forEach((track) => track.stop());
-        streamRef.current = null;
+        streamRef.current.getTracks().forEach((track) => {
+          console.log(`[MediaStream] Stopping local track ${track.id} on unmount`);
+          track.stop();
+        });
       }
     };
   }, []);
@@ -98,7 +71,5 @@ export function useMediaStream() {
     error,
     startAudio,
     toggleMute,
-    volumeLevel,
-    setVolumeLevel: updateVolume,
   };
 }

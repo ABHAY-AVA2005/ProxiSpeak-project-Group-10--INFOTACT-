@@ -6,11 +6,17 @@ const RTC_CONFIG = {
 };
 
 const peerConnections = new Map();
-const audioElements = new Map();
 
-export function createPeerConnection(peerSocketId, { onIceCandidate, onTrack, onConnectionStateChange }) {
+/**
+ * Creates or gets an existing RTCPeerConnection for a remote peer socket ID
+ */
+export function createPeerConnection(peerSocketId, { onIceCandidate, onTrack, onConnectionStateChange } = {}) {
   if (peerConnections.has(peerSocketId)) {
-    return peerConnections.get(peerSocketId);
+    const existing = peerConnections.get(peerSocketId);
+    if (existing.signalingState !== 'closed' && existing.connectionState !== 'closed' && existing.connectionState !== 'failed') {
+      return existing;
+    }
+    closePeerConnection(peerSocketId);
   }
 
   const pc = new RTCPeerConnection(RTC_CONFIG);
@@ -22,18 +28,16 @@ export function createPeerConnection(peerSocketId, { onIceCandidate, onTrack, on
   };
 
   pc.ontrack = (event) => {
-    const stream = event.streams[0] || new MediaStream([event.track]);
-    if (!audioElements.has(peerSocketId)) {
-      const audio = new Audio();
-      audio.srcObject = stream;
-      audio.autoplay = true;
-      audioElements.set(peerSocketId, audio);
+    const stream = (event.streams && event.streams[0]) ? event.streams[0] : new MediaStream([event.track]);
+    if (onTrack) {
+      onTrack(peerSocketId, stream, event.track);
     }
-    if (onTrack) onTrack(peerSocketId, stream);
   };
 
   pc.onconnectionstatechange = () => {
-    if (onConnectionStateChange) onConnectionStateChange(peerSocketId, pc.connectionState);
+    if (onConnectionStateChange) {
+      onConnectionStateChange(peerSocketId, pc.connectionState);
+    }
     if (pc.connectionState === 'failed' || pc.connectionState === 'closed') {
       closePeerConnection(peerSocketId);
     }
@@ -43,20 +47,27 @@ export function createPeerConnection(peerSocketId, { onIceCandidate, onTrack, on
   return pc;
 }
 
+/**
+ * Closes and cleans up a peer connection
+ */
 export function closePeerConnection(peerSocketId) {
   const pc = peerConnections.get(peerSocketId);
   if (pc) {
-    pc.close();
+    pc.ontrack = null;
+    pc.onicecandidate = null;
+    pc.onconnectionstatechange = null;
+    try {
+      pc.close();
+    } catch (err) {
+      console.debug(`[WebRTC] Peer connection close note for ${peerSocketId}:`, err);
+    }
     peerConnections.delete(peerSocketId);
-  }
-  const audio = audioElements.get(peerSocketId);
-  if (audio) {
-    audio.pause();
-    audio.srcObject = null;
-    audioElements.delete(peerSocketId);
   }
 }
 
+/**
+ * Closes all peer connections on disconnect/leave
+ */
 export function closeAllPeerConnections() {
   for (const peerSocketId of peerConnections.keys()) {
     closePeerConnection(peerSocketId);
