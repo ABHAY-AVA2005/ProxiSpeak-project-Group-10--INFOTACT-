@@ -65,22 +65,22 @@ const WALLS = [
 ];
 
 const ROOM_BOUNDARIES = [
-  // Meeting Room (top-left: x 18..303, y 18..205) -> doorway on right wall at y: 70..160
-  ...buildRoomBoundary({ x: 18, y: 18, width: 285, height: 187 }, "right", 70, 95),
-  // Focus Zone (top-right: x 697..982, y 18..205) -> doorway on left wall at y: 70..160
-  ...buildRoomBoundary({ x: 697, y: 18, width: 285, height: 187 }, "left", 70, 95),
-  // Lounge (bottom-left: x 18..303, y 395..585) -> doorway on right wall at y: 430..525
-  ...buildRoomBoundary({ x: 18, y: 395, width: 285, height: 190 }, "right", 430, 95),
-  // Pantry (bottom-right: x 697..982, y 395..585) -> doorway on left wall at y: 430..525
-  ...buildRoomBoundary({ x: 697, y: 395, width: 285, height: 190 }, "left", 430, 95),
+  // Meeting Room (top-left: x 18..303, y 18..205) -> doorway on right wall at y: 65..165 (gap: 100px)
+  ...buildRoomBoundary({ x: 18, y: 18, width: 285, height: 187 }, "right", 65, 100),
+  // Focus Zone (top-right: x 697..982, y 18..205) -> doorway on left wall at y: 65..165 (gap: 100px)
+  ...buildRoomBoundary({ x: 697, y: 18, width: 285, height: 187 }, "left", 65, 100),
+  // Lounge (bottom-left: x 18..303, y 395..585) -> doorway on right wall at y: 420..525 (gap: 105px)
+  ...buildRoomBoundary({ x: 18, y: 395, width: 285, height: 190 }, "right", 420, 105),
+  // Pantry (bottom-right: x 697..982, y 395..585) -> doorway on left wall at y: 420..525 (gap: 105px)
+  ...buildRoomBoundary({ x: 697, y: 395, width: 285, height: 190 }, "left", 420, 105),
 ];
 
 // Solid obstacles that avatars navigate around
 // Note: We use compact collision bounds so avatars can walk around furniture, sit at desks, and NEVER get trapped inside
 const OBSTACLES = [
-  // Meeting room conference table: table is drawn at (48, 68, 220, 90)
-  // Collision box only occupies the central core (70, 80, 175, 65) so avatars can walk along top, bottom, and around it
-  { x: 75, y: 85, width: 165, height: 55, label: "Table" },
+  // Meeting room conference table: table is drawn at (52, 68, 205, 82)
+  // Collision box only occupies the central core (70, 76, 168, 66) so avatars can walk around it freely
+  { x: 70, y: 76, width: 168, height: 66, label: "Table" },
   // Open workspace desks (compact collision box)
   { x: 335, y: 225, width: 70, height: 35, label: "Desk" },
   { x: 440, y: 225, width: 70, height: 35, label: "Desk" },
@@ -104,6 +104,21 @@ function checkCollision(cx, cy, radius = AVATAR_RADIUS) {
     if ((cx - nearX) ** 2 + (cy - nearY) ** 2 < radius * radius) return true;
   }
   return false;
+}
+
+// Find nearest collision-free point in 16 radial directions
+function findNearestFreePoint(x, y, radius = AVATAR_RADIUS - 4) {
+  if (!checkCollision(x, y, radius)) return { x, y };
+  for (let r = 2; r <= 40; r += 2) {
+    for (let a = 0; a < Math.PI * 2; a += Math.PI / 8) {
+      const tx = Math.max(25, Math.min(WORLD_W - 25, x + Math.cos(a) * r));
+      const ty = Math.max(25, Math.min(WORLD_H - 25, y + Math.sin(a) * r));
+      if (!checkCollision(tx, ty, radius)) {
+        return { x: tx, y: ty };
+      }
+    }
+  }
+  return { x, y };
 }
 
 function pointToCell(x, y) {
@@ -142,31 +157,51 @@ function isCellBlocked(cellX, cellY) {
 
   const pointX = cellX * GRID_SIZE + GRID_SIZE / 2;
   const pointY = cellY * GRID_SIZE + GRID_SIZE / 2;
-  return checkCollision(pointX, pointY, AVATAR_RADIUS - 2);
+  return checkCollision(pointX, pointY, AVATAR_RADIUS - 4);
 }
 
 function findPath(start, goal) {
-  const startCell = pointToCell(start.x, start.y);
+  let startCell = pointToCell(start.x, start.y);
   let goalCell = pointToCell(goal.x, goal.y);
+
+  // If start is in or near a blocked cell, find closest free cell near start
+  if (isCellBlocked(startCell.x, startCell.y)) {
+    let foundStart = null;
+    for (let r = 1; r <= 4; r++) {
+      for (let dx = -r; dx <= r; dx++) {
+        for (let dy = -r; dy <= r; dy++) {
+          const testX = startCell.x + dx;
+          const testY = startCell.y + dy;
+          if (!isCellBlocked(testX, testY)) {
+            foundStart = { x: testX, y: testY };
+            break;
+          }
+        }
+        if (foundStart) break;
+      }
+      if (foundStart) break;
+    }
+    if (foundStart) startCell = foundStart;
+  }
 
   // If goal is slightly blocked, find closest free cell near goal
   if (isCellBlocked(goalCell.x, goalCell.y)) {
-    let found = null;
-    for (let r = 1; r <= 3; r++) {
+    let foundGoal = null;
+    for (let r = 1; r <= 4; r++) {
       for (let dx = -r; dx <= r; dx++) {
         for (let dy = -r; dy <= r; dy++) {
           const testX = goalCell.x + dx;
           const testY = goalCell.y + dy;
           if (!isCellBlocked(testX, testY)) {
-            found = { x: testX, y: testY };
+            foundGoal = { x: testX, y: testY };
             break;
           }
         }
-        if (found) break;
+        if (foundGoal) break;
       }
-      if (found) break;
+      if (foundGoal) break;
     }
-    if (found) goalCell = found;
+    if (foundGoal) goalCell = foundGoal;
     else return [{ x: goal.x, y: goal.y }];
   }
 
@@ -189,12 +224,15 @@ function findPath(start, goal) {
     if (!currentKey) break;
     const [cx, cy] = currentKey.split(",").map(Number);
     if (cx === goalCell.x && cy === goalCell.y) {
-      const path = [{ x: cellToPoint({ x: cx, y: cy }).x, y: cellToPoint({ x: cx, y: cy }).y }];
+      const path = [{ x: goal.x, y: goal.y }];
       let cursor = currentKey;
       while (cameFrom.has(cursor)) {
         cursor = cameFrom.get(cursor);
         const [px, py] = cursor.split(",").map(Number);
-        path.unshift({ x: cellToPoint({ x: px, y: py }).x, y: cellToPoint({ x: px, y: py }).y });
+        path.unshift(cellToPoint({ x: px, y: py }));
+      }
+      if (path.length > 1 && Math.hypot(path[0].x - start.x, path[0].y - start.y) < 14) {
+        path.shift();
       }
       return path;
     }
@@ -258,11 +296,14 @@ function VirtualOffice({
   const pendingCandidatesRef = useRef({});
   const routeRef = useRef([]);
   const clickTargetRef = useRef(null);
+  const stuckFramesRef = useRef(0);
+  const lastPosRef = useRef({ x: 160, y: 44 });
+  const repathCooldownRef = useRef(0);
   const playerFacing = useRef({ angle: 0, moving: false });
 
   useEffect(() => { earshotRef.current = earshotRadius; }, [earshotRadius]);
 
-  const player = useRef({ x: 500, y: 360, username });
+  const player = useRef({ x: 160, y: 44, username });
   const keys = useRef({});
   const clickTarget = useRef(null);    // { x, y } for click-to-move
   const remotePlayers = useRef({});    // id -> { x, y, targetX, targetY, username }
@@ -275,10 +316,10 @@ function VirtualOffice({
     if (!meetingRooms.length) return;
     const targetRoom = meetingRooms.find((room) => room.name === spawnRoom || room.id === spawnRoom);
     if (targetRoom) {
-      // If spawning in Meeting Room, place avatar in the walkable area (above or to the side of table, near doorway)
+      // If spawning in Meeting Room, place avatar in the open walkway above the table
       if (targetRoom.id === "Meeting Room" || targetRoom.name === "Meeting Room") {
-        player.current.x = 220;
-        player.current.y = 52; // Top side of conference table, near doorway
+        player.current.x = 160;
+        player.current.y = 44;
       } else {
         const x = targetRoom.x + targetRoom.width / 2;
         const y = targetRoom.y + targetRoom.height / 2;
@@ -289,12 +330,16 @@ function VirtualOffice({
       }
       routeRef.current = [];
       clickTargetRef.current = null;
+      clickTarget.current = null;
+      stuckFramesRef.current = 0;
     } else {
       // Default spawn inside Meeting Room
-      player.current.x = 220;
-      player.current.y = 52;
+      player.current.x = 160;
+      player.current.y = 44;
       routeRef.current = [];
       clickTargetRef.current = null;
+      clickTarget.current = null;
+      stuckFramesRef.current = 0;
     }
   }, [meetingRooms, spawnRoom]);
 
@@ -854,42 +899,89 @@ function VirtualOffice({
       let movedX = false;
       let movedY = false;
 
-      // Unstuck emergency escape: If player somehow starts inside an obstacle or wall, push towards open area
+      // Unstuck emergency escape: If player starts or grazes inside an obstacle/wall, smoothly nudge into nearest free space
       if (checkCollision(player.current.x, player.current.y, AVATAR_RADIUS - 4)) {
-        // Find best direction towards center (500, 320)
-        const toCenterX = 500 - player.current.x;
-        const toCenterY = 320 - player.current.y;
-        const distToCenter = Math.hypot(toCenterX, toCenterY) || 1;
-        const escX = (toCenterX / distToCenter) * 3;
-        const escY = (toCenterY / distToCenter) * 3;
-        player.current.x += escX;
-        player.current.y += escY;
+        const freePoint = findNearestFreePoint(player.current.x, player.current.y, AVATAR_RADIUS - 4);
+        player.current.x = freePoint.x;
+        player.current.y = freePoint.y;
       }
 
       if (dx !== 0) {
-        const nx = Math.max(20, Math.min(WORLD_W - 20, player.current.x + dx));
+        const nx = Math.max(25, Math.min(WORLD_W - 25, player.current.x + dx));
         if (!checkCollision(nx, player.current.y, AVATAR_RADIUS - 4)) {
           player.current.x = nx;
           movedX = true;
         }
       }
       if (dy !== 0) {
-        const ny = Math.max(20, Math.min(WORLD_H - 20, player.current.y + dy));
+        const ny = Math.max(25, Math.min(WORLD_H - 25, player.current.y + dy));
         if (!checkCollision(player.current.x, ny, AVATAR_RADIUS - 4)) {
           player.current.y = ny;
           movedY = true;
         }
       }
 
-      // Only cancel route if completely stuck and couldn't move in either axis
-      if ((dx !== 0 || dy !== 0) && !movedX && !movedY) {
-        // Stuck against corner or obstacle: try skipping to next route node if available
-        if (routeRef.current.length > 1) {
+      // ── Stuck detection & dynamic self-rebuilding path logic ─────────────────
+      const intendedMove = (dx !== 0 || dy !== 0) || Boolean(clickTargetRef.current);
+      const actualDist = Math.hypot(player.current.x - lastPosRef.current.x, player.current.y - lastPosRef.current.y);
+      lastPosRef.current = { x: player.current.x, y: player.current.y };
+
+      if (repathCooldownRef.current > 0) {
+        repathCooldownRef.current--;
+      }
+
+      if (intendedMove && actualDist < 0.25) {
+        stuckFramesRef.current += 1;
+      } else {
+        stuckFramesRef.current = 0;
+      }
+
+      // If avatar has been blocked for >= 8 frames (~130ms), autonomously recover and rebuild path
+      if (stuckFramesRef.current >= 8 && repathCooldownRef.current === 0) {
+        repathCooldownRef.current = 10; // Prevent thrashing
+
+        // 1. First gently nudge away from any collision boundary
+        const nudged = findNearestFreePoint(player.current.x, player.current.y, AVATAR_RADIUS - 3);
+        player.current.x = nudged.x;
+        player.current.y = nudged.y;
+
+        const target = clickTargetRef.current;
+        if (target) {
+          // 2. Rebuild the A* path dynamically to the destination
+          let newPath = findPath({ x: player.current.x, y: player.current.y }, target);
+
+          // 3. If direct path is not immediately found, probe 8 surrounding neighbor cells for an open route
+          if (!newPath || newPath.length === 0) {
+            const probeOffsets = [
+              [0, -18], [0, 18], [-18, 0], [18, 0],
+              [-18, -18], [18, -18], [-18, 18], [18, 18]
+            ];
+            for (const [ox, oy] of probeOffsets) {
+              const probeX = Math.max(25, Math.min(WORLD_W - 25, player.current.x + ox));
+              const probeY = Math.max(25, Math.min(WORLD_H - 25, player.current.y + oy));
+              if (!checkCollision(probeX, probeY, AVATAR_RADIUS - 4)) {
+                const altPath = findPath({ x: probeX, y: probeY }, target);
+                if (altPath && altPath.length > 0) {
+                  newPath = [{ x: probeX, y: probeY }, ...altPath];
+                  break;
+                }
+              }
+            }
+          }
+
+          if (newPath && newPath.length > 0) {
+            routeRef.current = newPath;
+            stuckFramesRef.current = 0;
+          } else if (stuckFramesRef.current >= 35) {
+            // Destination is completely enclosed or unreachable; cleanly release
+            routeRef.current = [];
+            clickTarget.current = null;
+            clickTargetRef.current = null;
+            stuckFramesRef.current = 0;
+          }
+        } else if (routeRef.current.length > 1) {
           routeRef.current.shift();
-        } else {
-          clickTarget.current = null;
-          clickTargetRef.current = null;
-          routeRef.current = [];
+          stuckFramesRef.current = 0;
         }
       }
 
@@ -980,19 +1072,19 @@ function VirtualOffice({
       // ── 4. MEETING ROOM FURNITURE ────────────────────────────────────
       ctx.save();
       // Large conference table
-      rr(48, 68, 220, 90, 10);
+      rr(52, 68, 205, 82, 10);
       ctx.fillStyle = "#c8b98a"; ctx.fill();
       ctx.strokeStyle = "#a89060"; ctx.lineWidth = 1.5; ctx.stroke();
       // Chairs top
-      for (let i = 0; i < 4; i++) { rr(60 + i * 52, 58, 30, 14, 5); ctx.fillStyle = "#3a3a5a"; ctx.fill(); }
+      for (let i = 0; i < 4; i++) { rr(64 + i * 48, 54, 28, 12, 4); ctx.fillStyle = "#3a3a5a"; ctx.fill(); }
       // Chairs bottom
-      for (let i = 0; i < 4; i++) { rr(60 + i * 52, 158, 30, 14, 5); ctx.fillStyle = "#3a3a5a"; ctx.fill(); }
+      for (let i = 0; i < 4; i++) { rr(64 + i * 48, 150, 28, 12, 4); ctx.fillStyle = "#3a3a5a"; ctx.fill(); }
       // Chairs sides
-      rr(32, 92, 14, 28, 5); ctx.fillStyle = "#3a3a5a"; ctx.fill();
-      rr(270, 92, 14, 28, 5); ctx.fillStyle = "#3a3a5a"; ctx.fill();
+      rr(34, 95, 12, 28, 4); ctx.fillStyle = "#3a3a5a"; ctx.fill();
+      rr(262, 95, 12, 28, 4); ctx.fillStyle = "#3a3a5a"; ctx.fill();
       // Plant TL corner
-      ctx.beginPath(); ctx.arc(40, 170, 14, 0, Math.PI*2); ctx.fillStyle = "#4a9e4a"; ctx.fill();
-      ctx.beginPath(); ctx.arc(40, 170, 8, 0, Math.PI*2); ctx.fillStyle = "#3a7e3a"; ctx.fill();
+      ctx.beginPath(); ctx.arc(40, 172, 13, 0, Math.PI*2); ctx.fillStyle = "#4a9e4a"; ctx.fill();
+      ctx.beginPath(); ctx.arc(40, 172, 7, 0, Math.PI*2); ctx.fillStyle = "#3a7e3a"; ctx.fill();
       ctx.restore();
 
       // ── 5. FOCUS ZONE FURNITURE ──────────────────────────────────────
@@ -1062,32 +1154,32 @@ function VirtualOffice({
       ctx.strokeStyle = "rgba(110,100,180,0.45)";
       ctx.lineWidth = 3;
 
-      // Vertical partitions with doorway gaps (doorway = gap for walking)
-      // Top left Meeting room (right wall x: 303, entrance at y: 80..140)
-      ctx.beginPath(); ctx.moveTo(303, 18); ctx.lineTo(303, 75); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(303, 145); ctx.lineTo(303, 205); ctx.stroke();
+      // Vertical partitions with doorway gaps (doorway = 100px clear gap for walking)
+      // Top left Meeting room (right wall x: 303, entrance at y: 65..165)
+      ctx.beginPath(); ctx.moveTo(303, 18); ctx.lineTo(303, 65); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(303, 165); ctx.lineTo(303, 205); ctx.stroke();
       // Doorway indicator (Meeting room entrance)
       ctx.fillStyle = "rgba(99,102,241,0.15)";
-      ctx.fillRect(298, 75, 10, 70);
+      ctx.fillRect(298, 65, 10, 100);
 
-      // Top right Focus zone (left wall x: 697, entrance at y: 80..140)
-      ctx.beginPath(); ctx.moveTo(697, 18); ctx.lineTo(697, 75); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(697, 145); ctx.lineTo(697, 205); ctx.stroke();
+      // Top right Focus zone (left wall x: 697, entrance at y: 65..165)
+      ctx.beginPath(); ctx.moveTo(697, 18); ctx.lineTo(697, 65); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(697, 165); ctx.lineTo(697, 205); ctx.stroke();
       // Doorway indicator (Focus zone entrance)
       ctx.fillStyle = "rgba(99,102,241,0.15)";
-      ctx.fillRect(692, 75, 10, 70);
+      ctx.fillRect(692, 65, 10, 100);
 
-      // Bottom left Lounge (right wall x: 303, entrance at y: 440..500)
-      ctx.beginPath(); ctx.moveTo(303, 395); ctx.lineTo(303, 440); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(303, 505); ctx.lineTo(303, 582); ctx.stroke();
+      // Bottom left Lounge (right wall x: 303, entrance at y: 420..525)
+      ctx.beginPath(); ctx.moveTo(303, 395); ctx.lineTo(303, 420); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(303, 525); ctx.lineTo(303, 582); ctx.stroke();
       ctx.fillStyle = "rgba(99,102,241,0.15)";
-      ctx.fillRect(298, 440, 10, 65);
+      ctx.fillRect(298, 420, 10, 105);
 
-      // Bottom right Pantry (left wall x: 697, entrance at y: 440..500)
-      ctx.beginPath(); ctx.moveTo(697, 395); ctx.lineTo(697, 440); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(697, 505); ctx.lineTo(697, 582); ctx.stroke();
+      // Bottom right Pantry (left wall x: 697, entrance at y: 420..525)
+      ctx.beginPath(); ctx.moveTo(697, 395); ctx.lineTo(697, 420); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(697, 525); ctx.lineTo(697, 582); ctx.stroke();
       ctx.fillStyle = "rgba(99,102,241,0.15)";
-      ctx.fillRect(692, 440, 10, 65);
+      ctx.fillRect(692, 420, 10, 105);
 
       // Horizontal dividers
       ctx.beginPath(); ctx.moveTo(18, 205); ctx.lineTo(303, 205); ctx.stroke();
