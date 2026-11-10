@@ -856,6 +856,17 @@ function VirtualOffice({
       if (k["arrowleft"] || k["a"]) dx -= SPEED;
       if (k["arrowright"] || k["d"]) dx += SPEED;
 
+      // If the player presses any keyboard key, cancel the click-to-move route immediately
+      // so the avatar doesn't snap back to the previously clicked position on key release.
+      if (dx !== 0 || dy !== 0) {
+        if (routeRef.current.length > 0 || clickTarget.current || clickTargetRef.current) {
+          routeRef.current = [];
+          clickTarget.current = null;
+          clickTargetRef.current = null;
+          stuckFramesRef.current = 0;
+        }
+      }
+
       if (dx === 0 && dy === 0 && routeRef.current.length > 0) {
         const nextPoint = routeRef.current[0];
         const tdx = nextPoint.x - player.current.x;

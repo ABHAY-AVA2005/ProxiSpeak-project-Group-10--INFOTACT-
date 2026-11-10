@@ -16,27 +16,15 @@ export function useMediaStream() {
   useEffect(() => {
     streamRef.current = localStream;
 
+    // NOTE: We intentionally do NOT route localStream to any AudioContext output here.
+    // Connecting your own mic to the speakers causes local echo/loopback.
+    // Audio output is handled solely by WebRTC peer connections in VirtualOffice.jsx.
+    // The AudioContext here is kept only for speaker volume/mute control on remote audio elements.
     if (!localStream) {
       sourceRef.current = null;
       return;
     }
-
-    if (!audioContextRef.current) {
-      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-      if (AudioContextClass) {
-        audioContextRef.current = new AudioContextClass();
-        outputGainRef.current = audioContextRef.current.createGain();
-        outputGainRef.current.gain.value = speakerEnabled ? speakerVolume / 100 : 0;
-        outputGainRef.current.connect(audioContextRef.current.destination);
-      }
-    }
-
-    if (audioContextRef.current && outputGainRef.current && !sourceRef.current) {
-      const sourceNode = audioContextRef.current.createMediaStreamSource(localStream);
-      sourceNode.connect(outputGainRef.current);
-      sourceRef.current = sourceNode;
-    }
-  }, [localStream, speakerEnabled, speakerVolume]);
+  }, [localStream]);
 
   useEffect(() => {
     if (outputGainRef.current) {
