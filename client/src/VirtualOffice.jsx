@@ -17,46 +17,40 @@ const PATH_STEP = 18;
 
 // ─── Wall / obstacle definitions ─────────────────────────────────────────────
 // Each rect: { x, y, width, height, label? }
-const buildRoomBoundary = (room, doorSide, doorWidth = 86) => {
+const buildRoomBoundary = (room, doorSide, doorStart = 0, doorWidth = 100) => {
   const { x, y, width, height } = room;
   const left = x;
   const right = x + width;
   const top = y;
   const bottom = y + height;
-  const wallThickness = 8;
-  const doorStart = Math.max(x + 22, x + (width - doorWidth) / 2);
-  const doorEnd = doorStart + doorWidth;
+  const wallThickness = 6;
 
   const walls = [];
-
   const addWall = (wallX, wallY, wallW, wallH) => {
     walls.push({ x: wallX, y: wallY, width: wallW, height: wallH, label: null });
   };
 
+  // Top / bottom / left / right walls with specific doorway opening
   if (doorSide !== "top") addWall(left, top, width, wallThickness);
   if (doorSide !== "bottom") addWall(left, bottom - wallThickness, width, wallThickness);
   if (doorSide !== "left") addWall(left, top, wallThickness, height);
   if (doorSide !== "right") addWall(right - wallThickness, top, wallThickness, height);
 
-  if (doorSide === "top") {
-    const cut = Math.min(width - doorWidth, Math.max(20, width / 3));
-    addWall(left, top, cut, wallThickness);
-    addWall(left + cut + doorWidth, top, width - cut - doorWidth, wallThickness);
-  }
-  if (doorSide === "bottom") {
-    const cut = Math.min(width - doorWidth, Math.max(20, width / 3));
-    addWall(left, bottom - wallThickness, cut, wallThickness);
-    addWall(left + cut + doorWidth, bottom - wallThickness, width - cut - doorWidth, wallThickness);
-  }
-  if (doorSide === "left") {
-    const cut = Math.min(height - doorWidth, Math.max(20, height / 3));
-    addWall(left, top, wallThickness, cut);
-    addWall(left, top + cut + doorWidth, wallThickness, height - cut - doorWidth);
-  }
   if (doorSide === "right") {
-    const cut = Math.min(height - doorWidth, Math.max(20, height / 3));
-    addWall(right - wallThickness, top, wallThickness, cut);
-    addWall(right - wallThickness, top + cut + doorWidth, wallThickness, height - cut - doorWidth);
+    // Leave a gap from doorStart to doorStart + doorWidth along right wall
+    const dStart = doorStart || (top + height / 2 - doorWidth / 2);
+    const topSeg = Math.max(0, dStart - top);
+    const botSeg = Math.max(0, bottom - (dStart + doorWidth));
+    if (topSeg > 0) addWall(right - wallThickness, top, wallThickness, topSeg);
+    if (botSeg > 0) addWall(right - wallThickness, dStart + doorWidth, wallThickness, botSeg);
+  }
+
+  if (doorSide === "left") {
+    const dStart = doorStart || (top + height / 2 - doorWidth / 2);
+    const topSeg = Math.max(0, dStart - top);
+    const botSeg = Math.max(0, bottom - (dStart + doorWidth));
+    if (topSeg > 0) addWall(left, top, wallThickness, topSeg);
+    if (botSeg > 0) addWall(left, dStart + doorWidth, wallThickness, botSeg);
   }
 
   return walls;
@@ -71,19 +65,33 @@ const WALLS = [
 ];
 
 const ROOM_BOUNDARIES = [
-  ...buildRoomBoundary({ x: 34, y: 24, width: 210, height: 150 }, "bottom"),
-  ...buildRoomBoundary({ x: 270, y: 24, width: 420, height: 220 }, "bottom"),
-  ...buildRoomBoundary({ x: 710, y: 24, width: 250, height: 220 }, "bottom"),
-  ...buildRoomBoundary({ x: 270, y: 286, width: 420, height: 190 }, "top"),
-  ...buildRoomBoundary({ x: 710, y: 286, width: 250, height: 190 }, "top"),
-  ...buildRoomBoundary({ x: 34, y: 286, width: 210, height: 190 }, "top"),
+  // Meeting Room (top-left: x 18..303, y 18..205) -> doorway on right wall at y: 70..160
+  ...buildRoomBoundary({ x: 18, y: 18, width: 285, height: 187 }, "right", 70, 95),
+  // Focus Zone (top-right: x 697..982, y 18..205) -> doorway on left wall at y: 70..160
+  ...buildRoomBoundary({ x: 697, y: 18, width: 285, height: 187 }, "left", 70, 95),
+  // Lounge (bottom-left: x 18..303, y 395..585) -> doorway on right wall at y: 430..525
+  ...buildRoomBoundary({ x: 18, y: 395, width: 285, height: 190 }, "right", 430, 95),
+  // Pantry (bottom-right: x 697..982, y 395..585) -> doorway on left wall at y: 430..525
+  ...buildRoomBoundary({ x: 697, y: 395, width: 285, height: 190 }, "left", 430, 95),
 ];
 
-// Solid obstacles (desk, etc.)
+// Solid obstacles that avatars navigate around
+// Note: We use compact collision bounds so avatars can walk around furniture, sit at desks, and NEVER get trapped inside
 const OBSTACLES = [
-  { x: 150, y: 150, width: 180, height: 70, label: "Desk" },
-  { x: 380, y: 420, width: 160, height: 70, label: "Desk" },
-  { x: 560, y: 120, width: 220, height: 60, label: "Table" },
+  // Meeting room conference table: table is drawn at (48, 68, 220, 90)
+  // Collision box only occupies the central core (70, 80, 175, 65) so avatars can walk along top, bottom, and around it
+  { x: 75, y: 85, width: 165, height: 55, label: "Table" },
+  // Open workspace desks (compact collision box)
+  { x: 335, y: 225, width: 70, height: 35, label: "Desk" },
+  { x: 440, y: 225, width: 70, height: 35, label: "Desk" },
+  { x: 545, y: 225, width: 70, height: 35, label: "Desk" },
+  { x: 335, y: 320, width: 70, height: 35, label: "Desk" },
+  { x: 440, y: 320, width: 70, height: 35, label: "Desk" },
+  { x: 545, y: 320, width: 70, height: 35, label: "Desk" },
+  // Lounge sofa
+  { x: 45, y: 445, width: 105, height: 45, label: "Sofa" },
+  // Pantry counter
+  { x: 710, y: 425, width: 250, height: 30, label: "Counter" },
 ];
 
 // Combined for collision
@@ -134,15 +142,32 @@ function isCellBlocked(cellX, cellY) {
 
   const pointX = cellX * GRID_SIZE + GRID_SIZE / 2;
   const pointY = cellY * GRID_SIZE + GRID_SIZE / 2;
-  return checkCollision(pointX, pointY, AVATAR_RADIUS + 8);
+  return checkCollision(pointX, pointY, AVATAR_RADIUS - 2);
 }
 
 function findPath(start, goal) {
   const startCell = pointToCell(start.x, start.y);
-  const goalCell = pointToCell(goal.x, goal.y);
+  let goalCell = pointToCell(goal.x, goal.y);
 
-  if (isCellBlocked(startCell.x, startCell.y) || isCellBlocked(goalCell.x, goalCell.y)) {
-    return [];
+  // If goal is slightly blocked, find closest free cell near goal
+  if (isCellBlocked(goalCell.x, goalCell.y)) {
+    let found = null;
+    for (let r = 1; r <= 3; r++) {
+      for (let dx = -r; dx <= r; dx++) {
+        for (let dy = -r; dy <= r; dy++) {
+          const testX = goalCell.x + dx;
+          const testY = goalCell.y + dy;
+          if (!isCellBlocked(testX, testY)) {
+            found = { x: testX, y: testY };
+            break;
+          }
+        }
+        if (found) break;
+      }
+      if (found) break;
+    }
+    if (found) goalCell = found;
+    else return [{ x: goal.x, y: goal.y }];
   }
 
   const openSet = new Set([`${startCell.x},${startCell.y}`]);
@@ -223,7 +248,7 @@ function VirtualOffice({
   localStream = null,
   onUsersChange = () => {},
   meetingRooms = [],
-  spawnRoom = "Open Workspace",
+  spawnRoom = "Open Work",
   avatarColor = "#2563eb",
 }) {
   const canvasRef = useRef(null);
@@ -233,10 +258,11 @@ function VirtualOffice({
   const pendingCandidatesRef = useRef({});
   const routeRef = useRef([]);
   const clickTargetRef = useRef(null);
+  const playerFacing = useRef({ angle: 0, moving: false });
 
   useEffect(() => { earshotRef.current = earshotRadius; }, [earshotRadius]);
 
-  const player = useRef({ x: 400, y: 400, username });
+  const player = useRef({ x: 500, y: 360, username });
   const keys = useRef({});
   const clickTarget = useRef(null);    // { x, y } for click-to-move
   const remotePlayers = useRef({});    // id -> { x, y, targetX, targetY, username }
@@ -247,12 +273,26 @@ function VirtualOffice({
 
   useEffect(() => {
     if (!meetingRooms.length) return;
-    const targetRoom = meetingRooms.find((room) => room.name === spawnRoom) || meetingRooms[0];
-    const x = targetRoom.x + targetRoom.width / 2;
-    const y = targetRoom.y + targetRoom.height / 2;
-    if (!Number.isNaN(x) && !Number.isNaN(y)) {
-      player.current.x = Math.max(30, Math.min(WORLD_W - 30, x));
-      player.current.y = Math.max(30, Math.min(WORLD_H - 30, y));
+    const targetRoom = meetingRooms.find((room) => room.name === spawnRoom || room.id === spawnRoom);
+    if (targetRoom) {
+      // If spawning in Meeting Room, place avatar in the walkable area (above or to the side of table, near doorway)
+      if (targetRoom.id === "Meeting Room" || targetRoom.name === "Meeting Room") {
+        player.current.x = 220;
+        player.current.y = 52; // Top side of conference table, near doorway
+      } else {
+        const x = targetRoom.x + targetRoom.width / 2;
+        const y = targetRoom.y + targetRoom.height / 2;
+        if (!Number.isNaN(x) && !Number.isNaN(y)) {
+          player.current.x = Math.max(35, Math.min(WORLD_W - 35, x));
+          player.current.y = Math.max(35, Math.min(WORLD_H - 35, y));
+        }
+      }
+      routeRef.current = [];
+      clickTargetRef.current = null;
+    } else {
+      // Default spawn inside Meeting Room
+      player.current.x = 220;
+      player.current.y = 52;
       routeRef.current = [];
       clickTargetRef.current = null;
     }
@@ -709,23 +749,42 @@ function VirtualOffice({
       const rect = canvas.getBoundingClientRect();
       const scaleX = WORLD_W / rect.width;
       const scaleY = WORLD_H / rect.height;
-      const tx = Math.round((e.clientX - rect.left) * scaleX);
-      const ty = Math.round((e.clientY - rect.top) * scaleY);
+      let tx = Math.round((e.clientX - rect.left) * scaleX);
+      let ty = Math.round((e.clientY - rect.top) * scaleY);
+      tx = Math.max(25, Math.min(WORLD_W - 25, tx));
+      ty = Math.max(25, Math.min(WORLD_H - 25, ty));
       const target = { x: tx, y: ty };
-      if (checkCollision(tx, ty)) {
-        const path = findPath({ x: player.current.x, y: player.current.y }, target);
-        if (path.length > 1) {
-          routeRef.current = path;
-          clickTargetRef.current = target;
-          return;
+
+      // If clicked point is inside an obstacle, find nearest unblocked spot nearby
+      if (checkCollision(tx, ty, AVATAR_RADIUS)) {
+        let foundSpot = null;
+        for (let r = 10; r <= 80; r += 10) {
+          for (let a = 0; a < Math.PI * 2; a += Math.PI / 4) {
+            const testX = Math.round(tx + Math.cos(a) * r);
+            const testY = Math.round(ty + Math.sin(a) * r);
+            if (!checkCollision(testX, testY, AVATAR_RADIUS + 4)) {
+              foundSpot = { x: testX, y: testY };
+              break;
+            }
+          }
+          if (foundSpot) break;
         }
-        return;
+        if (foundSpot) {
+          target.x = foundSpot.x;
+          target.y = foundSpot.y;
+        }
       }
 
       const path = findPath({ x: player.current.x, y: player.current.y }, target);
-      routeRef.current = path.length > 1 ? path : [{ x: target.x, y: target.y }];
-      clickTargetRef.current = target;
-      clickTarget.current = { x: tx, y: ty };
+      if (path && path.length > 0) {
+        routeRef.current = path;
+        clickTargetRef.current = target;
+        clickTarget.current = target;
+      } else {
+        routeRef.current = [{ x: target.x, y: target.y }];
+        clickTargetRef.current = target;
+        clickTarget.current = target;
+      }
     };
     canvas.addEventListener("click", onCanvasClick);
 
@@ -785,19 +844,49 @@ function VirtualOffice({
         }
       }
 
+      if (dx !== 0 || dy !== 0) {
+        playerFacing.current.angle = Math.atan2(dy, dx);
+        playerFacing.current.moving = true;
+      } else {
+        playerFacing.current.moving = false;
+      }
+
+      let movedX = false;
+      let movedY = false;
+
+      // Unstuck emergency escape: If player somehow starts inside an obstacle or wall, push towards open area
+      if (checkCollision(player.current.x, player.current.y, AVATAR_RADIUS - 4)) {
+        // Find best direction towards center (500, 320)
+        const toCenterX = 500 - player.current.x;
+        const toCenterY = 320 - player.current.y;
+        const distToCenter = Math.hypot(toCenterX, toCenterY) || 1;
+        const escX = (toCenterX / distToCenter) * 3;
+        const escY = (toCenterY / distToCenter) * 3;
+        player.current.x += escX;
+        player.current.y += escY;
+      }
+
       if (dx !== 0) {
         const nx = Math.max(20, Math.min(WORLD_W - 20, player.current.x + dx));
-        if (!checkCollision(nx, player.current.y)) player.current.x = nx;
-        else {
-          clickTarget.current = null;
-          clickTargetRef.current = null;
-          routeRef.current = [];
+        if (!checkCollision(nx, player.current.y, AVATAR_RADIUS - 4)) {
+          player.current.x = nx;
+          movedX = true;
         }
       }
       if (dy !== 0) {
         const ny = Math.max(20, Math.min(WORLD_H - 20, player.current.y + dy));
-        if (!checkCollision(player.current.x, ny)) player.current.y = ny;
-        else {
+        if (!checkCollision(player.current.x, ny, AVATAR_RADIUS - 4)) {
+          player.current.y = ny;
+          movedY = true;
+        }
+      }
+
+      // Only cancel route if completely stuck and couldn't move in either axis
+      if ((dx !== 0 || dy !== 0) && !movedX && !movedY) {
+        // Stuck against corner or obstacle: try skipping to next route node if available
+        if (routeRef.current.length > 1) {
+          routeRef.current.shift();
+        } else {
           clickTarget.current = null;
           clickTargetRef.current = null;
           routeRef.current = [];
@@ -827,263 +916,326 @@ function VirtualOffice({
       // ─── Render ───────────────────────────────────────────────────────
       ctx.clearRect(0, 0, WORLD_W, WORLD_H);
 
-      // 1. Floor base and premium room layout
-      ctx.fillStyle = "#edf1f7";
+      // ── HELPER: draw rounded rect path ──────────────────────────────
+      const rr = (rx, ry, rw, rh, rad) => { drawRoundedRect(ctx, rx, ry, rw, rh, rad); };
+
+      // ── 1. FLOOR BACKGROUND ──────────────────────────────────────────
+      const bgGrad = ctx.createLinearGradient(0, 0, WORLD_W, WORLD_H);
+      bgGrad.addColorStop(0, "#ede9f6");
+      bgGrad.addColorStop(1, "#e0dbf0");
+      ctx.fillStyle = bgGrad;
       ctx.fillRect(0, 0, WORLD_W, WORLD_H);
 
-      ctx.strokeStyle = "rgba(15, 23, 42, 0.06)";
-      ctx.lineWidth = 1;
-      for (let gx = 0; gx <= WORLD_W; gx += GRID_SIZE) {
-        ctx.beginPath(); ctx.moveTo(gx, 0); ctx.lineTo(gx, WORLD_H); ctx.stroke();
+      // Subtle floor texture dots
+      ctx.fillStyle = "rgba(140,120,200,0.055)";
+      for (let gx = 30; gx < WORLD_W; gx += 30) {
+        for (let gy = 30; gy < WORLD_H; gy += 30) {
+          ctx.beginPath(); ctx.arc(gx, gy, 1.5, 0, Math.PI * 2); ctx.fill();
+        }
       }
-      for (let gy = 0; gy <= WORLD_H; gy += GRID_SIZE) {
-        ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(WORLD_W, gy); ctx.stroke();
-      }
 
-      const roomLayout = Array.isArray(meetingRooms) && meetingRooms.length > 0 ? meetingRooms : [
-        { id: "Reception", name: "Reception", x: 34, y: 22, width: 210, height: 154, fill: "rgba(255,234,196,0.9)" },
-        { id: "Open Workspace", name: "Open Workspace", x: 270, y: 22, width: 420, height: 210, fill: "rgba(175,214,220,0.9)" },
-        { id: "Conference Room", name: "Conference Room", x: 710, y: 22, width: 250, height: 210, fill: "rgba(203,211,212,0.9)" },
-        { id: "Brainstorming Room", name: "Brainstorming Room", x: 270, y: 286, width: 420, height: 190, fill: "rgba(212,208,248,0.92)" },
-        { id: "Cafeteria", name: "Cafeteria", x: 710, y: 286, width: 250, height: 190, fill: "rgba(214,192,170,0.96)" },
-        { id: "Private Meeting Room", name: "Private Meeting Room", x: 34, y: 286, width: 210, height: 190, fill: "rgba(194,220,201,0.9)" },
-      ];
-
-      roomLayout.forEach((room) => {
-        const x = room.x;
-        const y = room.y;
-        const width = room.width;
-        const height = room.height;
-
+      // ── 2. ROOM ZONES (no overlap) ───────────────────────────────────
+      const drawRoom = (rx, ry, rw, rh, label, fillColor) => {
         ctx.save();
-        drawRoundedRect(ctx, x, y, width, height, 18);
-        ctx.fillStyle = room.fill || "rgba(255,255,255,0.85)";
+        rr(rx, ry, rw, rh, 16);
+        ctx.fillStyle = fillColor;
         ctx.fill();
-        ctx.strokeStyle = "rgba(15, 23, 42, 0.12)";
+        ctx.strokeStyle = "rgba(140,120,200,0.3)";
         ctx.lineWidth = 1.5;
         ctx.stroke();
-        ctx.restore();
-
-        ctx.fillStyle = "rgba(15, 23, 42, 0.8)";
-        ctx.font = "bold 12px Inter, Arial";
+        ctx.fillStyle = "rgba(55,50,100,0.7)";
+        ctx.font = "bold 11px Inter, sans-serif";
         ctx.textAlign = "center";
-        ctx.fillText(room.name, x + width / 2, y + 20);
+        ctx.fillText(label, rx + rw / 2, ry + 18);
+        ctx.restore();
+      };
 
-        if (room.name === "Reception") {
-          ctx.fillStyle = "rgba(255,255,255,0.55)";
-          drawRoundedRect(ctx, x + 18, y + 32, width - 36, 42, 12);
-          ctx.fill();
-          ctx.fillStyle = "#9a6f3e";
-          ctx.fillRect(x + 34, y + 90, width - 68, 26);
-          ctx.fillStyle = "#f4e7d5";
-          for (let i = 0; i < 4; i += 1) {
-            const chairX = x + 32 + i * 40;
-            ctx.fillRect(chairX, y + 118, 18, 20);
-          }
-        }
+      // Layout: Meeting Room TL, Focus Zone TR, Lounge BL, Pantry BR
+      // Center open workspace 320..680 x 210..385 (no overlap with rooms)
+      drawRoom(18, 18, 285, 185, "Meeting Room", "rgba(228,224,248,0.88)");
+      drawRoom(697, 18, 285, 185, "Focus Zone",   "rgba(220,232,248,0.88)");
+      drawRoom(312, 195, 376, 190, "Open Workspace", "rgba(240,238,252,0.65)");
+      drawRoom(18,  395, 285, 190, "Lounge",      "rgba(238,228,250,0.88)");
+      drawRoom(697, 395, 285, 190, "Pantry",      "rgba(220,236,250,0.88)");
 
-        if (room.name === "Open Workspace") {
-          ctx.fillStyle = "rgba(255,255,255,0.55)";
-          for (let i = 0; i < 4; i += 1) {
-            const deskX = x + 40 + i * 86;
-            drawRoundedRect(ctx, deskX, y + 52, 52, 26, 8);
-            ctx.fill();
-            drawRoundedRect(ctx, deskX + 8, y + 82, 36, 44, 8);
-            ctx.fill();
-          }
-        }
-
-        if (room.name === "Conference Room") {
-          ctx.fillStyle = "rgba(255,255,255,0.55)";
-          drawRoundedRect(ctx, x + 58, y + 58, width - 110, 50, 14);
-          ctx.fill();
-          ctx.fillStyle = "rgba(28,39,53,0.72)";
-          for (let i = 0; i < 5; i += 1) {
-            const chairX = x + 50 + i * 35;
-            ctx.fillRect(chairX, y + 120, 20, 18);
-          }
-          ctx.fillStyle = "#5b6478";
-          ctx.fillRect(x + 90, y + 150, width - 180, 18);
-        }
-
-        if (room.name === "Brainstorming Room") {
-          ctx.fillStyle = "rgba(255,255,255,0.54)";
-          drawRoundedRect(ctx, x + 30, y + 36, width - 60, 62, 16);
-          ctx.fill();
-          drawRoundedRect(ctx, x + 48, y + 112, width - 96, 34, 10);
-          ctx.fill();
-          ctx.fillStyle = "rgba(255,255,255,0.9)";
-          ctx.fillRect(x + 72, y + 52, 46, 28);
-          ctx.fillRect(x + 140, y + 52, 46, 28);
-          ctx.fillRect(x + 208, y + 52, 46, 28);
-          ctx.fillRect(x + 276, y + 52, 46, 28);
-        }
-
-        if (room.name === "Cafeteria") {
-          ctx.fillStyle = "rgba(255,255,255,0.52)";
-          drawRoundedRect(ctx, x + 26, y + 38, width - 52, 36, 12);
-          ctx.fill();
-          ctx.fillStyle = "#8d5d3f";
-          ctx.fillRect(x + 40, y + 94, width - 80, 20);
-          ctx.fillStyle = "#f4e7d5";
-          for (let i = 0; i < 4; i += 1) {
-            const seatX = x + 48 + i * 42;
-            ctx.fillRect(seatX, y + 118, 18, 20);
-          }
-        }
-
-        if (room.name === "Private Meeting Room") {
-          ctx.fillStyle = "rgba(255,255,255,0.52)";
-          drawRoundedRect(ctx, x + 36, y + 50, width - 72, 54, 12);
-          ctx.fill();
-          ctx.fillStyle = "rgba(20, 39, 30, 0.72)";
-          ctx.fillRect(x + 56, y + 120, width - 112, 16);
-          ctx.fillStyle = "#edf5ef";
-          ctx.fillRect(x + 58, y + 140, 26, 18);
-          ctx.fillRect(x + 98, y + 140, 26, 18);
-        }
+      // ── 3. CENTER HEADER LOGO ────────────────────────────────────────
+      ctx.save();
+      rr(360, 18, 280, 52, 12);
+      ctx.fillStyle = "rgba(18,16,46,0.84)";
+      ctx.fill();
+      const barH = [10, 18, 14, 10];
+      barH.forEach((h, b) => {
+        ctx.fillStyle = "#a78bfa";
+        ctx.fillRect(380 + b * 10, 40 - h / 2, 7, h);
       });
+      ctx.fillStyle = "#e0d7ff";
+      ctx.font = "bold 14px Inter, sans-serif";
+      ctx.textAlign = "left";
+      ctx.fillText("ProxiSpeak", 423, 42);
+      ctx.fillStyle = "rgba(190,180,255,0.7)";
+      ctx.font = "9px Inter, sans-serif";
+      ctx.fillText("Work • Talk • Connect", 423, 56);
+      ctx.restore();
 
-      // 2. Black room boundaries with a single entry point per room
-      ctx.fillStyle = "#000000";
-      [...WALLS, ...ROOM_BOUNDARIES].forEach((w) => {
-        ctx.fillRect(w.x, w.y, w.width, w.height);
+      // ── 4. MEETING ROOM FURNITURE ────────────────────────────────────
+      ctx.save();
+      // Large conference table
+      rr(48, 68, 220, 90, 10);
+      ctx.fillStyle = "#c8b98a"; ctx.fill();
+      ctx.strokeStyle = "#a89060"; ctx.lineWidth = 1.5; ctx.stroke();
+      // Chairs top
+      for (let i = 0; i < 4; i++) { rr(60 + i * 52, 58, 30, 14, 5); ctx.fillStyle = "#3a3a5a"; ctx.fill(); }
+      // Chairs bottom
+      for (let i = 0; i < 4; i++) { rr(60 + i * 52, 158, 30, 14, 5); ctx.fillStyle = "#3a3a5a"; ctx.fill(); }
+      // Chairs sides
+      rr(32, 92, 14, 28, 5); ctx.fillStyle = "#3a3a5a"; ctx.fill();
+      rr(270, 92, 14, 28, 5); ctx.fillStyle = "#3a3a5a"; ctx.fill();
+      // Plant TL corner
+      ctx.beginPath(); ctx.arc(40, 170, 14, 0, Math.PI*2); ctx.fillStyle = "#4a9e4a"; ctx.fill();
+      ctx.beginPath(); ctx.arc(40, 170, 8, 0, Math.PI*2); ctx.fillStyle = "#3a7e3a"; ctx.fill();
+      ctx.restore();
+
+      // ── 5. FOCUS ZONE FURNITURE ──────────────────────────────────────
+      ctx.save();
+      for (let i = 0; i < 3; i++) {
+        const dx = 712 + i * 86; const dy = 48;
+        rr(dx, dy, 70, 42, 6); ctx.fillStyle = "#c8b98a"; ctx.fill();
+        ctx.strokeStyle = "#a89060"; ctx.lineWidth = 1; ctx.stroke();
+        rr(dx + 17, dy + 6, 36, 24, 3); ctx.fillStyle = "#2a2a40"; ctx.fill();
+        rr(dx + 19, dy + 8, 32, 20, 2); ctx.fillStyle = i % 2 === 0 ? "#2d3a7a" : "#1a3050"; ctx.fill();
+        rr(dx + 17, dy + 50, 36, 15, 5); ctx.fillStyle = "#3a3a5a"; ctx.fill();
+      }
+      ctx.beginPath(); ctx.arc(958, 168, 14, 0, Math.PI*2); ctx.fillStyle = "#4a9e4a"; ctx.fill();
+      ctx.beginPath(); ctx.arc(958, 168, 8, 0, Math.PI*2); ctx.fillStyle = "#3a7e3a"; ctx.fill();
+      ctx.restore();
+
+      // ── 6. OPEN WORKSPACE DESKS (CENTER AREA) ───────────────────────
+      ctx.save();
+      // 2 rows × 3 desks, well inside 320..680 x 210..385
+      const deskPos = [
+        {x:325,y:220},{x:430,y:220},{x:535,y:220},
+        {x:325,y:315},{x:430,y:315},{x:535,y:315},
+      ];
+      deskPos.forEach((dp, idx) => {
+        rr(dp.x, dp.y, 85, 46, 6); ctx.fillStyle = "#c8b98a"; ctx.fill();
+        ctx.strokeStyle = "#a89060"; ctx.lineWidth = 1; ctx.stroke();
+        rr(dp.x+22, dp.y+6, 40, 26, 3); ctx.fillStyle = "#1e1e34"; ctx.fill();
+        rr(dp.x+24, dp.y+8, 36, 22, 2); ctx.fillStyle = idx%2===0?"#2d3a7a":"#1a3050"; ctx.fill();
+        rr(dp.x+24, dp.y+52, 36, 14, 5); ctx.fillStyle = "#3a3a5a"; ctx.fill();
       });
-
-      // 3. Obstacle fills (Tanvi Day 6 — world obstacles)
-      OBSTACLES.forEach((obs) => {
-        ctx.fillStyle = "#4b3f2a";
-        ctx.fillRect(obs.x, obs.y, obs.width, obs.height);
-        ctx.strokeStyle = "#78604a";
-        ctx.lineWidth = 2;
-        ctx.strokeRect(obs.x, obs.y, obs.width, obs.height);
-        if (obs.label) {
-          ctx.fillStyle = "#d4b896";
-          ctx.font = "bold 12px Inter, Arial";
-          ctx.textAlign = "center";
-          ctx.fillText(obs.label, obs.x + obs.width / 2, obs.y + obs.height / 2 + 5);
-        }
+      // Plants in open area
+      [[312,390],[676,220],[676,390]].forEach(([px,py]) => {
+        ctx.beginPath(); ctx.arc(px,py,13,0,Math.PI*2); ctx.fillStyle="#4a9e4a"; ctx.fill();
+        ctx.beginPath(); ctx.arc(px,py,7,0,Math.PI*2); ctx.fillStyle="#3a7e3a"; ctx.fill();
       });
+      ctx.restore();
 
-      // 4. Click-to-move target indicator and path preview
+      // ── 7. LOUNGE FURNITURE ──────────────────────────────────────────
+      ctx.save();
+      rr(42, 440, 115, 55, 12); ctx.fillStyle = "#5a6fa0"; ctx.fill();
+      ctx.strokeStyle="#4a5f90"; ctx.lineWidth=1; ctx.stroke();
+      rr(48, 448, 48, 38, 8); ctx.fillStyle="#7a8fc0"; ctx.fill();
+      rr(102, 448, 48, 38, 8); ctx.fillStyle="#7a8fc0"; ctx.fill();
+      rr(52, 508, 95, 38, 8); ctx.fillStyle="#b8a870"; ctx.fill();
+      ctx.strokeStyle="#988850"; ctx.lineWidth=1; ctx.stroke();
+      ctx.beginPath(); ctx.arc(255,420,15,0,Math.PI*2); ctx.fillStyle="#4a9e4a"; ctx.fill();
+      ctx.beginPath(); ctx.arc(255,420,9,0,Math.PI*2); ctx.fillStyle="#3a7e3a"; ctx.fill();
+      ctx.beginPath(); ctx.arc(42,565,12,0,Math.PI*2); ctx.fillStyle="#4a9e4a"; ctx.fill();
+      ctx.restore();
+
+      // ── 8. PANTRY FURNITURE ──────────────────────────────────────────
+      ctx.save();
+      rr(702, 420, 268, 38, 8); ctx.fillStyle="#b0b8c8"; ctx.fill();
+      ctx.strokeStyle="#909aaa"; ctx.lineWidth=1; ctx.stroke();
+      rr(712, 426, 36, 26, 4); ctx.fillStyle="#555566"; ctx.fill();
+      rr(756, 426, 28, 26, 4); ctx.fillStyle="#666677"; ctx.fill();
+      rr(793, 426, 50, 26, 4); ctx.fillStyle="#4a4a5a"; ctx.fill();
+      rr(702, 396, 268, 20, 4); ctx.fillStyle="#c8d0d8"; ctx.fill();
+      rr(870, 420, 60, 38, 6); ctx.fillStyle="#c0c8d0"; ctx.fill();
+      rr(880, 428, 40, 22, 4); ctx.fillStyle="#a0a8b0"; ctx.fill();
+      ctx.beginPath(); ctx.arc(958, 572, 13, 0, Math.PI*2); ctx.fillStyle="#4a9e4a"; ctx.fill();
+      ctx.beginPath(); ctx.arc(958, 572, 7, 0, Math.PI*2); ctx.fillStyle="#3a7e3a"; ctx.fill();
+      ctx.restore();
+
+      // ── 9. GLASS PARTITION LINES WITH VISIBLE ENTRANCES ────────────
+      ctx.save();
+      ctx.strokeStyle = "rgba(110,100,180,0.45)";
+      ctx.lineWidth = 3;
+
+      // Vertical partitions with doorway gaps (doorway = gap for walking)
+      // Top left Meeting room (right wall x: 303, entrance at y: 80..140)
+      ctx.beginPath(); ctx.moveTo(303, 18); ctx.lineTo(303, 75); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(303, 145); ctx.lineTo(303, 205); ctx.stroke();
+      // Doorway indicator (Meeting room entrance)
+      ctx.fillStyle = "rgba(99,102,241,0.15)";
+      ctx.fillRect(298, 75, 10, 70);
+
+      // Top right Focus zone (left wall x: 697, entrance at y: 80..140)
+      ctx.beginPath(); ctx.moveTo(697, 18); ctx.lineTo(697, 75); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(697, 145); ctx.lineTo(697, 205); ctx.stroke();
+      // Doorway indicator (Focus zone entrance)
+      ctx.fillStyle = "rgba(99,102,241,0.15)";
+      ctx.fillRect(692, 75, 10, 70);
+
+      // Bottom left Lounge (right wall x: 303, entrance at y: 440..500)
+      ctx.beginPath(); ctx.moveTo(303, 395); ctx.lineTo(303, 440); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(303, 505); ctx.lineTo(303, 582); ctx.stroke();
+      ctx.fillStyle = "rgba(99,102,241,0.15)";
+      ctx.fillRect(298, 440, 10, 65);
+
+      // Bottom right Pantry (left wall x: 697, entrance at y: 440..500)
+      ctx.beginPath(); ctx.moveTo(697, 395); ctx.lineTo(697, 440); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(697, 505); ctx.lineTo(697, 582); ctx.stroke();
+      ctx.fillStyle = "rgba(99,102,241,0.15)";
+      ctx.fillRect(692, 440, 10, 65);
+
+      // Horizontal dividers
+      ctx.beginPath(); ctx.moveTo(18, 205); ctx.lineTo(303, 205); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(697, 205); ctx.lineTo(982, 205); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(18, 395); ctx.lineTo(303, 395); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(697, 395); ctx.lineTo(982, 395); ctx.stroke();
+      ctx.restore();
+
+      // Suppress old room layout variable (not used anymore)
+      const roomLayout = [];
+
+      // ── 10. DESTINATION MARKER & PATH PREVIEW (A* pathfinding feedback) ───
       if (clickTarget.current || routeRef.current.length > 0) {
         const route = routeRef.current.length > 1 ? routeRef.current : [];
         if (route.length > 1) {
           ctx.beginPath();
           route.forEach((point, index) => {
-            if (index === 0) {
-              ctx.moveTo(point.x, point.y);
-            } else {
-              ctx.lineTo(point.x, point.y);
-            }
+            if (index === 0) ctx.moveTo(point.x, point.y);
+            else ctx.lineTo(point.x, point.y);
           });
-          ctx.strokeStyle = "rgba(96,165,250,0.9)";
-          ctx.lineWidth = 2;
-          ctx.setLineDash([6, 4]);
+          ctx.strokeStyle = "rgba(99,102,241,0.65)";
+          ctx.lineWidth = 2.5;
+          ctx.setLineDash([5, 4]);
           ctx.stroke();
           ctx.setLineDash([]);
         }
 
-        if (clickTarget.current) {
+        // Animated destination marker with pulsing rings
+        const target = clickTarget.current || (route.length > 0 ? route[route.length - 1] : null);
+        if (target) {
+          const pulse = (performance.now() % 1000) / 1000;
+          ctx.save();
+          // Expanding outer pulse ring
           ctx.beginPath();
-          ctx.arc(clickTarget.current.x, clickTarget.current.y, 8, 0, Math.PI * 2);
-          ctx.strokeStyle = "rgba(99,179,237,0.8)";
+          ctx.arc(target.x, target.y, 8 + pulse * 14, 0, Math.PI * 2);
+          ctx.strokeStyle = `rgba(99,102,241,${0.8 * (1 - pulse)})`;
           ctx.lineWidth = 2;
-          ctx.setLineDash([3, 3]);
           ctx.stroke();
-          ctx.setLineDash([]);
+
+          // Target pin center
+          ctx.beginPath();
+          ctx.arc(target.x, target.y, 6, 0, Math.PI * 2);
+          ctx.fillStyle = "#6350ff";
+          ctx.fill();
+          ctx.strokeStyle = "#fff";
+          ctx.lineWidth = 2;
+          ctx.stroke();
+
+          // Crosshairs
+          ctx.strokeStyle = "#6350ff";
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.moveTo(target.x - 10, target.y); ctx.lineTo(target.x + 10, target.y);
+          ctx.moveTo(target.x, target.y - 10); ctx.lineTo(target.x, target.y + 10);
+          ctx.stroke();
+          ctx.restore();
         }
       }
 
-      // 5. Earshot circle (Tanvi Day 5 — visual feedback)
+      // ── 11. EARSHOT CIRCLE ──────────────────────────────────────────
       const earshot = earshotRef.current;
       ctx.beginPath();
       ctx.arc(player.current.x, player.current.y, earshot, 0, Math.PI * 2);
-      ctx.fillStyle = "rgba(59,130,246,0.06)";
-      ctx.fill();
-      ctx.strokeStyle = "rgba(59,130,246,0.3)";
-      ctx.lineWidth = 1.5;
-      ctx.setLineDash([6, 4]);
-      ctx.stroke();
-      ctx.setLineDash([]);
+      ctx.fillStyle = "rgba(99,102,241,0.05)"; ctx.fill();
+      ctx.strokeStyle = "rgba(99,102,241,0.25)"; ctx.lineWidth = 1.5;
+      ctx.setLineDash([5, 4]); ctx.stroke(); ctx.setLineDash([]);
 
-      // 6. Remote avatars with username (Tanvi Day 3 + Day 5)
+      // ── 12. AVATAR DRAWING HELPER (with Directional Animation) ─────
+      const drawAvatar = (ax, ay, color, initials, name, isLocal, facingAngle = 0, isMoving = false) => {
+        const R = AVATAR_RADIUS;
+        // Glow ring for local user
+        if (isLocal) {
+          ctx.save();
+          ctx.shadowBlur = 20; ctx.shadowColor = "rgba(99,102,241,0.9)";
+          ctx.beginPath(); ctx.arc(ax, ay, R + 4, 0, Math.PI * 2);
+          ctx.strokeStyle = "rgba(140,120,255,0.75)"; ctx.lineWidth = 2.5; ctx.stroke();
+          ctx.restore();
+        }
+
+        // Direction pointer / visor indicator when moving or facing
+        ctx.save();
+        ctx.translate(ax, ay);
+        ctx.rotate(facingAngle);
+        // Small directional arrowhead / pointer on avatar rim
+        ctx.beginPath();
+        ctx.moveTo(R + 5, 0);
+        ctx.lineTo(R - 2, -4);
+        ctx.lineTo(R - 2, 4);
+        ctx.closePath();
+        ctx.fillStyle = isLocal ? "#6350ff" : "#4ade80";
+        ctx.fill();
+        ctx.restore();
+
+        // Walking wobble bounce when moving
+        const bounce = isMoving ? Math.sin(performance.now() / 100) * 1.5 : 0;
+
+        // Avatar fill
+        ctx.save();
+        ctx.beginPath(); ctx.arc(ax, ay + bounce, R, 0, Math.PI * 2);
+        ctx.fillStyle = color; ctx.fill();
+        ctx.strokeStyle = "#fff"; ctx.lineWidth = 2.5; ctx.stroke();
+        ctx.restore();
+
+        // Green online dot
+        ctx.save();
+        ctx.beginPath(); ctx.arc(ax + R * 0.65, ay + R * 0.65 + bounce, 5, 0, Math.PI * 2);
+        ctx.fillStyle = "#2bd67b"; ctx.fill();
+        ctx.strokeStyle = "#fff"; ctx.lineWidth = 1.5; ctx.stroke();
+        ctx.restore();
+
+        // Initials
+        ctx.fillStyle = "#fff"; ctx.font = "bold 11px Inter, sans-serif";
+        ctx.textAlign = "center"; ctx.fillText(initials, ax, ay + 4 + bounce);
+
+        // Name pill below
+        ctx.save();
+        const nameW = ctx.measureText(name).width + 14;
+        rr(ax - nameW / 2, ay + R + 6, nameW, 17, 8);
+        ctx.fillStyle = "rgba(18,16,46,0.65)"; ctx.fill();
+        ctx.fillStyle = "#fff"; ctx.font = "bold 10px Inter, sans-serif";
+        ctx.textAlign = "center"; ctx.fillText(name, ax, ay + R + 17);
+        ctx.restore();
+      };
+
+      // ── 13. REMOTE AVATARS ──────────────────────────────────────────
       Object.entries(remotePlayers.current).forEach(([id, rp]) => {
         const dist = Math.hypot(rp.x - player.current.x, rp.y - player.current.y);
         const inEarshot = dist <= earshot;
-        const colour = colourForId(id);
-
-        // Avatar circle
-        ctx.beginPath();
-        ctx.arc(rp.x, rp.y, AVATAR_RADIUS, 0, Math.PI * 2);
-        ctx.fillStyle = inEarshot ? colour : "rgba(100,100,100,0.4)";
-        ctx.fill();
-        ctx.strokeStyle = inEarshot ? "#fff" : "#555";
-        ctx.lineWidth = 2;
-        ctx.stroke();
-        ctx.closePath();
-
-        // Earshot ring
-        if (inEarshot) {
-          ctx.beginPath();
-          ctx.arc(rp.x, rp.y, AVATAR_RADIUS + 5, 0, Math.PI * 2);
-          ctx.strokeStyle = "rgba(34,197,94,0.6)";
-          ctx.lineWidth = 2;
-          ctx.stroke();
-          ctx.closePath();
-        }
-
-        // Initial letter inside avatar
+        const colour = inEarshot ? colourForId(id) : "rgba(110,110,130,0.5)";
         const displayName = rp.username && rp.username.trim() ? rp.username : "?";
-        ctx.fillStyle = "#fff";
-        ctx.font = `bold 13px Inter, Arial`;
-        ctx.textAlign = "center";
-        ctx.fillText(displayName[0].toUpperCase(), rp.x, rp.y + 5);
-
-        // Username label above avatar
-        ctx.fillStyle = inEarshot ? "#e5e7eb" : "#6b7280";
-        ctx.font = "11px Inter, Arial";
-        ctx.textAlign = "center";
-        ctx.fillText(displayName !== "?" ? displayName : id.slice(0, 6), rp.x, rp.y - AVATAR_RADIUS - 6);
-
-        // Earshot distance badge
-        if (inEarshot) {
-          ctx.fillStyle = "rgba(34,197,94,0.85)";
-          ctx.font = "9px Inter, Arial";
-          ctx.fillText(`${Math.round(dist)}px`, rp.x, rp.y + AVATAR_RADIUS + 12);
-        }
+        const ini = displayName.split(" ").map(p => p[0] || "").slice(0, 2).join("").toUpperCase() || "?";
+        const moving = Math.abs(rp.targetX - rp.x) > 0.5 || Math.abs(rp.targetY - rp.y) > 0.5;
+        const angle = moving ? Math.atan2(rp.targetY - rp.y, rp.targetX - rp.x) : 0;
+        drawAvatar(rp.x, rp.y, colour, ini, displayName, false, angle, moving);
       });
 
-      // 7. Local player avatar with username (Tanvi Day 3)
-      ctx.beginPath();
-      ctx.arc(player.current.x, player.current.y, AVATAR_RADIUS, 0, Math.PI * 2);
-      ctx.fillStyle = avatarColor || "#2563eb";
-      ctx.fill();
-      ctx.strokeStyle = "#93c5fd";
-      ctx.lineWidth = 2.5;
-      ctx.stroke();
-      ctx.closePath();
-
-      ctx.fillStyle = "#fff";
-      ctx.font = `bold 13px Inter, Arial`;
-      ctx.textAlign = "center";
-      ctx.fillText((username[0] || "Y").toUpperCase(), player.current.x, player.current.y + 5);
-
-      ctx.fillStyle = "#bfdbfe";
-      ctx.font = "bold 11px Inter, Arial";
-      ctx.textAlign = "center";
-      ctx.fillText(username, player.current.x, player.current.y - AVATAR_RADIUS - 6);
-
-      // 8. HUD overlay
-      ctx.textAlign = "left";
-      ctx.fillStyle = "rgba(0,0,0,0.45)";
-      ctx.fillRect(14, 14, 210, 50);
-      ctx.fillStyle = "#94a3b8";
-      ctx.font = "11px Inter, Arial";
-      ctx.fillText(`👤 ${username}`, 22, 32);
-      ctx.fillText(`📡 Earshot: ${earshot}px`, 22, 50);
-      ctx.fillText(`🧑 Online: ${Object.keys(remotePlayers.current).length + 1}`, 130, 32);
-      ctx.fillText(`📍 ${Math.round(player.current.x)}, ${Math.round(player.current.y)}`, 130, 50);
+      // ── 14. LOCAL PLAYER ────────────────────────────────────────────
+      const selfIni = username.split(" ").map(p => p[0] || "").slice(0, 2).join("").toUpperCase() || "Y";
+      drawAvatar(
+        player.current.x,
+        player.current.y,
+        avatarColor || "#6350ff",
+        selfIni,
+        "You",
+        true,
+        playerFacing.current.angle,
+        playerFacing.current.moving
+      );
 
       rafId = requestAnimationFrame(gameLoop);
     }

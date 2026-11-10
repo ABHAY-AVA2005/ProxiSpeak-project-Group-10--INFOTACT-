@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 600" width="1000" height="600">
+  <!-- Background gradient -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#f5f5ff"/>
+      <stop offset="100%" stop-color="#e0e0ff"/>
+    </linearGradient>
+  </defs>
+  <rect width="1000" height="600" fill="url(#bg)" />
+  <!-- Rooms -->
+  <g id="rooms" stroke="#666" stroke-width="2" fill="none">
+    <rect x="330" y="90" width="340" height="220" fill="rgba(169,227,194,0.3)"/><!-- Focus Room -->
+    <rect x="100" y="320" width="240" height="180" fill="rgba(228,197,165,0.3)"/><!-- Lounge -->
+    <rect x="470" y="320" width="340" height="180" fill="rgba(175,214,220,0.3)"/><!-- Open Work -->
+    <rect x="710" y="90" width="180" height="180" fill="rgba(203,211,212,0.3)"/><!-- Conference Room -->
+    <rect x="710" y="285" width="180" height="170" fill="rgba(194,220,201,0.3)"/><!-- Private Meeting Room -->
+  </g>
+  <!-- Furniture placeholder shapes -->
+  <g id="furniture" stroke="#555" stroke-width="1" fill="#fff">
+    <rect x="150" y="150" width="180" height="70" rx="5" ry="5"/><!-- Desk 1 -->
+    <rect x="380" y="420" width="160" height="70" rx="5" ry="5"/><!-- Desk 2 -->
+    <rect x="560" y="120" width="220" height="60" rx="5" ry="5"/><!-- Desk 3 -->
+    <circle cx="180" cy="135" r="12" fill="#ddd"/><!-- Chair 1 -->
+    <circle cx="410" cy="405" r="12" fill="#ddd"/><!-- Chair 2 -->
+    <circle cx="580" cy="105" r="12" fill="#ddd"/><!-- Chair 3 -->
+    <rect x="120" y="340" width="80" height="40" rx="5" ry="5" fill="#cfd8dc"/><!-- Sofa 1 -->
+    <rect x="220" y="340" width="80" height="40" rx="5" ry="5" fill="#cfd8dc"/><!-- Sofa 2 -->
+    <circle cx="300" cy="200" r="20" fill="#a5d6a7"/><!-- Plant 1 -->
+    <circle cx="800" cy="150" r="20" fill="#a5d6a7"/><!-- Plant 2 -->
+  </g>
+</svg>
+
