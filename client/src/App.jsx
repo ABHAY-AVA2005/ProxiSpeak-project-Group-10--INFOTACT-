@@ -32,6 +32,7 @@ function App() {
   const [officeRooms] = useState(baseRooms);
   const [themeMode] = useState("dark");
   const [avatarColor, setAvatarColor] = useState("#2563eb");
+  const [searchOpen, setSearchOpen] = useState(false);
   const [notificationOpen, setNotificationOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [onlineUsers, setOnlineUsers] = useState([]);
@@ -49,6 +50,7 @@ function App() {
   const [notifications, setNotifications] = useState([]);
   const screenShareVideoRef = useRef(null);
   const [screenShareStream, setScreenShareStream] = useState(null);
+  const socketRef = useRef(null);
 
   const {
     localStream, isMuted, permissionGranted, error,
@@ -115,11 +117,34 @@ function App() {
     setNotifications(c => [{ id: Date.now(), title, detail }, ...c].slice(0, 8));
   };
 
+  const handleChatMessage = (msg) => {
+    if (!msg || !msg.text) return;
+    const isSelf = msg.sender === username;
+    setChatMessages(c => [
+      ...c,
+      {
+        id: msg.id || Date.now(),
+        sender: isSelf ? "You" : msg.sender,
+        text: msg.text,
+        time: msg.time
+          ? new Date(msg.time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+          : "Now",
+      },
+    ]);
+    if (!isSelf && activeTab !== "Chat") {
+      addNotification("New Chat Message", `${msg.sender}: ${msg.text.slice(0, 35)}`);
+    }
+  };
+
   const handleSendMessage = (e) => {
     e.preventDefault();
     const trimmed = draftMessage.trim();
     if (!trimmed) return;
-    setChatMessages(c => [...c, { id: Date.now(), sender: "You", text: trimmed, time: "Now" }]);
+    if (socketRef.current && socketRef.current.connected) {
+      socketRef.current.emit("chat:message", { text: trimmed });
+    } else {
+      setChatMessages(c => [...c, { id: Date.now(), sender: "You", text: trimmed, time: "Now" }]);
+    }
     setDraftMessage("");
   };
 
@@ -196,7 +221,14 @@ function App() {
             </button>
           </div>
           <div className="header-right">
-            <button className="hdr-icon-btn" aria-label="Search">🔍</button>
+            <button
+              className={`hdr-icon-btn ${searchOpen ? "active" : ""}`}
+              aria-label="Search"
+              onClick={() => setSearchOpen(o => !o)}
+              title="Search teammates"
+            >
+              🔍
+            </button>
             <button className="hdr-icon-btn notif-btn" aria-label="Notifications" onClick={() => { setNotificationOpen(o => !o); setProfileOpen(false); }}>
               🔔
               {notifications.length > 0 && <span className="notif-badge">{notifications.length}</span>}
@@ -230,17 +262,22 @@ function App() {
           {/* ── OFFICE STAGE + VOICE CONTROLS ── */}
           <section className="office-stage">
             <div className="office-map-frame">
-              {activeTab === "Office" ? (
+              {/* Keep VirtualOffice continuously mounted so socket and WebRTC audio NEVER disconnect when checking tabs */}
+              <div style={{ display: activeTab === "Office" ? "block" : "none", width: "100%", height: "100%" }}>
                 <VirtualOffice
                   username={username}
                   earshotRadius={earshotRadius}
                   localStream={localStream}
                   onUsersChange={handleUsersChange}
+                  onChatMessage={handleChatMessage}
+                  onSocketReady={(sock) => { socketRef.current = sock; }}
                   meetingRooms={officeRooms}
                   spawnRoom={activeRoom}
                   avatarColor={avatarColor}
                 />
-              ) : (
+              </div>
+
+              {activeTab !== "Office" && (
                 <div className="tab-content-wrapper">
                   {activeTab === "Team" && (
                     <div className="workspace-card">
@@ -371,19 +408,59 @@ function App() {
           {/* ── RIGHT PRESENCE PANEL ── */}
           <aside className="presence-panel">
             <div className="presence-head">
-              <span className="online-dot small" />
-              <strong>Online Users ({presenceUsers.length})</strong>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <span className="online-dot small" />
+                <strong>Online Users ({presenceUsers.length})</strong>
+              </div>
+              <button
+                type="button"
+                className={`presence-search-toggle ${searchOpen ? "active" : ""}`}
+                onClick={() => setSearchOpen(o => !o)}
+                title={searchOpen ? "Close search" : "Search teammates"}
+                style={{
+                  background: searchOpen ? "rgba(99,102,241,0.25)" : "transparent",
+                  border: "none",
+                  cursor: "pointer",
+                  fontSize: "14px",
+                  padding: "4px 8px",
+                  borderRadius: "6px",
+                  color: "#cbd5e1",
+                  transition: "background 0.15s ease"
+                }}
+              >
+                🔍
+              </button>
             </div>
 
-            <div className="presence-search">
-              <span>🔍</span>
-              <input
-                type="text"
-                value={presenceSearch}
-                onChange={e => setPresenceSearch(e.target.value)}
-                placeholder="Search teammates..."
-              />
-            </div>
+            {searchOpen && (
+              <div className="presence-search">
+                <span>🔍</span>
+                <input
+                  type="text"
+                  autoFocus
+                  value={presenceSearch}
+                  onChange={e => setPresenceSearch(e.target.value)}
+                  placeholder="Search teammates..."
+                />
+                {presenceSearch && (
+                  <button
+                    type="button"
+                    onClick={() => setPresenceSearch("")}
+                    title="Clear"
+                    style={{
+                      background: "none",
+                      border: "none",
+                      color: "#94a3b8",
+                      cursor: "pointer",
+                      fontSize: "12px",
+                      padding: "0 4px"
+                    }}
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+            )}
 
             <div className="presence-list">
               {filteredUsers.map((user, index) => {

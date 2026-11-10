@@ -285,6 +285,8 @@ function VirtualOffice({
   earshotRadius = 100,
   localStream = null,
   onUsersChange = () => {},
+  onChatMessage = () => {},
+  onSocketReady = () => {},
   meetingRooms = [],
   spawnRoom = "Open Work",
   avatarColor = "#2563eb",
@@ -414,6 +416,11 @@ function VirtualOffice({
       console.log("[ProxiSpeak] Connected:", socket.id);
       socket.emit("join", { username, x: player.current.x, y: player.current.y });
       notifyPresence();
+      onSocketReady(socket);
+    });
+
+    socket.on("chat:message", (msg) => {
+      onChatMessage(msg);
     });
 
     socket.on("users:list", (list) => {
@@ -1369,6 +1376,7 @@ function VirtualOffice({
         } catch (err) { console.debug("[WebRTC] Audio cleanup note:", err); }
       });
 
+      onSocketReady(null);
       socket.disconnect();
     };
   }, [username]);

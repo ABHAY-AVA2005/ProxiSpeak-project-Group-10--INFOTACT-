@@ -72,15 +72,16 @@ function handleConnection(socket) {
     // Create this player's starting position in memory
     players[socket.id] = {
         id: socket.id,
+        socketId: socket.id,
         x: 400,
         y: 400,
+        username: "",
     };
 
     // Send all existing players to the new player
     socket.emit("users:list", players);
 
-    // Tell all other players that a new player joined
-    socket.broadcast.emit("user:joined", players[socket.id]);
+    // Don't broadcast user:joined here — wait until 'join' event carries the username
 
     // Synchronize player join with MongoDB (create/upsert with flat position [x, y])
     // Track promise in inFlightWrites to ensure disconnect awaits it before deleteOne runs
@@ -112,6 +113,28 @@ function handleConnection(socket) {
         }
     });
 
+    // ── Join event: store username ───────────────────────────────────────────
+    socket.on("join", (data) => {
+        if (data && data.username) {
+            players[socket.id].username = data.username;
+        }
+        // Re-broadcast so all clients can display the username
+        socket.broadcast.emit("user:joined", { ...players[socket.id], socketId: socket.id });
+    });
+
+    // ── Global chat message broadcast ────────────────────────────────────────
+    socket.on("chat:message", (msg) => {
+        if (!msg || typeof msg.text !== "string" || !msg.text.trim()) return;
+        const payload = {
+            id: Date.now() + "_" + socket.id,
+            sender: (players[socket.id] && players[socket.id].username) || "Guest",
+            text: msg.text.trim().slice(0, 500),
+            time: new Date().toISOString(),
+        };
+        // Broadcast to everyone including sender
+        io.emit("chat:message", payload);
+    });
+
     // When a player moves (listens to 'move' only)
     socket.on("move", (position) => {
         // Defensive check: ensure player exists, is connected, and coordinates are valid finite numbers within canvas bounds
@@ -134,6 +157,7 @@ function handleConnection(socket) {
             socketId: socket.id,
             x: position.x,
             y: position.y,
+            username: players[socket.id].username || "",
         });
 
         // Debounced database write:
