@@ -1,16 +1,26 @@
-# React + Vite
+# ProxiSpeak Client (React + Vite)
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Frontend web application for ProxiSpeak — a 2D proximity-aware virtual office.
 
-Currently, two official plugins are available:
+## Features
+- **Modern Virtual Office Canvas**: Realistic top-down office floor plan with labeled rooms (**Meeting Room**, **Focus Zone**, **Open Workspace**, **Lounge**, **Pantry**), glass-like dividers, and walkable doorways.
+- **A\* Pathfinding & Click-to-Move**: Click anywhere on the floor to navigate obstacles automatically with path previews and animated destination markers.
+- **Directional Animations**: Real-time avatar facing angle and movement feedback.
+- **Spatial WebRTC Voice**: Automatic peer connection within customizable proximity distance (50px, 75px, 100px, 150px, 200px) with dynamic volume attenuation.
+- **Floating Audio Dock**: Quick-access controls for Microphone, Speaker, Proximity Range, Settings, and End Call.
+- **Nearby Voices & Live Presence**: Expandable widget showing teammates within earshot and right-side searchable active directory.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Getting Started
 
-## React Compiler
+```bash
+# Install dependencies
+npm install
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+# Start Vite dev server
+npm run dev
 
-## Expanding the ESLint configuration
+# Production build
+npm run build
+```
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+The application runs by default at `http://localhost:5173`.
