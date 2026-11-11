@@ -6,7 +6,7 @@ import cors from "cors";
 import { setupSocketHandlers } from "./sockets/socketHandler.js";
 import { getUserCount } from "./services/userManager.js";
 import { connectDB, isDbConnected, closeDB } from "./config/db.js";
-import { initRedis, isRedisConnected, closeRedis } from "./config/redis.js";
+import { initRedis, isRedisConnected, closeRedis, startRedisAutoReconnect, stopRedisAutoReconnect } from "./config/redis.js";
 import { SERVER_ID } from "./services/redisSync.js";
 
 const PORT = Number(process.env.PORT) || 5000;
@@ -44,6 +44,7 @@ app.get("/health", (req, res) => {
     service: "ProxiSpeak Signaling Server",
     instanceId: SERVER_ID,
     port: PORT,
+    pid: process.pid,
     redis: {
       connected: isRedisConnected()
     },
@@ -76,6 +77,9 @@ try {
   console.warn(`[Redis] Initialization failed (${err.message}). Continuing in standalone mode.`);
 }
 
+// Enable background auto-reconnect or register Socket.IO instance for runtime reconnection
+startRedisAutoReconnect(io);
+
 // Register socket handlers (connect, disconnect, join, users:list)
 await setupSocketHandlers(io);
 
@@ -92,6 +96,7 @@ server.listen(PORT, () => {
  * Gracefully stops HTTP, Socket.IO, Redis, and Database connections
  */
 export async function stopServer() {
+  stopRedisAutoReconnect();
   return new Promise((resolve) => {
     io.close(() => {
       server.close(async () => {

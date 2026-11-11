@@ -30,12 +30,90 @@ $LogsDir = Join-Path $ServerDir "logs"
 $StateFile = Join-Path $ScriptDir ".instances.json"
 $DockerComposeFile = Join-Path $RootDir "docker-compose.yml"
 
-$REDIS_HOST = "127.0.0.1"
-$REDIS_PORT = 6379
+# Parse .env if available in RootDir or ServerDir
+$EnvFileCandidates = @(
+    (Join-Path $RootDir ".env"),
+    (Join-Path $ServerDir ".env")
+)
+$parsedEnv = @{}
+foreach ($envPath in $EnvFileCandidates) {
+    if (Test-Path $envPath) {
+        Get-Content $envPath | ForEach-Object {
+            $rawLine = $_.Trim()
+            if ($rawLine -and -not $rawLine.StartsWith("#") -and $rawLine.Contains("=")) {
+                $parts = $rawLine.Split("=", 2)
+                $k = $parts[0].Trim()
+                $v = $parts[1].Trim()
+                if ($v -and -not $parsedEnv.ContainsKey($k)) {
+                    $parsedEnv[$k] = $v
+                }
+            }
+        }
+    }
+}
+
+# Resolve Redis configuration (precedence: process env > .env file > default)
+$resolvedRedisUrl = if ($env:REDIS_URL) {
+    $env:REDIS_URL
+} elseif ($parsedEnv["REDIS_URL"]) {
+    $parsedEnv["REDIS_URL"]
+} else {
+    $null
+}
+
+if ($resolvedRedisUrl) {
+    try {
+        $uriObj = [System.Uri]$resolvedRedisUrl
+        $REDIS_HOST = if ($uriObj.Host) { $uriObj.Host } else { "127.0.0.1" }
+        $REDIS_PORT = if ($uriObj.Port -gt 0) { $uriObj.Port } else { 6379 }
+    } catch {
+        $REDIS_HOST = "127.0.0.1"
+        $REDIS_PORT = 6379
+    }
+} else {
+    $REDIS_HOST = if ($env:REDIS_HOST) { $env:REDIS_HOST } elseif ($parsedEnv["REDIS_HOST"]) { $parsedEnv["REDIS_HOST"] } else { "127.0.0.1" }
+    $REDIS_PORT = if ($env:REDIS_PORT) { [int]$env:REDIS_PORT } elseif ($parsedEnv["REDIS_PORT"]) { [int]$parsedEnv["REDIS_PORT"] } else { 6379 }
+}
+
+$REDIS_ENABLED = if ($env:REDIS_ENABLED) { $env:REDIS_ENABLED } elseif ($parsedEnv["REDIS_ENABLED"]) { $parsedEnv["REDIS_ENABLED"] } else { "true" }
+$DEFAULT_REDIS_URL = if ($resolvedRedisUrl) { $resolvedRedisUrl } else { "redis://${REDIS_HOST}:${REDIS_PORT}" }
+
 $INSTANCES = @(
     @{ Id = "instance-1"; Port = 5000; Log = "instance-1.log" },
     @{ Id = "instance-2"; Port = 5001; Log = "instance-2.log" }
 )
+
+# ---------------------------------------------------------------------------
+# Helper: Extract PID listening on a given port reliably on Windows
+# ---------------------------------------------------------------------------
+function Get-PortPid {
+    param ([int]$Port)
+    try {
+        $h = Get-InstanceHealth -Port $Port -TimeoutSec 1
+        if ($h.IsHealthy -and $h.Data.pid) {
+            return [int]$h.Data.pid
+        }
+    } catch {}
+    try {
+        $lines = netstat -ano | findstr ":$Port"
+        foreach ($line in $lines) {
+            $trimmed = $line.Trim()
+            if ($trimmed -match "LISTENING\s+(\d+)$") {
+                $p = [int]$matches[1]
+                if ($p -gt 0) {
+                    return $p
+                }
+            }
+        }
+    } catch {}
+    try {
+        $conn = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($conn -and $conn.OwningProcess -and $conn.OwningProcess -gt 0) {
+            return $conn.OwningProcess
+        }
+    } catch {}
+    return $null
+}
 
 # ---------------------------------------------------------------------------
 # Helper: Check if a TCP port is responding
@@ -221,6 +299,10 @@ function Start-Instances {
                 if (-not ($proc -and $health.IsHealthy)) {
                     $allRunning = $false
                 }
+                # If Redis is online, instance must have Redis connected
+                if ($redisReady -and $health.IsHealthy -and -not $health.Data.redis.connected) {
+                    $allRunning = $false
+                }
             } else {
                 $allRunning = $false
             }
@@ -253,17 +335,27 @@ function Start-Instances {
         if (Test-TcpPort -Port $port -TimeoutMs 500) {
             $health = Get-InstanceHealth -Port $port -TimeoutSec 1
             if ($health.IsHealthy) {
-                Write-Host "[INFO] Port $port is already listening and healthy. Reusing instance ($id)." -ForegroundColor Yellow
-                $conn = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
-                $existingPid = if ($conn) { $conn.OwningProcess } else { $null }
-                $newState[$id] = @{
-                    Id = $id
-                    Port = $port
-                    Pid = $existingPid
-                    LogFile = $logFile
-                    ErrFile = $errFile
+                # If Redis is online, but this instance is in standalone mode (redis.connected == false),
+                # do NOT reuse the degraded instance. Stop it and launch a fresh one with Redis!
+                if ($redisReady -and -not $health.Data.redis.connected) {
+                    Write-Host "[WARN] Port $port is running in standalone mode without Redis. Restarting $id with Redis..." -ForegroundColor Yellow
+                    $stalePid = Get-PortPid -Port $port
+                    if ($stalePid) {
+                        Stop-Process -Id $stalePid -Force -ErrorAction SilentlyContinue
+                        Start-Sleep -Milliseconds 600
+                    }
+                } else {
+                    Write-Host "[INFO] Port $port is already listening and healthy. Reusing instance ($id)." -ForegroundColor Yellow
+                    $existingPid = Get-PortPid -Port $port
+                    $newState[$id] = @{
+                        Id = $id
+                        Port = $port
+                        Pid = $existingPid
+                        LogFile = $logFile
+                        ErrFile = $errFile
+                    }
+                    continue
                 }
-                continue
             } else {
                 Write-Host "[ERROR] Port $port is already bound by an unknown process. Please free it." -ForegroundColor Red
                 return
@@ -272,9 +364,9 @@ function Start-Instances {
 
         Write-Host "[Start] Launching $id on port $port..." -ForegroundColor Cyan
 
-        $redisUrl = "redis://$REDIS_HOST`:$REDIS_PORT"
+        $redisUrl = $DEFAULT_REDIS_URL
         # cmd.exe wrapper with explicit output redirection, detached via WMI
-        $cmdLine = "cmd.exe /c `"set PORT=$port& set INSTANCE_ID=$id& set MONGO_CONNECT_TIMEOUT_MS=2000& set REDIS_URL=$redisUrl& node src/server.js > `"`"$logFile`"`" 2> `"`"$errFile`"`"`""
+        $cmdLine = "cmd.exe /c `"set PORT=$port& set INSTANCE_ID=$id& set MONGO_CONNECT_TIMEOUT_MS=2000& set REDIS_URL=$redisUrl& set REDIS_ENABLED=$REDIS_ENABLED& node src/server.js > `"`"$logFile`"`" 2> `"`"$errFile`"`"`""
         $res = $wmiProcess.Create($cmdLine, $ServerDir, $null)
 
         if ($res.ReturnValue -ne 0) {
@@ -306,16 +398,19 @@ function Start-Instances {
             $id = $inst.Id
             if (-not $ready[$id]) {
                 $h = Get-InstanceHealth -Port $inst.Port -TimeoutSec 1
-                if ($h.IsHealthy) {
+                $isRedisReady = if ($redisReady) { [bool]$h.Data.redis.connected } else { $true }
+                if ($h.IsHealthy -and $isRedisReady) {
                     $ready[$id] = $true
 
                     # Record exact Node PID from the listening TCP socket
-                    $conn = Get-NetTCPConnection -LocalPort $inst.Port -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
-                    if ($conn -and $conn.OwningProcess) {
-                        $newState[$id].Pid = $conn.OwningProcess
+                    $actualPid = Get-PortPid -Port $inst.Port
+                    if ($actualPid) {
+                        $newState[$id].Pid = $actualPid
                     }
 
                     Write-Host "  [OK] $id is HEALTHY on port $($inst.Port) (PID: $($newState[$id].Pid), Uptime: $($h.Data.uptime)s, Redis: $($h.Data.redis.connected))" -ForegroundColor Green
+                } elseif ($h.IsHealthy -and -not $isRedisReady) {
+                    $allReady = $false
                 } else {
                     $allReady = $false
                 }
@@ -391,10 +486,7 @@ function Get-InstancesStatus {
 
         # If PID wasn't saved or needs verification, check listening socket
         if (-not $pidNum) {
-            $conn = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
-            if ($conn -and $conn.OwningProcess) {
-                $pidNum = $conn.OwningProcess
-            }
+            $pidNum = Get-PortPid -Port $port
         }
 
         $isProcAlive = $false
@@ -526,12 +618,12 @@ function Stop-Instances {
 
     # Safety check: if ports 5000 or 5001 are still listening and belong to node, stop them
     foreach ($inst in $INSTANCES) {
-        $conn = Get-NetTCPConnection -LocalPort $inst.Port -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
-        if ($conn -and $conn.OwningProcess) {
-            $p = Get-Process -Id $conn.OwningProcess -ErrorAction SilentlyContinue
+        $portPid = Get-PortPid -Port $inst.Port
+        if ($portPid) {
+            $p = Get-Process -Id $portPid -ErrorAction SilentlyContinue
             if ($p -and $p.ProcessName -like "*node*") {
-                Write-Host "[Stop] Stopping remaining listener on port $($inst.Port) (PID: $($conn.OwningProcess))..." -ForegroundColor Cyan
-                Stop-Process -Id $conn.OwningProcess -Force -ErrorAction SilentlyContinue
+                Write-Host "[Stop] Stopping remaining listener on port $($inst.Port) (PID: $portPid)..." -ForegroundColor Cyan
+                Stop-Process -Id $portPid -Force -ErrorAction SilentlyContinue
             }
         }
     }

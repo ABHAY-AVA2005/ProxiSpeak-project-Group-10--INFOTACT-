@@ -24,13 +24,14 @@ export const REDIS_CHANNELS = Object.freeze({
 
 let isSubscribed = false;
 let currentMessageListener = null;
+let subscribedSubscriber = null;
 
 /**
  * Checks whether Redis Pub/Sub channels are currently subscribed
  * @returns {boolean}
  */
 export function isRedisSyncSubscribed() {
-  return isSubscribed;
+  return isSubscribed && Boolean(subscribedSubscriber && isRedisConnected());
 }
 
 /**
@@ -42,13 +43,18 @@ export async function setupRedisSync(io) {
   if (!subscriber || !isRedisConnected()) {
     return false;
   }
-  if (isSubscribed) {
+  if (isSubscribed && subscribedSubscriber === subscriber) {
     return true;
   }
 
   try {
+    if (subscribedSubscriber && currentMessageListener) {
+      try { subscribedSubscriber.off("message", currentMessageListener); } catch (_) {}
+    }
+
     await subscriber.subscribe(REDIS_CHANNELS.POSITIONS, REDIS_CHANNELS.LIFECYCLE, REDIS_CHANNELS.SIGNALING);
     isSubscribed = true;
+    subscribedSubscriber = subscriber;
     console.log(`[RedisSync] Subscribed to ${REDIS_CHANNELS.POSITIONS}, ${REDIS_CHANNELS.LIFECYCLE}, and ${REDIS_CHANNELS.SIGNALING} (Server ID: ${SERVER_ID})`);
 
     if (currentMessageListener) {
@@ -353,9 +359,10 @@ export async function publishProximityLeave({ targetId, peerId }) {
  */
 export function resetRedisSyncState() {
   isSubscribed = false;
-  const subscriber = getRedisSubscriber();
-  if (subscriber && currentMessageListener) {
-    try { subscriber.off("message", currentMessageListener); } catch (_) {}
+  const targetSub = subscribedSubscriber || getRedisSubscriber();
+  if (targetSub && currentMessageListener) {
+    try { targetSub.off("message", currentMessageListener); } catch (_) {}
   }
+  subscribedSubscriber = null;
   currentMessageListener = null;
 }
