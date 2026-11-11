@@ -8,7 +8,8 @@ import {
   getRedisSubscriber,
   startRedisAutoReconnect,
   stopRedisAutoReconnect,
-  isAutoReconnectActive
+  isAutoReconnectActive,
+  getPendingClientsCount
 } from "../src/config/redis.js";
 import {
   setupRedisSync,
@@ -237,4 +238,53 @@ test("Lifecycle Scenario 9: Graceful shutdown cancels reconnect timer, resets st
     await closeRedis();
     assert.equal(isRedisConnected(), false);
   }
+});
+
+test("Lifecycle Scenario 10: Shutdown during an in-flight Redis initialization", async () => {
+  await closeRedis();
+
+  // 1. Start a Redis initialization attempt (do not await immediately)
+  const inFlightInitPromise = initRedis({ url: VALID_REDIS_URL });
+
+  // 2. Trigger closeRedis() while the initialization attempt is in flight
+  const closePromise = closeRedis();
+
+  // 3. Allow both pending operations to settle
+  const [initResult] = await Promise.all([inFlightInitPromise, closePromise]);
+
+  // 4. Verify that isRedisConnected() remains false
+  assert.equal(isRedisConnected(), false, "isRedisConnected() must remain false after shutdown during in-flight init");
+  assert.equal(initResult.isConnected, false, "in-flight init result must report isConnected: false");
+
+  // 5. Verify that getRedisPublisher() returns null
+  assert.equal(getRedisPublisher(), null, "getRedisPublisher() must return null after shutdown during in-flight init");
+
+  // 6. Verify that getRedisSubscriber() returns null
+  assert.equal(getRedisSubscriber(), null, "getRedisSubscriber() must return null after shutdown during in-flight init");
+
+  // 7. Verify that no pending Redis clients survive shutdown
+  assert.equal(getPendingClientsCount(), 0, "No pending Redis clients should survive shutdown");
+
+  // 8. Verify that no automatic reconnect timer starts after shutdown
+  assert.equal(isAutoReconnectActive(), false, "No automatic reconnect timer should be running after shutdown");
+
+  // 9. Verify that a subsequent explicit initRedis() can successfully restart Redis
+  const restartRes = await initRedis({ url: VALID_REDIS_URL });
+  assert.equal(restartRes.isConnected, true, "Subsequent explicit initRedis() must successfully restart Redis");
+  assert.equal(isRedisConnected(), true, "isRedisConnected() must report true after restart");
+  assert.ok(getRedisPublisher(), "Publisher must be an active client after restart");
+  assert.ok(getRedisSubscriber(), "Subscriber must be an active client after restart");
+  assert.equal(getRedisPublisher().status, "ready");
+  assert.equal(getRedisSubscriber().status, "ready");
+  assert.equal(getPendingClientsCount(), 0, "No pending clients remain after successful restart");
+
+  // Verify synchronization attaches cleanly after restart
+  const syncAttached = await setupRedisSync(dummyIO);
+  assert.equal(syncAttached, true, "setupRedisSync should succeed on restarted connection");
+  assert.equal(isRedisSyncSubscribed(), true);
+
+  // Teardown
+  await closeRedis();
+  assert.equal(isRedisConnected(), false);
+  assert.equal(getPendingClientsCount(), 0);
 });
