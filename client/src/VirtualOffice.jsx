@@ -485,6 +485,9 @@ function VirtualOffice({
     socket.on("chat:message", (msg) => {
       onChatMessage(msg);
     });
+    socket.on("chat:direct:message", (msg) => {
+      onChatMessage(msg);
+    });
 
     socket.on("users:list", (list) => {
       remotePlayers.current = {};

@@ -49,6 +49,7 @@ function App() {
   const [chatSending, setChatSending] = useState(false);
   const [chatError, setChatError] = useState("");
   const [chatScope, setChatScope] = useState("room");
+  const [directChat, setDirectChat] = useState(null);
   const [earshotRadius, setEarshotRadius] = useState(100);
   const [proximityOpen, setProximityOpen] = useState(false);
   const [nearbyVoicesExpanded, setNearbyVoicesExpanded] = useState(false);
@@ -64,6 +65,7 @@ function App() {
   const [remoteScreenShare, setRemoteScreenShare] = useState(null);
   const socketRef = useRef(null);
   const chatScopeRef = useRef("room");
+  const directChatRef = useRef(null);
   const chatListRef = useRef(null);
 
   const {
@@ -154,6 +156,13 @@ function App() {
     const isSelf = msg.senderId
       ? msg.senderId === socketRef.current?.id
       : msg.sender === username;
+    if (msg.scope === "direct") {
+      const activeTarget = directChatRef.current?.socketId;
+      const otherParticipant = isSelf ? msg.recipientId : msg.senderId;
+      if (!activeTarget || activeTarget !== otherParticipant) return;
+    } else if (directChatRef.current) {
+      return;
+    }
     setChatMessages((current) => {
       if (msg.id && current.some((message) => message.id === msg.id)) return current;
       return [...current, {
@@ -172,8 +181,10 @@ function App() {
     }
   };
 
-  const handleToggleChatScope = () => {
-    const nextScope = chatScopeRef.current === "room" ? "all" : "room";
+  const handleSelectChatScope = (nextScope) => {
+    if (nextScope === chatScopeRef.current && !directChatRef.current) return;
+    directChatRef.current = null;
+    setDirectChat(null);
     chatScopeRef.current = nextScope;
     setChatScope(nextScope);
     setChatError("");
@@ -205,6 +216,69 @@ function App() {
     });
   };
 
+  const handleOpenDirectChat = (user) => {
+    if (!user.socketId || user.isSelf) return;
+    const conversation = { socketId: user.socketId, username: user.username || "Teammate" };
+    directChatRef.current = conversation;
+    setDirectChat(conversation);
+    setChatError("");
+    setChatMessages([]);
+    setActiveTab("Chat");
+
+    const socket = socketRef.current;
+    if (!socket?.connected) {
+      setChatError("Chat is reconnecting. Please try again when you are back online.");
+      return;
+    }
+    socket.timeout(5000).emit(
+      "chat:direct:history",
+      { targetId: conversation.socketId },
+      (error, response) => {
+        if (error || !response?.ok) {
+          if (directChatRef.current?.socketId === conversation.socketId) {
+            setChatError("This teammate is no longer available for a direct message.");
+          }
+          return;
+        }
+        if (directChatRef.current?.socketId !== conversation.socketId) return;
+        setChatMessages(response.messages.map((message) => ({
+          id: message.id,
+          isSelf: message.senderId === socket.id,
+          scope: "direct",
+          sender: message.senderId === socket.id ? "You" : message.sender,
+          text: message.text,
+          time: message.time
+            ? new Date(message.time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+            : "Now",
+        })));
+      }
+    );
+  };
+
+  const handleReturnToGroupChat = () => {
+    directChatRef.current = null;
+    setDirectChat(null);
+    setChatMessages([]);
+    const socket = socketRef.current;
+    if (!socket?.connected) return;
+    socket.timeout(5000).emit("chat:history", { scope: chatScopeRef.current }, (error, response) => {
+      if (error || !response?.ok) {
+        setChatError("Could not load this chat history. Please try again.");
+        return;
+      }
+      setChatMessages(response.messages.map((message) => ({
+        id: message.id,
+        isSelf: message.senderId === socket.id,
+        scope: chatScopeRef.current,
+        sender: message.senderId === socket.id ? "You" : message.sender,
+        text: message.text,
+        time: message.time
+          ? new Date(message.time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+          : "Now",
+      })));
+    });
+  };
+
   const handleSendMessage = (e) => {
     e.preventDefault();
     const trimmed = draftMessage.trim();
@@ -215,9 +289,12 @@ function App() {
     }
     setChatSending(true);
     setChatError("");
+    const directTarget = directChatRef.current;
     socketRef.current.timeout(5000).emit(
-      "chat:message",
-      { text: trimmed, scope: chatScopeRef.current },
+      directTarget ? "chat:direct:message" : "chat:message",
+      directTarget
+        ? { text: trimmed, targetId: directTarget.socketId }
+        : { text: trimmed, scope: chatScopeRef.current },
       (error, response) => {
       setChatSending(false);
       if (error || !response?.ok) {
@@ -433,7 +510,15 @@ function App() {
                                 {name.split(" ").map(p => p[0]).slice(0,2).join("").toUpperCase()}
                               </div>
                               <div className="detail-copy"><strong>{user.isSelf ? `${name} (you)` : name}</strong><span>{user.status}</span></div>
-                              <button type="button" className="secondary-button">Message</button>
+                              {!user.isSelf && (
+                                <button
+                                  type="button"
+                                  className="secondary-button"
+                                  onClick={() => handleOpenDirectChat(user)}
+                                >
+                                  Message
+                                </button>
+                              )}
                             </div>
                           );
                         })}
@@ -444,10 +529,14 @@ function App() {
                     <div className="workspace-card chat-card">
                       <div className="card-header-row">
                         <div>
-                          <h2>Workspace chat</h2>
-                          <small>{chatScope === "all" ? "Everyone in the meeting" : `Room: ${roomName}`}</small>
+                          <h2>{directChat ? `Chat with ${directChat.username}` : "Workspace chat"}</h2>
+                          <small>
+                            {directChat
+                              ? "Direct message"
+                              : chatScope === "all" ? "Everyone in the meeting" : `Room: ${roomName}`}
+                          </small>
                         </div>
-                        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                        <div className="chat-header-actions">
                           <span>
                             {!chatConnected
                               ? "Offline"
@@ -457,12 +546,38 @@ function App() {
                                   ? "Live"
                                   : "Joining room..."}
                           </span>
-                          <button type="button" className="primary-button" onClick={handleToggleScreenShare}>
-                            {screenShareStream ? "Stop sharing" : "Share screen"}
-                          </button>
+                          {directChat ? (
+                            <button type="button" className="secondary-button" onClick={handleReturnToGroupChat}>
+                              Back to group chat
+                            </button>
+                          ) : (
+                            <>
+                              <div className="chat-scope-toggle" role="group" aria-label="Chat audience">
+                                <button
+                                  type="button"
+                                  className={chatScope === "room" ? "selected" : ""}
+                                  aria-pressed={chatScope === "room"}
+                                  onClick={() => handleSelectChatScope("room")}
+                                >
+                                  Room chat
+                                </button>
+                                <button
+                                  type="button"
+                                  className={chatScope === "all" ? "selected" : ""}
+                                  aria-pressed={chatScope === "all"}
+                                  onClick={() => handleSelectChatScope("all")}
+                                >
+                                  All chat
+                                </button>
+                              </div>
+                              <button type="button" className="primary-button" onClick={handleToggleScreenShare}>
+                                {screenShareStream ? "Stop sharing" : "Share screen"}
+                              </button>
+                            </>
+                          )}
                         </div>
                       </div>
-                      {screenShareStream || remoteScreenShare?.stream ? (
+                      {!directChat && (screenShareStream || remoteScreenShare?.stream) ? (
                         <div className="screen-share-panel">
                           <div className="card-header-row">
                             <strong>{screenShareStream ? "Your screen" : `${remoteScreenShare.username || "Teammate"}'s screen`}</strong>
@@ -582,16 +697,6 @@ function App() {
 
               <button className="voice-btn settings-btn" title="Audio settings" onClick={() => setActiveTab("Settings")}>
                 ⚙
-              </button>
-
-              <button
-                type="button"
-                className={`chat-mode-toggle ${chatScope === "all" ? "active" : ""}`}
-                onClick={handleToggleChatScope}
-                aria-pressed={chatScope === "all"}
-                title={`Switch to ${chatScope === "room" ? "all meeting" : "room"} chat`}
-              >
-                {chatScope === "room" ? "Room chat" : "All chat"}
               </button>
 
               <button className="voice-btn end-btn" onClick={handleLeave} title="Leave office">

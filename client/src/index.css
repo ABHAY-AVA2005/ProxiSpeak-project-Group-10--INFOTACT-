@@ -40,6 +40,12 @@ html, body, #root {
   overflow-y: auto;
 }
 
+#root {
+  width: 80%;
+  min-height: 100vh;
+  zoom: 0.8;
+}
+
 body {
   background: var(--clr-bg);
   color: #0d1023;
@@ -344,20 +350,33 @@ input { outline: none; border: none; }
   border: none;
 }
 .voice-btn:hover { transform: scale(1.08); }
-.chat-mode-toggle {
-  min-height: 40px;
-  padding: 0 12px;
-  border: 1px solid rgba(99,80,255,0.3);
-  border-radius: 20px;
-  background: rgba(255,255,255,0.9);
-  color: #34365c;
-  font-size: 0.78rem;
-  font-weight: 700;
-  cursor: pointer;
-  transition: transform 0.15s, background 0.15s, color 0.15s;
+.chat-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
-.chat-mode-toggle:hover { transform: scale(1.04); }
-.chat-mode-toggle.active { background: #6350ff; color: #fff; }
+.chat-scope-toggle {
+  display: inline-flex;
+  flex-shrink: 0;
+  padding: 3px;
+  border: 1px solid rgba(99,80,255,0.3);
+  border-radius: 10px;
+  background: rgba(255,255,255,0.9);
+}
+.chat-scope-toggle button {
+  min-height: 34px;
+  padding: 0 10px;
+  border-radius: 7px;
+  background: transparent;
+  color: #34365c;
+  font-size: 0.75rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.chat-scope-toggle button.selected {
+  background: #6350ff;
+  color: #fff;
+}
 
 .mic-btn { background: linear-gradient(135deg, #6350ff, #8b5cf6); color: #fff; box-shadow: 0 4px 16px rgba(99,80,255,0.5); }
 .mic-btn.muted { background: rgba(100,100,120,0.5); box-shadow: none; }

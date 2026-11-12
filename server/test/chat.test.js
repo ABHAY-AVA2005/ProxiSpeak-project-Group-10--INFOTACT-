@@ -88,6 +88,29 @@ test("Chat - broadcasts messages only to users in the joined room", async () => 
     assert.deepEqual(await allSent, { ok: true, id: allDelivered[0].id });
     assert.ok(allDelivered.every((message) => message.scope === "all" && message.text === "Office-wide"));
 
+    const aliceDirect = once(alice, "chat:direct:message");
+    const bobDirect = once(bob, "chat:direct:message");
+    const directSent = new Promise((resolve) => {
+      alice.emit("chat:direct:message", { text: "Private hello", targetId: bob.id }, resolve);
+    });
+    const [directToAlice, directToBob] = await Promise.all([aliceDirect, bobDirect]);
+    assert.deepEqual(await directSent, { ok: true, id: directToAlice.id });
+    assert.equal(directToAlice.scope, "direct");
+    assert.equal(directToBob.text, "Private hello");
+    assert.equal(directToBob.senderId, alice.id);
+
+    const directHistory = await new Promise((resolve) => {
+      bob.emit("chat:direct:history", { targetId: alice.id }, resolve);
+    });
+    assert.equal(directHistory.ok, true);
+    assert.equal(directHistory.messages.length, 1);
+    assert.equal(directHistory.messages[0].text, "Private hello");
+
+    const forbiddenDirect = await new Promise((resolve) => {
+      alice.emit("chat:direct:message", { text: "Should not deliver", targetId: outsider.id }, resolve);
+    });
+    assert.deepEqual(forbiddenDirect, { ok: false, error: "recipient-unavailable" });
+
     const [roomHistory, meetingHistory] = await Promise.all([
       new Promise((resolve) => alice.emit("chat:history", { scope: "room" }, resolve)),
       new Promise((resolve) => alice.emit("chat:history", { scope: "all" }, resolve))

@@ -38,8 +38,13 @@ export const pendingPositions = new Map(); // socketId -> user
 export const lastEvaluatedPositions = new Map(); // socketId -> { x, y }
 const roomChatHistory = new Map();
 const meetingChatHistory = [];
+const directChatHistory = new Map();
 const MAX_ROOM_CHAT_MESSAGES = 500;
 const MEETING_CHAT_ROOM = "office:all";
+
+function getDirectConversationKey(firstSocketId, secondSocketId) {
+  return [firstSocketId, secondSocketId].sort().join(":");
+}
 
 /**
  * Resets all proximity queue state (useful for tests and restarts)
@@ -356,6 +361,54 @@ export function setupSocketHandlers(io) {
       });
     });
 
+    socket.on("chat:direct:message", (payload = {}, acknowledge) => {
+      const respond = (result) => {
+        if (typeof acknowledge === "function") acknowledge(result);
+      };
+      const targetId = typeof payload.targetId === "string" ? payload.targetId : "";
+      const text = typeof payload.text === "string" ? payload.text.trim() : "";
+      const recipient = io.sockets.sockets.get(targetId);
+      if (!text || text.length > 2000 || !socket.data.username || !socket.data.roomName) {
+        respond({ ok: false, error: "invalid-message" });
+        return;
+      }
+      if (!recipient || recipient.data.roomName !== socket.data.roomName || recipient.id === socket.id) {
+        respond({ ok: false, error: "recipient-unavailable" });
+        return;
+      }
+
+      const message = {
+        id: `${socket.id}:${Date.now()}`,
+        scope: "direct",
+        senderId: socket.id,
+        recipientId: recipient.id,
+        sender: socket.data.username,
+        text,
+        time: new Date().toISOString()
+      };
+      const key = getDirectConversationKey(socket.id, recipient.id);
+      const history = directChatHistory.get(key) || [];
+      history.push(message);
+      if (history.length > MAX_ROOM_CHAT_MESSAGES) history.shift();
+      directChatHistory.set(key, history);
+      socket.emit("chat:direct:message", message);
+      recipient.emit("chat:direct:message", message);
+      respond({ ok: true, id: message.id });
+    });
+
+    socket.on("chat:direct:history", (payload = {}, acknowledge) => {
+      if (typeof acknowledge !== "function") return;
+      const targetId = typeof payload.targetId === "string" ? payload.targetId : "";
+      const recipient = io.sockets.sockets.get(targetId);
+      if (!socket.data.roomName || !socket.data.username || !recipient
+        || recipient.data.roomName !== socket.data.roomName || recipient.id === socket.id) {
+        acknowledge({ ok: false, error: "recipient-unavailable" });
+        return;
+      }
+      const key = getDirectConversationKey(socket.id, recipient.id);
+      acknowledge({ ok: true, messages: directChatHistory.get(key) || [] });
+    });
+
     /**
      * Movement handler (listens to 'move' only)
      * Payload: { x: number, y: number }
@@ -498,6 +551,9 @@ export function setupSocketHandlers(io) {
      */
     socket.on("disconnect", async (reason) => {
       const removedUser = removeUser(socket.id);
+      for (const key of directChatHistory.keys()) {
+        if (key.split(":").includes(socket.id)) directChatHistory.delete(key);
+      }
       const roomName = socket.data.roomName;
       if (roomName && !io.sockets.adapter.rooms.get(roomName)?.size) {
         roomChatHistory.delete(roomName);
