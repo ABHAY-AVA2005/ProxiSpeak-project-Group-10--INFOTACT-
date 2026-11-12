@@ -2,14 +2,14 @@ import { useState } from 'react';
 
 export function JoinScreen({ onJoin }) {
   const [username, setUsername] = useState('');
-  const [roomName, setRoomName] = useState('sunrise-studio');
+  const [roomName, setRoomName] = useState('');
   const [isError, setIsError] = useState(false);
 
   const handleSubmit = (e) => {
     e.preventDefault();
     const cleanName = username.trim();
-    const cleanRoom = roomName.trim() || 'sunrise-studio';
-    if (!cleanName) {
+    const cleanRoom = roomName.trim();
+    if (!cleanName || !cleanRoom) {
       setIsError(true);
       return;
     }
@@ -97,7 +97,7 @@ export function JoinScreen({ onJoin }) {
                     setUsername(e.target.value);
                     if (isError && e.target.value.trim()) setIsError(false);
                   }}
-                  placeholder="jadhav pallavi"
+                  placeholder="Enter name"
                   maxLength={30}
                   aria-invalid={isError}
                   style={{
@@ -121,8 +121,9 @@ export function JoinScreen({ onJoin }) {
                   type="text"
                   value={roomName}
                   onChange={(e) => setRoomName(e.target.value)}
-                  placeholder="sunrise-studio"
+                  placeholder="Enter room name"
                   maxLength={40}
+                  required
                   style={{
                     width: '100%',
                     padding: '14px 14px',
@@ -139,7 +140,7 @@ export function JoinScreen({ onJoin }) {
 
               {isError && (
                 <div style={{ color: '#cf5a5a', fontSize: '0.76rem', marginBottom: '12px' }}>
-                  Please enter a valid username to continue.
+                  Please enter your name and room name to continue.
                 </div>
               )}
 
