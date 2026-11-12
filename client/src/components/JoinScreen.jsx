@@ -1,6 +1,6 @@
 import { useState } from 'react';
 
-export function JoinScreen({ onJoin }) {
+export function JoinScreen({ onJoin, rooms }) {
   const [username, setUsername] = useState('');
   const [roomName, setRoomName] = useState('');
   const [isError, setIsError] = useState(false);
@@ -8,7 +8,7 @@ export function JoinScreen({ onJoin }) {
   const handleSubmit = (e) => {
     e.preventDefault();
     const cleanName = username.trim();
-    const cleanRoom = roomName.trim();
+    const cleanRoom = roomName.trim().toLowerCase();
     if (!cleanName || !cleanRoom) {
       setIsError(true);
       return;
@@ -117,12 +117,10 @@ export function JoinScreen({ onJoin }) {
 
               <div style={{ marginBottom: '18px' }}>
                 <div style={{ fontSize: '0.82rem', color: '#5f706b', marginBottom: '8px' }}>Office room</div>
-                <input
-                  type="text"
+                <select
                   value={roomName}
                   onChange={(e) => setRoomName(e.target.value)}
-                  placeholder="Enter room name"
-                  maxLength={40}
+                  aria-label="Office room"
                   required
                   style={{
                     width: '100%',
@@ -135,7 +133,12 @@ export function JoinScreen({ onJoin }) {
                     boxSizing: 'border-box',
                     outline: 'none'
                   }}
-                />
+                >
+                  <option value="" disabled>Select an office room</option>
+                  {rooms.map((room) => (
+                    <option key={room.id} value={room.name.trim().toLowerCase()}>{room.name}</option>
+                  ))}
+                </select>
               </div>
 
               {isError && (

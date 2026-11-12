@@ -8,6 +8,7 @@ import { getUserCount } from "./services/userManager.js";
 import { connectDB, isDbConnected, closeDB } from "./config/db.js";
 import { initRedis, isRedisConnected, closeRedis } from "./config/redis.js";
 import { SERVER_ID } from "./services/redisSync.js";
+import { listRooms } from "./services/roomService.js";
 
 const PORT = Number(process.env.PORT) || 5000;
 const CLIENT_URL = process.env.CLIENT_URL || "http://localhost:5173";
@@ -54,6 +55,11 @@ app.get("/health", (req, res) => {
     uptime: Math.round(process.uptime()),
     timestamp: new Date().toISOString()
   });
+});
+
+app.get("/api/rooms", async (_req, res) => {
+  const rooms = await listRooms();
+  res.json(rooms.map(({ name }) => name));
 });
 
 // Create HTTP server & bind Socket.io

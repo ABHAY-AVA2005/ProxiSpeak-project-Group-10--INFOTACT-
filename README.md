@@ -86,6 +86,7 @@ Comprehensive review documentation: [`docs/mid-review.md`](file:///docs/mid-revi
 | P2P WebRTC Audio | ✅ Implemented | `getUserMedia` mic streaming, peer-to-peer audio mesh |
 | Dynamic Distance Attenuation | ✅ Implemented | Web Audio `GainNode` volume drop-off ($100\%$ at 0 px $\to 0\%$ at max earshot) |
 | Stereo Panning | ✅ Implemented | `StereoPannerNode` directional audio (left/right ear) |
+| Live Text Chat | ✅ Implemented | Room-only and office-wide channels with in-memory history cleared when participants leave |
 | Multi-Instance Clustering & Redis | ✅ Implemented | Dual-server execution & verification with Redis Pub/Sub adapter |
 | UI Controls & Teammate Directory | ✅ Implemented | Floating voice bar (mic, speaker, proximity selector, end-call), Nearby Voices widget |
 | Room Layout Persistence | ✅ Implemented | Room schemas, obstacles, and REST API (`/api/rooms`) |

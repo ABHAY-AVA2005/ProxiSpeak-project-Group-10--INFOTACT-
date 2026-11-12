@@ -287,6 +287,9 @@ function VirtualOffice({
   onUsersChange = () => {},
   onChatMessage = () => {},
   onSocketReady = () => {},
+  roomName = "default-room",
+  screenShareStream = null,
+  onRemoteScreenShareChange = () => {},
   meetingRooms = [],
   spawnRoom = "Open Work",
   avatarColor = "#2563eb",
@@ -294,7 +297,11 @@ function VirtualOffice({
   const canvasRef = useRef(null);
   const earshotRef = useRef(earshotRadius);
   const localStreamRef = useRef(localStream);
+  const screenShareStreamRef = useRef(screenShareStream);
+  const roomNameRef = useRef(roomName);
+  const onRemoteScreenShareChangeRef = useRef(onRemoteScreenShareChange);
   const peerConnectionsRef = useRef({});
+  const renegotiatePeersRef = useRef(null);
   const pendingCandidatesRef = useRef({});
   const routeRef = useRef([]);
   const clickTargetRef = useRef(null);
@@ -304,6 +311,14 @@ function VirtualOffice({
   const playerFacing = useRef({ angle: 0, moving: false });
 
   useEffect(() => { earshotRef.current = earshotRadius; }, [earshotRadius]);
+  useEffect(() => {
+    roomNameRef.current = roomName;
+    onRemoteScreenShareChangeRef.current = onRemoteScreenShareChange;
+  }, [roomName, onRemoteScreenShareChange]);
+  useEffect(() => {
+    screenShareStreamRef.current = screenShareStream;
+    renegotiatePeersRef.current?.();
+  }, [screenShareStream]);
 
   const player = useRef({ x: 160, y: 44, username });
   const keys = useRef({});
@@ -316,10 +331,12 @@ function VirtualOffice({
 
   useEffect(() => {
     if (!meetingRooms.length) return;
-    const targetRoom = meetingRooms.find((room) => room.name === spawnRoom || room.id === spawnRoom);
+    const targetRoom = meetingRooms.find((room) =>
+      room.name.trim().toLowerCase() === spawnRoom || room.id.trim().toLowerCase() === spawnRoom
+    );
     if (targetRoom) {
       // If spawning in Meeting Room, place avatar in the open walkway above the table
-      if (targetRoom.id === "Meeting Room" || targetRoom.name === "Meeting Room") {
+      if (targetRoom.id.toLowerCase() === "meeting room" || targetRoom.name.toLowerCase() === "meeting room") {
         player.current.x = 160;
         player.current.y = 44;
       } else {
@@ -399,25 +416,71 @@ function VirtualOffice({
     // ── Socket.IO ──────────────────────────────────────────────────────────
     const socket = io(SERVER_URL, { transports: ["websocket"], reconnectionAttempts: 5 });
 
+    const negotiatePeer = async (peerId, pc) => {
+      if (pc.signalingState !== "stable" || pc.connectionState === "closed") return;
+      try {
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        socket.emit("webrtc:offer", { targetId: peerId, offer });
+      } catch (err) {
+        console.error(`[WebRTC] Screen-share negotiation failed for ${peerId}:`, err);
+      }
+    };
+
+    renegotiatePeersRef.current = async () => {
+      const stream = screenShareStreamRef.current;
+      const videoTrack = stream?.getVideoTracks()[0] || null;
+      await Promise.all(Object.entries(peerConnectionsRef.current).map(async ([peerId, pc]) => {
+        const videoTransceiver = pc.getTransceivers().find((transceiver) =>
+          transceiver.receiver.track?.kind === "video"
+        );
+        const videoSender = videoTransceiver?.sender;
+        try {
+          if (videoTrack) {
+            if (videoSender) await videoSender.replaceTrack(videoTrack);
+            else pc.addTrack(videoTrack, stream);
+          } else if (videoSender) {
+            await videoSender.replaceTrack(null);
+          }
+          await negotiatePeer(peerId, pc);
+        } catch (err) {
+          console.error(`[WebRTC] Unable to update screen-share track for ${peerId}:`, err);
+        }
+      }));
+    };
+
     const notifyPresence = () => {
       const entries = Object.entries(remotePlayers.current).map(([id, user]) => ({
         socketId: id,
         username: user.username || "Guest",
+        joinedAt: user.joinedAt,
         status: "In office",
       }));
 
       onUsersChange([
-        { socketId: socket.id || "local-user", username, status: "In office", isSelf: true },
+        { socketId: socket.id || "local-user", username, joinedAt: Date.now(), status: "In office", isSelf: true },
         ...entries,
       ]);
     };
 
     socket.on("connect", () => {
       console.log("[ProxiSpeak] Connected:", socket.id);
-      socket.emit("join", { username, x: player.current.x, y: player.current.y });
-      notifyPresence();
-      onSocketReady(socket);
+      onSocketReady(socket, [], false, false);
+      socket.timeout(5000).emit(
+        "join",
+        { username, roomName: roomNameRef.current, x: player.current.x, y: player.current.y },
+        (error, result) => {
+        if (error || !result?.ok) {
+          console.error("[ProxiSpeak] Server could not join the selected room.");
+          onSocketReady(socket, [], false, true);
+          return;
+        }
+        notifyPresence();
+        onSocketReady(socket, result.chatMessages || [], true, false, result.meetingChatMessages || []);
+        }
+      );
     });
+    socket.on("disconnect", () => onSocketReady(null));
 
     socket.on("chat:message", (msg) => {
       onChatMessage(msg);
@@ -428,7 +491,7 @@ function VirtualOffice({
       (Array.isArray(list) ? list : Object.values(list || {})).forEach((u) => {
         const id = u.socketId || u.id;
         if (id && id !== socket.id) {
-          remotePlayers.current[id] = { x: u.x, y: u.y, targetX: u.x, targetY: u.y, username: u.username };
+          remotePlayers.current[id] = { x: u.x, y: u.y, targetX: u.x, targetY: u.y, username: u.username, joinedAt: u.joinedAt };
         }
       });
       notifyPresence();
@@ -437,7 +500,7 @@ function VirtualOffice({
     socket.on("user:joined", (u) => {
       const id = u.socketId || u.id;
       if (id && id !== socket.id) {
-        remotePlayers.current[id] = { x: u.x, y: u.y, targetX: u.x, targetY: u.y, username: u.username };
+        remotePlayers.current[id] = { x: u.x, y: u.y, targetX: u.x, targetY: u.y, username: u.username, joinedAt: u.joinedAt };
       }
       notifyPresence();
     });
@@ -621,10 +684,24 @@ function VirtualOffice({
       };
 
       pc.ontrack = (event) => {
-        console.log(`[WebRTC] Received audio stream ontrack from: ${peerId}`);
+        if (event.track.kind === "video") {
+          const stream = event.streams?.[0] || new MediaStream([event.track]);
+          onRemoteScreenShareChangeRef.current({
+            stream,
+            socketId: peerId,
+            username: remotePlayers.current[peerId]?.username || "Teammate"
+          });
+          event.track.onended = () => onRemoteScreenShareChangeRef.current({ socketId: peerId });
+          return;
+        }
         const stream = (event.streams && event.streams[0]) ? event.streams[0] : null;
         setupRemoteAudio(peerId, event.track, stream);
       };
+
+      const shareTrack = screenShareStreamRef.current?.getVideoTracks()[0];
+      if (shareTrack) {
+        pc.addTrack(shareTrack, screenShareStreamRef.current);
+      }
 
       peerConnections[peerId] = pc;
       return pc;
@@ -666,9 +743,7 @@ function VirtualOffice({
           return;
         }
         try {
-          const offer = await pc.createOffer();
-          await pc.setLocalDescription(offer);
-          socket.emit("webrtc:offer", { targetId: peerId, offer });
+          await negotiatePeer(peerId, pc);
           console.log(`[WebRTC] Sent offer to ${peerId}`);
         } catch (err) {
           console.error("[WebRTC] Create offer error:", err);
@@ -683,6 +758,7 @@ function VirtualOffice({
         try { peerConnections[peerId].close(); } catch (err) { console.debug("[WebRTC] Peer close note:", err); }
         delete peerConnections[peerId];
       }
+      onRemoteScreenShareChangeRef.current({ socketId: peerId });
       delete pendingCandidates[peerId];
       const audioEl = document.getElementById(`audio-${peerId}`);
       if (audioEl) {
@@ -1377,6 +1453,7 @@ function VirtualOffice({
       });
 
       onSocketReady(null);
+      renegotiatePeersRef.current = null;
       socket.disconnect();
     };
   }, [username]);

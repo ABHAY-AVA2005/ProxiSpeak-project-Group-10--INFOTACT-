@@ -26,7 +26,11 @@ const PROXIMITY_OPTIONS = [50, 75, 100, 150, 200];
 
 function App() {
   const [username, setUsername] = useState(() => sessionStorage.getItem("proxispeak_username") || "");
-  const [roomName, setRoomName] = useState(() => sessionStorage.getItem("proxispeak_room") || "Team Alpha");
+  const [roomName, setRoomName] = useState(() => {
+    const storedRoom = sessionStorage.getItem("proxispeak_room")?.trim().toLowerCase();
+    return baseRooms.find((room) => room.name.toLowerCase() === storedRoom)?.name.toLowerCase()
+      || baseRooms[0].name.toLowerCase();
+  });
   const [activeTab, setActiveTab] = useState("Office");
   const [activeRoom, setActiveRoom] = useState("Meeting Room");
   const [officeRooms] = useState(baseRooms);
@@ -39,6 +43,12 @@ function App() {
   const [presenceSearch, setPresenceSearch] = useState("");
   const [chatMessages, setChatMessages] = useState([]);
   const [draftMessage, setDraftMessage] = useState("");
+  const [chatConnected, setChatConnected] = useState(false);
+  const [chatRoomReady, setChatRoomReady] = useState(false);
+  const [chatServerOutdated, setChatServerOutdated] = useState(false);
+  const [chatSending, setChatSending] = useState(false);
+  const [chatError, setChatError] = useState("");
+  const [chatScope, setChatScope] = useState("room");
   const [earshotRadius, setEarshotRadius] = useState(100);
   const [proximityOpen, setProximityOpen] = useState(false);
   const [nearbyVoicesExpanded, setNearbyVoicesExpanded] = useState(false);
@@ -48,9 +58,13 @@ function App() {
     desktopAlerts: true, screenShare: false, doNotDisturb: false,
   });
   const [notifications, setNotifications] = useState([]);
+  const [presenceClock, setPresenceClock] = useState(0);
   const screenShareVideoRef = useRef(null);
   const [screenShareStream, setScreenShareStream] = useState(null);
+  const [remoteScreenShare, setRemoteScreenShare] = useState(null);
   const socketRef = useRef(null);
+  const chatScopeRef = useRef("room");
+  const chatListRef = useRef(null);
 
   const {
     localStream, isMuted, permissionGranted, error,
@@ -61,9 +75,24 @@ function App() {
   useEffect(() => {
     const video = screenShareVideoRef.current;
     if (!video) return;
-    if (screenShareStream) { video.srcObject = screenShareStream; video.play().catch(() => undefined); }
+    const stream = screenShareStream || remoteScreenShare?.stream;
+    if (stream) { video.srcObject = stream; video.play().catch((err) => console.warn("Screen share playback was blocked:", err)); }
     else { video.srcObject = null; }
-  }, [screenShareStream]);
+  }, [screenShareStream, remoteScreenShare]);
+
+  useEffect(() => {
+    const initialTimer = window.setTimeout(() => setPresenceClock(Date.now()), 0);
+    const timer = window.setInterval(() => setPresenceClock(Date.now()), 60_000);
+    return () => {
+      window.clearTimeout(initialTimer);
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  useEffect(() => {
+    const list = chatListRef.current;
+    if (list) list.scrollTop = list.scrollHeight;
+  }, [chatMessages]);
 
   const selfStatus = settings.doNotDisturb ? "Do Not Disturb" : settings.focusMode ? "Focus" : "Available";
   const presenceUsers = useMemo(() => {
@@ -82,7 +111,7 @@ function App() {
   }, [presenceSearch, presenceUsers]);
 
   const handleJoin = (name, room) => {
-    const cleanRoom = (room || "Team Alpha").trim() || "Team Alpha";
+    const cleanRoom = room.trim().toLowerCase();
     const cleanName = (name || "").trim();
     sessionStorage.setItem("proxispeak_username", cleanName);
     sessionStorage.setItem("proxispeak_room", cleanRoom);
@@ -92,10 +121,13 @@ function App() {
   };
 
   const handleLeave = () => {
+    screenShareStream?.getTracks().forEach((track) => track.stop());
+    setScreenShareStream(null);
+    setRemoteScreenShare(null);
     sessionStorage.removeItem("proxispeak_username");
     sessionStorage.removeItem("proxispeak_room");
     setUsername("");
-    setRoomName("Team Alpha");
+    setRoomName(baseRooms[0].name.toLowerCase());
     setActiveRoom("Meeting Room");
     setActiveTab("Office");
   };
@@ -119,46 +151,135 @@ function App() {
 
   const handleChatMessage = (msg) => {
     if (!msg || !msg.text) return;
-    const isSelf = msg.sender === username;
-    setChatMessages(c => [
-      ...c,
-      {
-        id: msg.id || Date.now(),
+    const isSelf = msg.senderId
+      ? msg.senderId === socketRef.current?.id
+      : msg.sender === username;
+    setChatMessages((current) => {
+      if (msg.id && current.some((message) => message.id === msg.id)) return current;
+      return [...current, {
+        id: msg.id || `${Date.now()}-${Math.random()}`,
+        isSelf,
+        scope: msg.scope,
         sender: isSelf ? "You" : msg.sender,
         text: msg.text,
         time: msg.time
           ? new Date(msg.time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
           : "Now",
-      },
-    ]);
+      }];
+    });
     if (!isSelf && activeTab !== "Chat") {
       addNotification("New Chat Message", `${msg.sender}: ${msg.text.slice(0, 35)}`);
     }
+  };
+
+  const handleToggleChatScope = () => {
+    const nextScope = chatScopeRef.current === "room" ? "all" : "room";
+    chatScopeRef.current = nextScope;
+    setChatScope(nextScope);
+    setChatError("");
+    const socket = socketRef.current;
+    if (!socket?.connected) return;
+
+    socket.timeout(5000).emit("chat:history", { scope: nextScope }, (error, response) => {
+      if (error || !response?.ok) {
+        setChatError("Could not load this chat history. Please try again.");
+        return;
+      }
+      if (nextScope !== chatScopeRef.current) return;
+      setChatMessages((current) => {
+        const history = response.messages.map((message) => ({
+          id: message.id,
+          isSelf: message.senderId === socket.id,
+          sender: message.senderId === socket.id ? "You" : message.sender,
+          text: message.text,
+          time: message.time
+            ? new Date(message.time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+            : "Now",
+        }));
+        const messageIds = new Set(history.map((message) => message.id));
+        const arrivedWhileLoading = current.filter((message) =>
+          message.scope === nextScope && !messageIds.has(message.id)
+        );
+        return [...history, ...arrivedWhileLoading];
+      });
+    });
   };
 
   const handleSendMessage = (e) => {
     e.preventDefault();
     const trimmed = draftMessage.trim();
     if (!trimmed) return;
-    if (socketRef.current && socketRef.current.connected) {
-      socketRef.current.emit("chat:message", { text: trimmed });
-    } else {
-      setChatMessages(c => [...c, { id: Date.now(), sender: "You", text: trimmed, time: "Now" }]);
+    if (!socketRef.current?.connected) {
+      setChatError("Chat is reconnecting. Please try again when you are back online.");
+      return;
     }
-    setDraftMessage("");
+    setChatSending(true);
+    setChatError("");
+    socketRef.current.timeout(5000).emit(
+      "chat:message",
+      { text: trimmed, scope: chatScopeRef.current },
+      (error, response) => {
+      setChatSending(false);
+      if (error || !response?.ok) {
+        setChatError(chatServerOutdated
+          ? "The chat server needs its latest update before messages can be delivered."
+          : "Message could not be sent. Please try again.");
+        return;
+      }
+      setDraftMessage((current) => current === trimmed ? "" : current);
+      }
+    );
+  };
+
+  const handleToggleScreenShare = async () => {
+    if (screenShareStream) {
+      screenShareStream.getTracks().forEach((track) => track.stop());
+      setScreenShareStream(null);
+      return;
+    }
+
+    if (!navigator.mediaDevices?.getDisplayMedia) {
+      console.warn("Screen sharing is not supported by this browser.");
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+      const track = stream.getVideoTracks()[0];
+      if (!track) {
+        stream.getTracks().forEach((mediaTrack) => mediaTrack.stop());
+        throw new Error("No screen video track was provided.");
+      }
+      track.addEventListener("ended", () => {
+        setScreenShareStream((current) => current === stream ? null : current);
+      }, { once: true });
+      setScreenShareStream(stream);
+    } catch (error) {
+      if (error.name !== "NotAllowedError") {
+        console.error("Unable to start screen sharing:", error);
+      }
+    }
+  };
+
+  const handleRemoteScreenShareChange = (share) => {
+    setRemoteScreenShare((current) => {
+      if (!share?.stream) return current?.socketId === share?.socketId ? null : current;
+      return share;
+    });
   };
 
   const handleToggleSetting = (key) => {
     setSettings(c => ({ ...c, [key]: !c[key] }));
   };
 
-  const timeAgo = (index) => {
-    const mins = [0, 12, 14, 20, 25, 30, 32, 40, 42];
-    const m = mins[index % mins.length];
-    return m === 0 ? "Near You" : `${m}m ago`;
+  const timeAgo = (user) => {
+    if (user.isSelf) return "Near You";
+    if (!Number.isFinite(user.joinedAt)) return "Online";
+    const minutes = Math.max(0, Math.floor((presenceClock - user.joinedAt) / 60_000));
+    return minutes === 0 ? "Just now" : `${minutes}m ago`;
   };
 
-  if (!username) return <JoinScreen onJoin={handleJoin} />;
+  if (!username) return <JoinScreen onJoin={handleJoin} rooms={officeRooms} />;
 
   return (
     <div className={`proxi-app-shell theme-${themeMode}`}>
@@ -214,7 +335,7 @@ function App() {
         <header className="app-top-header">
           <div className="header-left">
             <button className="team-selector-btn">
-              <span className="team-dot" />Team Alpha <span className="caret-icon">▾</span>
+              <span className="team-dot" />{roomName} <span className="caret-icon">▾</span>
             </button>
             <button className="online-count-btn">
               <span className="users-icon">👥</span>{presenceUsers.length} Online
@@ -270,7 +391,28 @@ function App() {
                   localStream={localStream}
                   onUsersChange={handleUsersChange}
                   onChatMessage={handleChatMessage}
-                  onSocketReady={(sock) => { socketRef.current = sock; }}
+                  onSocketReady={(sock, history = [], roomReady = false, serverOutdated = false, meetingHistory = []) => {
+                    socketRef.current = sock;
+                    setChatConnected(Boolean(sock?.connected));
+                    setChatRoomReady(roomReady);
+                    setChatServerOutdated(serverOutdated);
+                    if (sock && roomReady) {
+                      const messages = chatScopeRef.current === "all" ? meetingHistory : history;
+                      setChatMessages(messages.map((message) => ({
+                        id: message.id,
+                        isSelf: message.senderId === sock.id,
+                        sender: message.senderId === sock.id ? "You" : message.sender,
+                        scope: message.scope || (chatScopeRef.current === "all" ? "all" : "room"),
+                        text: message.text,
+                        time: message.time
+                          ? new Date(message.time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+                          : "Now",
+                      })));
+                    }
+                  }}
+                  roomName={roomName}
+                  screenShareStream={screenShareStream}
+                  onRemoteScreenShareChange={handleRemoteScreenShareChange}
                   meetingRooms={officeRooms}
                   spawnRoom={activeRoom}
                   avatarColor={avatarColor}
@@ -300,18 +442,61 @@ function App() {
                   )}
                   {activeTab === "Chat" && (
                     <div className="workspace-card chat-card">
-                      <div className="card-header-row"><h2>Workspace chat</h2><span>Live</span></div>
-                      <div className="chat-list">
+                      <div className="card-header-row">
+                        <div>
+                          <h2>Workspace chat</h2>
+                          <small>{chatScope === "all" ? "Everyone in the meeting" : `Room: ${roomName}`}</small>
+                        </div>
+                        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                          <span>
+                            {!chatConnected
+                              ? "Offline"
+                              : chatServerOutdated
+                                ? "Server update needed"
+                                : chatRoomReady
+                                  ? "Live"
+                                  : "Joining room..."}
+                          </span>
+                          <button type="button" className="primary-button" onClick={handleToggleScreenShare}>
+                            {screenShareStream ? "Stop sharing" : "Share screen"}
+                          </button>
+                        </div>
+                      </div>
+                      {screenShareStream || remoteScreenShare?.stream ? (
+                        <div className="screen-share-panel">
+                          <div className="card-header-row">
+                            <strong>{screenShareStream ? "Your screen" : `${remoteScreenShare.username || "Teammate"}'s screen`}</strong>
+                          </div>
+                          <video
+                            ref={(video) => {
+                              screenShareVideoRef.current = video;
+                              const stream = screenShareStream || remoteScreenShare?.stream;
+                              if (video && stream && video.srcObject !== stream) {
+                                video.srcObject = stream;
+                                video.play().catch((err) => console.warn("Screen share playback was blocked:", err));
+                              }
+                            }}
+                            autoPlay
+                            playsInline
+                            muted
+                            className="screen-share-video"
+                          />
+                        </div>
+                      ) : null}
+                      <div className="chat-list" ref={chatListRef}>
                         {chatMessages.map(m => (
-                          <div key={m.id} className={`chat-item ${m.sender === "You" ? "self" : ""}`}>
+                          <div key={m.id} className={`chat-item ${m.isSelf ? "self" : ""}`}>
                             <div className="chat-bubble"><strong>{m.sender}</strong><p>{m.text}</p><small>{m.time}</small></div>
                           </div>
                         ))}
                       </div>
                       <form onSubmit={handleSendMessage} className="chat-form">
-                        <input type="text" value={draftMessage} onChange={e => setDraftMessage(e.target.value)} placeholder="Write a message..." />
-                        <button type="submit">Send</button>
+                        <input type="text" value={draftMessage} onChange={e => { setDraftMessage(e.target.value); setChatError(""); }} placeholder="Write a message..." maxLength={2000} />
+                        <button type="submit" disabled={!chatConnected || chatSending || !draftMessage.trim()}>
+                          {chatSending ? "Sending..." : "Send"}
+                        </button>
                       </form>
+                      {chatError && <p role="status" className="chat-error">{chatError}</p>}
                     </div>
                   )}
                   {activeTab === "Meetings" && (
@@ -399,6 +584,16 @@ function App() {
                 ⚙
               </button>
 
+              <button
+                type="button"
+                className={`chat-mode-toggle ${chatScope === "all" ? "active" : ""}`}
+                onClick={handleToggleChatScope}
+                aria-pressed={chatScope === "all"}
+                title={`Switch to ${chatScope === "room" ? "all meeting" : "room"} chat`}
+              >
+                {chatScope === "room" ? "Room chat" : "All chat"}
+              </button>
+
               <button className="voice-btn end-btn" onClick={handleLeave} title="Leave office">
                 📞
               </button>
@@ -466,7 +661,7 @@ function App() {
               {filteredUsers.map((user, index) => {
                 const name = user.username || `Guest ${index + 1}`;
                 const accent = user.isSelf ? "purple" : palette[index % palette.length];
-                const ago = timeAgo(index);
+                const ago = timeAgo(user);
                 return (
                   <div className="presence-item" key={user.socketId || `${name}-${index}`}>
                     <div className="presence-avatar-wrapper">

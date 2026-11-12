@@ -36,6 +36,10 @@ import {
 export const proximityQueues = new Map(); // socketId -> Promise
 export const pendingPositions = new Map(); // socketId -> user
 export const lastEvaluatedPositions = new Map(); // socketId -> { x, y }
+const roomChatHistory = new Map();
+const meetingChatHistory = [];
+const MAX_ROOM_CHAT_MESSAGES = 500;
+const MEETING_CHAT_ROOM = "office:all";
 
 /**
  * Resets all proximity queue state (useful for tests and restarts)
@@ -250,14 +254,26 @@ export function setupSocketHandlers(io) {
      * User joins world
      * Payload: { username?: string, x?: number, y?: number }
      */
-    socket.on("join", async (payload = {}) => {
+    socket.on("join", async (payload = {}, acknowledge) => {
       // Guard against non-object payloads
       if (typeof payload !== "object" || payload === null) {
         payload = {};
       }
 
       const { username, x, y } = payload;
+      const roomName = typeof payload.roomName === "string" && payload.roomName.trim()
+        ? payload.roomName.trim().toLowerCase().slice(0, 40)
+        : "default-room";
       const newUser = addUser(socket.id, username, x, y);
+      socket.data.username = newUser.username;
+      socket.data.roomName = roomName;
+      try {
+        await Promise.all([socket.join(roomName), socket.join(MEETING_CHAT_ROOM)]);
+      } catch (error) {
+        console.error(`[Socket] Failed to join room '${roomName}':`, error);
+        if (typeof acknowledge === "function") acknowledge({ ok: false });
+        return;
+      }
 
       console.log(`[User Joined] ${newUser.username} (${newUser.socketId}) at [${newUser.x}, ${newUser.y}]`);
 
@@ -273,8 +289,71 @@ export function setupSocketHandlers(io) {
       // Publish join to Redis for cross-instance position sharing
       publishUserJoin(newUser);
 
+      if (typeof acknowledge === "function") {
+        acknowledge({
+          ok: true,
+          roomName,
+          chatMessages: roomChatHistory.get(roomName) || [],
+          meetingChatMessages: meetingChatHistory
+        });
+      }
+
       // 4. Calculate and emit initial proximity enter diffs on join
       await queueProximityCheck(socket, newUser);
+    });
+
+    socket.on("chat:message", (payload = {}, acknowledge) => {
+      const respond = (result) => {
+        if (typeof acknowledge === "function") acknowledge(result);
+      };
+      if (typeof payload.text !== "string") {
+        respond({ ok: false, error: "invalid-message" });
+        return;
+      }
+      const text = payload.text.trim();
+      const roomName = socket.data.roomName;
+      const scope = payload.scope === "all" ? "all" : "room";
+      if (!text || text.length > 2000 || !roomName || !socket.data.username) {
+        respond({ ok: false, error: "invalid-message" });
+        return;
+      }
+
+      const message = {
+        id: `${socket.id}:${Date.now()}`,
+        senderId: socket.id,
+        sender: socket.data.username || "Guest",
+        scope,
+        roomName,
+        text,
+        time: new Date().toISOString()
+      };
+      if (scope === "all") {
+        meetingChatHistory.push(message);
+        if (meetingChatHistory.length > MAX_ROOM_CHAT_MESSAGES) meetingChatHistory.shift();
+        io.to(MEETING_CHAT_ROOM).emit("chat:message", message);
+      } else {
+        const history = roomChatHistory.get(roomName) || [];
+        history.push(message);
+        if (history.length > MAX_ROOM_CHAT_MESSAGES) history.shift();
+        roomChatHistory.set(roomName, history);
+        io.to(roomName).emit("chat:message", message);
+      }
+      respond({ ok: true, id: message.id });
+    });
+
+    socket.on("chat:history", (payload = {}, acknowledge) => {
+      if (typeof acknowledge !== "function") return;
+      const scope = payload.scope === "all" ? "all" : "room";
+      if (!socket.data.roomName || !socket.data.username) {
+        acknowledge({ ok: false, error: "not-in-meeting" });
+        return;
+      }
+      acknowledge({
+        ok: true,
+        messages: scope === "all"
+          ? meetingChatHistory
+          : roomChatHistory.get(socket.data.roomName) || []
+      });
     });
 
     /**
@@ -419,6 +498,13 @@ export function setupSocketHandlers(io) {
      */
     socket.on("disconnect", async (reason) => {
       const removedUser = removeUser(socket.id);
+      const roomName = socket.data.roomName;
+      if (roomName && !io.sockets.adapter.rooms.get(roomName)?.size) {
+        roomChatHistory.delete(roomName);
+      }
+      if (!io.sockets.adapter.rooms.get(MEETING_CHAT_ROOM)?.size) {
+        meetingChatHistory.length = 0;
+      }
       console.log(`[Socket Disconnected] ID: ${socket.id} (Reason: ${reason})`);
 
       if (removedUser) {
@@ -452,6 +538,7 @@ export function setupSocketHandlers(io) {
           });
         }
       }
+
     });
   });
 
