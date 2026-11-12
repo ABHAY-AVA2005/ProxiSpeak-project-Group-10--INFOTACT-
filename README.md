@@ -42,27 +42,28 @@ Visit **`http://localhost:5173`** in two browser windows or on separate laptops 
 
 ---
 
-## ☁️ Deploying to Vercel and Railway
+## ☁️ Deploying to Vercel and Render
 
 The Vite client can be hosted on Vercel. The Express + Socket.IO server must run
-as a persistent service, so deploy it separately to Railway.
+as a Node web service, so deploy it separately to Render.
 
-1. In Railway, create a service from this GitHub repository and set its **Root
-   Directory** to `/server`. The included `server/railway.json` starts the
-   server and configures its `/health` health check. Set `REDIS_ENABLED=false`
-   for a single Railway instance; MongoDB is optional and can be configured
-   with `MONGODB_URI`.
-2. Generate a public domain for the Railway service. Copy its HTTPS origin
-   (for example, `https://your-service.up.railway.app`) and set the service's
-   `CLIENT_URL` to the Vercel site origin once that is available.
+1. In Render, create a Blueprint instance from this GitHub repository. The
+   included `render.yaml` configures the service to use `/server`, start with
+   `npm start`, and expose its `/health` health check. It uses the free plan
+   and disables Redis for a single instance; MongoDB is optional and can be
+   configured with `MONGODB_URI`.
+2. Copy the Render service's public HTTPS URL.
 3. In Vercel, import the same GitHub repository and set **Root Directory** to
    `client`. Vercel uses the client package's `npm run build` script and
-   `dist` output. Set the `VITE_SERVER_URL` environment variable to the
-   Railway HTTPS origin, then deploy or redeploy.
-4. Open the Vercel URL and allow microphone access to test voice features.
+   `dist` output. Set the `VITE_SERVER_URL` environment variable to the Render
+   HTTPS URL, then deploy or redeploy.
+4. Set the Render service's `CLIENT_URL` environment variable to the Vercel
+   site origin and redeploy the Render service.
+5. Open the Vercel URL and allow microphone access to test voice features.
 
-Vercel and Railway must both be configured with the other's public origin for
-the app's Socket.IO connections and cross-origin requests to work.
+Vercel and Render must both be configured with the other's public origin for
+the app's Socket.IO connections and cross-origin requests to work. Render's
+free web service may spin down after inactivity.
 
 ---
 
