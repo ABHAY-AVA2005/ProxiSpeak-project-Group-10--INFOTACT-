@@ -42,6 +42,30 @@ Visit **`http://localhost:5173`** in two browser windows or on separate laptops 
 
 ---
 
+## ☁️ Deploying to Vercel and Railway
+
+The Vite client can be hosted on Vercel. The Express + Socket.IO server must run
+as a persistent service, so deploy it separately to Railway.
+
+1. In Railway, create a service from this GitHub repository and set its **Root
+   Directory** to `/server`. The included `server/railway.json` starts the
+   server and configures its `/health` health check. Set `REDIS_ENABLED=false`
+   for a single Railway instance; MongoDB is optional and can be configured
+   with `MONGODB_URI`.
+2. Generate a public domain for the Railway service. Copy its HTTPS origin
+   (for example, `https://your-service.up.railway.app`) and set the service's
+   `CLIENT_URL` to the Vercel site origin once that is available.
+3. In Vercel, import the same GitHub repository and set **Root Directory** to
+   `client`. Vercel uses the client package's `npm run build` script and
+   `dist` output. Set the `VITE_SERVER_URL` environment variable to the
+   Railway HTTPS origin, then deploy or redeploy.
+4. Open the Vercel URL and allow microphone access to test voice features.
+
+Vercel and Railway must both be configured with the other's public origin for
+the app's Socket.IO connections and cross-origin requests to work.
+
+---
+
 ## 📊 Project Completion Status (Final Release v1.0)
 
 **Release Tag:** `v1.0` | **Passing Automated Tests:** 66/66 (100%)  
