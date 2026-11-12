@@ -1,4 +1,5 @@
 import Redis from "ioredis";
+import { createAdapter } from "@socket.io/redis-adapter";
 import dotenv from "dotenv";
 
 dotenv.config();
@@ -12,7 +13,7 @@ let isInitialized = false;
  * Default Redis configuration
  */
 export const REDIS_CONFIG = Object.freeze({
-  URL: (process.env.REDIS_URL && process.env.REDIS_URL.trim()) || "redis://127.0.0.1:6379",
+  URL: process.env.REDIS_URL?.trim() || null,
   ENABLED: process.env.REDIS_ENABLED !== "false",
   CONNECT_TIMEOUT_MS: 3000,
   MAX_RECONNECT_RETRIES: 3
@@ -31,10 +32,19 @@ export async function initRedis(customOptions = {}) {
   }
 
   const enabled = customOptions.enabled ?? REDIS_CONFIG.ENABLED;
-  const url = (customOptions.url && String(customOptions.url).trim()) || REDIS_CONFIG.URL;
+  const url = (customOptions.url && String(customOptions.url).trim())
+    || process.env.REDIS_URL?.trim()
+    || null;
 
   if (!enabled) {
     console.log("[Redis] Redis scaling is disabled via REDIS_ENABLED=false");
+    isInitialized = true;
+    isConnected = false;
+    return { publisher: null, subscriber: null, isConnected: false };
+  }
+
+  if (!url) {
+    console.warn("[Redis] REDIS_URL is not configured. Operating in standalone single-instance mode.");
     isInitialized = true;
     isConnected = false;
     return { publisher: null, subscriber: null, isConnected: false };
@@ -45,9 +55,14 @@ export async function initRedis(customOptions = {}) {
     await closeRedis();
   }
 
+  const redisOverrides = { ...customOptions };
+  delete redisOverrides.enabled;
+  delete redisOverrides.url;
+  const connectTimeout = redisOverrides.connectTimeout;
+  delete redisOverrides.connectTimeout;
   const clientOptions = {
     lazyConnect: true,
-    connectTimeout: customOptions.connectTimeout ?? REDIS_CONFIG.CONNECT_TIMEOUT_MS,
+    connectTimeout: connectTimeout ?? REDIS_CONFIG.CONNECT_TIMEOUT_MS,
     maxRetriesPerRequest: 1,
     retryStrategy(times) {
       if (times > REDIS_CONFIG.MAX_RECONNECT_RETRIES) {
@@ -56,7 +71,7 @@ export async function initRedis(customOptions = {}) {
       }
       return Math.min(times * 500, 2000);
     },
-    ...customOptions
+    ...redisOverrides
   };
 
   let lastPublisherError = null;
@@ -166,6 +181,24 @@ export function isRedisConnected() {
 }
 
 /**
+ * Attaches the Socket.IO Redis adapter when a Redis service is configured.
+ * The existing publisher and subscriber are also used by the app's custom
+ * cross-instance presence and signaling channels.
+ *
+ * @param {import("socket.io").Server} io
+ * @param {object} [options]
+ * @returns {Promise<boolean>}
+ */
+export async function setupRedisAdapter(io, options = {}) {
+  const { publisher: pub, subscriber: sub, isConnected: connected } = await initRedis(options);
+  if (!connected || !pub || !sub) return false;
+
+  io.adapter(createAdapter(pub, sub));
+  console.log("[Redis] Socket.IO adapter enabled for cross-instance broadcasts");
+  return true;
+}
+
+/**
  * Closes active Redis connections cleanly (useful for tests and graceful shutdown)
  */
 export async function closeRedis() {
@@ -196,3 +229,5 @@ export async function closeRedis() {
 
   await Promise.allSettled(closePromises);
 }
+
+export const closeRedisConnection = closeRedis;

@@ -1,179 +1,160 @@
 # ProxiSpeak
 
-A 2D virtual office where voice chat depends on distance. Move your avatar around a shared office map and connect via WebRTC audio only with people within earshot (100 px).
+**A browser-based virtual office for spatial conversations and remote teamwork.**
+Move through a shared 2D office, talk with nearby teammates, chat with a room or
+the whole meeting, send direct messages, and share your screen.
 
-Built as a 4-person internship project at Infotact Solutions (Group 10).
+## Live app
 
----
+**https://proxi-speak-project-group-10-infota.vercel.app/**
 
-## 🚀 Quick Start (One-Click Launchers)
-
-If you are on Windows, you can start the entire project with a single double-click:
-
-| File | Description |
-|---|---|
-| [`start.bat`](file:///start.bat) | **Standard Launcher** — Verifies Node.js, installs dependencies if missing, and launches both the Backend Server (port 5000) and Frontend Client (`http://localhost:5173`) in parallel. |
-| [`start-multi.bat`](file:///start-multi.bat) | **Multi-Instance Launcher** — Launches 2 separate Node instances (port 5000 and 5001) + Frontend Client to demonstrate Week 3 horizontal scaling. |
-
-### Manual Installation & Running
-
-Prerequisites: Node.js (LTS), a modern browser (Chrome / Edge / Firefox) with microphone permissions enabled.
-
-```bash
-# Clone the repository
-git clone https://github.com/ABHAY-AVA2005/ProxiSpeak-project-Group-10--INFOTACT-.git
-cd ProxiSpeak-project-Group-10--INFOTACT-
-
-# Configure environment variables
-cp .env.example .env
-
-# Start Backend Server (Terminal 1)
-cd server
-npm install
-npm run dev
-
-# Start Frontend Client (Terminal 2)
-cd ../client
-npm install
-npm run dev
-```
-
-Visit **`http://localhost:5173`** in two browser windows or on separate laptops on the same network. Enter usernames and walk within 100 pixels to talk!
-
----
-
-## ☁️ Deploying to Vercel and Render
-
-The Vite client can be hosted on Vercel. The Express + Socket.IO server must run
-as a Node web service, so deploy it separately to Render.
-
-1. In Render, create a Blueprint instance from this GitHub repository. The
-   included `render.yaml` configures the service to use `/server`, start with
-   `npm start`, and expose its `/health` health check. It uses the free plan
-   and disables Redis for a single instance; MongoDB is optional and can be
-   configured with `MONGODB_URI`.
-2. Copy the Render service's public HTTPS URL.
-3. In Vercel, import the same GitHub repository and set **Root Directory** to
-   `client`. Vercel uses the client package's `npm run build` script and
-   `dist` output. Set the `VITE_SERVER_URL` environment variable to the Render
-   HTTPS URL, then deploy or redeploy.
-4. Set the Render service's `CLIENT_URL` environment variable to the Vercel
-   site origin and redeploy the Render service.
-5. Open the Vercel URL and allow microphone access to test voice features.
-
-Vercel and Render must both be configured with the other's public origin for
-the app's Socket.IO connections and cross-origin requests to work. Render's
-free web service may spin down after inactivity.
-
----
-
-## 📊 Project Completion Status (Final Release v1.0)
-
-**Release Tag:** `v1.0` | **Passing Automated Tests:** 66/66 (100%)  
-Comprehensive review documentation: [`docs/mid-review.md`](file:///docs/mid-review.md)
-
-| Area | Status | Verified Deliverable |
+| Service | URL | Purpose |
 |---|---|---|
-| Socket.IO Signaling Server | ✅ Implemented | Connect, disconnect, join, users:list, move, user:moved |
-| Server-Side Proximity Diffing | ✅ Implemented | Dynamic earshot boundary detection (`nearby:enter` / `nearby:leave`) |
-| Glare-Free WebRTC Offerer Election | ✅ Implemented | Lower socket ID rule (`shouldInitiateOffer = socketA.id < socketB.id`) |
-| Proximity-Gated Signaling Relay | ✅ Implemented | Server validates distance before forwarding offer, answer, ICE |
-| RAM In-Memory Spatial Engine | ✅ Implemented | $O(1)$ coordinate lookups (< 0.02 ms p95), 60 FPS gameplay |
-| Coordinate Validation & Clamping | ✅ Implemented | Bounds checking ($0 \le x, y \le 2000$), XSS sanitization |
-| Debounced MongoDB Persistence | ✅ Implemented | 1,000 ms debounce, race-safe disconnect cleanup (>95% I/O reduction) |
-| React + HTML5 Canvas World | ✅ Implemented | Modern SaaS top-down floor layout with glass rooms, doorways, 60 FPS |
-| Movement & Pathfinding | ✅ Implemented | A* click-to-walk, obstacle avoidance, directional animations, destination pin |
-| P2P WebRTC Audio | ✅ Implemented | `getUserMedia` mic streaming, peer-to-peer audio mesh |
-| Dynamic Distance Attenuation | ✅ Implemented | Web Audio `GainNode` volume drop-off ($100\%$ at 0 px $\to 0\%$ at max earshot) |
-| Stereo Panning | ✅ Implemented | `StereoPannerNode` directional audio (left/right ear) |
-| Live Text Chat | ✅ Implemented | Room-only and office-wide channels with in-memory history cleared when participants leave |
-| Multi-Instance Clustering & Redis | ✅ Implemented | Dual-server execution & verification with Redis Pub/Sub adapter |
-| UI Controls & Teammate Directory | ✅ Implemented | Floating voice bar (mic, speaker, proximity selector, end-call), Nearby Voices widget |
-| Room Layout Persistence | ✅ Implemented | Room schemas, obstacles, and REST API (`/api/rooms`) |
+| Web app | https://proxi-speak-project-group-10-infota.vercel.app/ | React + Vite frontend hosted on Vercel |
+| Socket server health | [Render health check](https://proxispeak-server-hkvz.onrender.com/health) | Express and Socket.IO backend hosted on Render |
+| Server health | [/health](https://proxispeak-server-hkvz.onrender.com/health) | Backend health and optional-service status |
 
----
+The live app and backend health endpoint were checked on **12 November 2026**.
+The backend reports healthy and Redis connected. MongoDB is not connected;
+database persistence is optional, so chat and presence continue to use
+in-memory state where applicable.
 
-## 🛠️ System Architecture
+## Technology stack
 
-```mermaid
-flowchart LR
-    A[React + Canvas Client] -- move x/y --> B[Socket.io Server]
-    B -- in-memory proximity diff (<0.02ms) --> B
-    B -- 1000ms debounced writes --> C[(MongoDB: 2d Index)]
-    B -- nearby:enter/leave + signaling --> A
-    A <-. WebRTC P2P audio + Web Audio Gain/Pan .-> E[Nearby Clients]
+| Technology | Where it is used |
+|---|---|
+| React 19 | Builds the interactive office, chat, team directory, and call controls as reusable UI components. |
+| JavaScript (ES modules), HTML, and CSS | Client and server application code, page structure, and responsive styling. |
+| Canvas and A* pathfinding | Draws the 2D office and finds routes around furniture and walls when users click to move. |
+| Vite | Runs the client development server and bundles the frontend for production. |
+| Node.js | Runtime for the JavaScript backend. |
+| Express | Provides backend HTTP endpoints, including `/health` and the room list API. |
+| Socket.IO | Maintains realtime connections for presence, movement, chat, and WebRTC signaling. |
+| WebRTC | Connects browsers peer-to-peer for proximity voice and screen sharing; Socket.IO relays signaling, not media. |
+| Redis (Upstash) with `ioredis` and `@socket.io/redis-adapter` | Shares presence, proximity signaling, and Socket.IO broadcasts across backend instances. Production health currently reports Redis connected. |
+| MongoDB with Mongoose (optional) | Provides database persistence when configured. It is not connected in the current production health check. |
+| Vercel | Hosts the built static React/Vite frontend. |
+| Render | Hosts the persistent Node.js/Express/Socket.IO backend. |
+
+## Features
+
+- **Virtual office:** a 2D office map with Meeting Room, Focus Zone, Open
+  Workspace, Lounge, and Pantry.
+- **Movement and pathfinding:** keyboard movement plus click-to-move navigation
+  using the A* pathfinding algorithm to route around office furniture and walls.
+- **Proximity voice:** WebRTC audio connections with adjustable listening
+  distance, volume attenuation, and stereo positioning.
+- **Room chat and All chat:** two audience modes in the chat panel. Room chat
+  follows the room selected when joining; All chat is for everyone in the
+  meeting.
+- **Direct messages:** start a private conversation from the Team directory.
+- **Screen sharing:** share a screen with meeting participants.
+- **Live directory:** see who is online and open a teammate's direct chat.
+- **Office-room selection:** choose a listed office room when joining.
+
+Chat history is held in server memory, not a durable database. Room and meeting
+history is cleared when the last participant leaves its scope; direct-message
+history is cleared when either participant disconnects. A server restart also
+clears in-memory chat. Although Redis is connected in production, direct-message
+recipient lookup and chat history are still process-local; they are not shared
+between backend instances.
+
+## Run locally
+
+**Requirements:** a recent Node.js LTS release and a modern browser. Microphone
+access is required for voice chat; allow it when prompted.
+
+### Windows quick start
+
+Run [`start.bat`](./start.bat) to start the backend and frontend. The client
+opens at `http://localhost:5173`; the server uses port `5000`.
+
+### Manual start
+
+In PowerShell, from the repository root:
+
+```powershell
+Copy-Item .env.example server\.env
+Set-Location server
+npm install
+npm run dev
 ```
 
-### Signaling Sequence
+In a second terminal:
 
-```mermaid
-sequenceDiagram
-    autonumber
-    actor A as Alice (Client A)
-    participant S as Signaling Server
-    actor B as Bob (Client B)
-
-    A->>S: move { x: 100, y: 100 }
-    Note over S: Proximity diff: Alice & Bob within 100px earshot
-    Note over S: Offerer Election: Alice ID < Bob ID
-    S->>A: nearby:enter { peer: Bob, shouldInitiateOffer: true }
-    S->>B: nearby:enter { peer: Alice, shouldInitiateOffer: false }
-
-    A->>S: webrtc:offer { targetId: "Bob", sdp }
-    S->>S: Validate dist(Alice, Bob) <= 100px
-    S->>B: webrtc:offer { senderId: "Alice", sdp }
-
-    B->>S: webrtc:answer { targetId: "Alice", sdp }
-    S->>S: Validate dist(Alice, Bob) <= 100px
-    S->>A: webrtc:answer { senderId: "Bob", sdp }
-
-    Note over A,B: P2P Audio Connected! GainNode attenuates volume by distance.
+```powershell
+Set-Location client
+npm install
+npm run dev
 ```
 
----
+Open `http://localhost:5173`. To try the live office with other people, use
+separate browser profiles or devices and join the same room.
 
-## 🧪 Testing & Benchmarks
+## Deployment
 
-Run automated tests from the `/server` directory:
+The frontend and realtime backend are separate services:
 
-```bash
-# Run all 66 unit & integration tests
+- **Vercel** builds the `client` directory and serves the static Vite app.
+- **Render** runs the persistent Express + Socket.IO server from `server`.
+
+The live URLs, required environment variables, health checks, and redeployment
+steps are documented in [Deployment guide](./docs/DEPLOYMENT.md). Keep
+environment secrets in the hosting provider's environment settings, not in
+Git.
+
+## Development and tests
+
+Build and lint the frontend:
+
+```powershell
+Set-Location client
+npm run build
+npm run lint
+```
+
+Run backend tests:
+
+```powershell
+Set-Location server
 npm test
+```
 
-# Run multi-instance verification test (dual Node instances)
+Other useful backend checks:
+
+```powershell
 npm run test:multi-instance
-
-# Run multi-client movement simulation
 npm run test:clients
-
-# Run spatial engine latency audit (10 to 200 concurrent users)
 npm run audit:spatial
 ```
 
-### Spatial Benchmark Latency (< 20 ms Target)
-| Concurrent Users | Proximity Avg (ms) | Proximity p95 (ms) | Clustering Avg (ms) | Clustering p95 (ms) | Target Met? |
-|:---:|:---:|:---:|:---:|:---:|:---:|
-| **25** | 0.0063 | 0.0089 | 0.0106 | 0.0120 | ✅ Yes (<20ms) |
-| **50** | 0.0065 | 0.0091 | 0.0434 | 0.0696 | ✅ Yes (<20ms) |
-| **100** | 0.0106 | 0.0186 | 0.2378 | 0.3553 | ✅ Yes (<20ms) |
-| **200** | 0.0207 | 0.0317 | 0.9817 | 1.3458 | ✅ Yes (<20ms) |
+The multi-instance checks require a reachable Redis service and
+`REDIS_ENABLED=true`. See the [deployment guide](./docs/DEPLOYMENT.md) to
+configure Upstash and verify Redis in production.
 
----
+## Architecture
 
-## 👥 Team & Responsibilities
+```mermaid
+flowchart LR
+    Browser[React + Canvas client] <-->|Socket.IO: presence, movement, chat, signaling| Server[Express + Socket.IO server]
+    Browser <-->|WebRTC peer-to-peer audio and screen share| Peers[Other browsers]
+    Server -. optional persistence .-> MongoDB[(MongoDB)]
+    Server -. optional cross-instance events .-> Redis[(Redis)]
+```
 
-| Member | Role | Primary Responsibilities |
-|---|---|---|
-| **Abhay Varshit Aripirala** | Team Lead & Backend Lead | Socket.IO signaling server, WebRTC relay, proximity diffing, glare prevention, multi-instance clustering, merge integration. |
-| **Tanvi Dighe** | Frontend Lead | React & HTML5 Canvas world, avatar movement, wall collision detection, 60 FPS loop. |
-| **Abhishek Bhalla** | Frontend Audio Lead | WebRTC `getUserMedia`, `RTCPeerConnection`, Web Audio API `GainNode` and `StereoPannerNode`. |
-| **Kajal Kumari Singh** | Backend & Database Lead | MongoDB schemas, `2d` spatial indexing, debounced persistence, spatial benchmarks (`audit:spatial`), Redis Pub/Sub. |
+The server validates signaling and coordinates presence. Audio and screen-share
+media are negotiated between browsers using WebRTC. MongoDB persistence and
+Redis cross-instance coordination are optional; check `/health` to see whether
+they are connected in a particular deployment.
 
----
+## Project documentation
 
-## 📄 Key Project Documentation
-- **Mid-Review Document:** [`docs/mid-review.md`](file:///docs/mid-review.md) *(Weekly work done, architecture diagrams, and comprehensive viva Q&A)*
-- **Team Plan & Roles:** [`docs/context/02_TEAM_PLAN.md`](file:///docs/context/02_TEAM_PLAN.md)
-- **Mid-Review Checklist:** [`docs/mid-review-checklist.md`](file:///docs/mid-review-checklist.md)
-- **Spatial Benchmark Methodology:** [`docs/benchmarks.md`](file:///docs/benchmarks.md)
-- **Database Schema Reference:** [`docs/database-schema.md`](file:///docs/database-schema.md)
+- [Deployment guide](./docs/DEPLOYMENT.md) — hosting layout, configuration,
+  health checks, and troubleshooting.
+- [Progress log](./docs/context/06_PROGRESS_LOG.md) — dated project status and
+  historical milestones.
+- [Project brief](./docs/context/01_PROJECT_BRIEF.md) — original goals and
+  requirements.
+- [Database schema](./docs/database-schema.md) — persistence model and indexes.
+- [Redis scaling](./docs/REDIS_SCALING.md) — optional multi-instance design.
+- [Mid-review checklist](./docs/mid-review-checklist.md) — review materials.

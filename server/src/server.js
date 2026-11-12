@@ -6,7 +6,7 @@ import cors from "cors";
 import { setupSocketHandlers } from "./sockets/socketHandler.js";
 import { getUserCount } from "./services/userManager.js";
 import { connectDB, isDbConnected, closeDB } from "./config/db.js";
-import { initRedis, isRedisConnected, closeRedis } from "./config/redis.js";
+import { setupRedisAdapter, isRedisConnected, closeRedis } from "./config/redis.js";
 import { SERVER_ID } from "./services/redisSync.js";
 import { listRooms } from "./services/roomService.js";
 
@@ -75,11 +75,12 @@ const io = new Server(server, {
   maxHttpBufferSize: 1e5 // 100 KB max socket packet size
 });
 
-// Initialize Redis for multi-instance scaling before setting up socket handlers
+// Initialize Redis and the Socket.IO adapter before registering socket handlers
 try {
-  await initRedis();
+  await setupRedisAdapter(io);
 } catch (err) {
-  console.warn(`[Redis] Initialization failed (${err.message}). Continuing in standalone mode.`);
+  console.error(`[Redis] Adapter initialization failed (${err.message}).`);
+  throw err;
 }
 
 // Register socket handlers (connect, disconnect, join, users:list)

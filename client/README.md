@@ -1,26 +1,41 @@
-# ProxiSpeak Client (React + Vite)
+# ProxiSpeak Client
 
-Frontend web application for ProxiSpeak — a 2D proximity-aware virtual office.
+The React + Vite frontend for the ProxiSpeak virtual office.
 
 ## Features
-- **Modern Virtual Office Canvas**: Realistic top-down office floor plan with labeled rooms (**Meeting Room**, **Focus Zone**, **Open Workspace**, **Lounge**, **Pantry**), glass-like dividers, and walkable doorways.
-- **A\* Pathfinding & Click-to-Move**: Click anywhere on the floor to navigate obstacles automatically with path previews and animated destination markers.
-- **Directional Animations**: Real-time avatar facing angle and movement feedback.
-- **Spatial WebRTC Voice**: Automatic peer connection within customizable proximity distance (50px, 75px, 100px, 150px, 200px) with dynamic volume attenuation.
-- **Floating Audio Dock**: Quick-access controls for Microphone, Speaker, Proximity Range, Settings, and End Call.
-- **Nearby Voices & Live Presence**: Expandable widget showing teammates within earshot and right-side searchable active directory.
 
-## Getting Started
+- Interactive office map with room selection, keyboard movement, and
+  click-to-move navigation.
+- Proximity-based WebRTC voice with adjustable distance and spatial audio.
+- Room chat and All chat modes, plus direct messages from the Team directory.
+- WebRTC screen sharing.
+- Responsive interface, live presence, and teammate directory.
 
-```bash
-# Install dependencies
+## Development
+
+```powershell
 npm install
-
-# Start Vite dev server
 npm run dev
-
-# Production build
-npm run build
 ```
 
-The application runs by default at `http://localhost:5173`.
+Vite serves the app at `http://localhost:5173`. By default, the client connects
+to `http://localhost:5000`. To use another backend, set `VITE_SERVER_URL` in a
+client environment file, for example:
+
+```env
+VITE_SERVER_URL=https://your-server.example.com
+```
+
+Build and lint:
+
+```powershell
+npm run build
+npm run lint
+```
+
+## Production
+
+The deployed client is hosted on
+[Vercel](https://proxi-speak-project-group-10-infota.vercel.app/). Set
+`VITE_SERVER_URL` to the public HTTPS URL of the Socket.IO server. See the
+[deployment guide](../docs/DEPLOYMENT.md) for the full Vercel and Render setup.

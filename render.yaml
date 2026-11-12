@@ -9,6 +9,8 @@ services:
     healthCheckPath: /health
     envVars:
       - key: REDIS_ENABLED
-        value: "false"
+        value: "true"
+      - key: REDIS_URL
+        sync: false
       - key: CLIENT_URL
-        value: "http://localhost:5173"
+        value: "https://proxi-speak-project-group-10-infota.vercel.app"

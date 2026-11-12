@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import brandIcon from "./assets/favicon.png";
 import { JoinScreen } from "./components/JoinScreen";
 import VirtualOffice from "./VirtualOffice";
 import { AudioControls } from "./components/AudioControls";
@@ -363,10 +364,7 @@ function App() {
       {/* ── LEFT SIDEBAR ── */}
       <aside className="proxi-sidebar">
         <div className="brand-block">
-          <div className="brand-signal" aria-hidden="true">
-            <span className="bar bar-1" /><span className="bar bar-2" />
-            <span className="bar bar-3" /><span className="bar bar-4" />
-          </div>
+          <img className="brand-signal" src={brandIcon} alt="" />
           <div className="brand-text">
             <h1>ProxiSpeak</h1>
             <span>Virtual Office</span>
@@ -700,7 +698,9 @@ function App() {
               </button>
 
               <button className="voice-btn end-btn" onClick={handleLeave} title="Leave office">
-                📞
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M12 9c-1.6 0-3.15.25-4.6.72v3.1c0 .39-.23.74-.56.9-.98.49-1.87 1.12-2.65 1.87-.18.18-.42.28-.68.28-.28 0-.52-.11-.71-.29L.29 12.88a.996.996 0 0 1 0-1.41C3.34 8.44 7.46 6.5 12 6.5s8.66 1.94 11.71 4.97c.39.39.39 1.02 0 1.41l-2.5 2.5a.996.996 0 0 1-.71.29c-.26 0-.5-.1-.68-.28a11.8 11.8 0 0 0-2.65-1.87.996.996 0 0 1-.56-.9v-3.1C15.15 9.25 13.6 9 12 9Z" />
+                </svg>
               </button>
             </div>
           </section>

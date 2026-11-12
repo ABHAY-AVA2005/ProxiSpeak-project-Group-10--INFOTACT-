@@ -41,7 +41,7 @@ html, body, #root {
 }
 
 #root {
-  width: 80%;
+  width: 100%;
   min-height: 100vh;
   zoom: 0.8;
 }
@@ -89,21 +89,12 @@ input { outline: none; border: none; }
 }
 
 .brand-signal {
-  width: 32px; height: 32px;
-  display: flex; align-items: flex-end; justify-content: center;
-  gap: 3px; padding-bottom: 4px;
+  width: 36px; height: 36px;
+  display: block;
   border-radius: 8px;
-  background: rgba(99,80,255,0.15);
+  object-fit: cover;
   flex-shrink: 0;
 }
-.brand-signal .bar {
-  width: 4px; border-radius: 99px; display: block;
-  background: linear-gradient(180deg, #fff 0%, rgba(120,100,255,0.4) 100%);
-}
-.bar-1 { height: 10px; }
-.bar-2 { height: 16px; }
-.bar-3 { height: 22px; }
-.bar-4 { height: 14px; }
 
 .brand-text { display: flex; flex-direction: column; }
 .brand-text h1 {
@@ -382,7 +373,13 @@ input { outline: none; border: none; }
 .mic-btn.muted { background: rgba(100,100,120,0.5); box-shadow: none; }
 .speaker-btn { background: rgba(255,255,255,0.85); color: #333; border: 1px solid rgba(0,0,0,0.1); box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
 .settings-btn { background: rgba(255,255,255,0.85); color: #333; border: 1px solid rgba(0,0,0,0.1); box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
-.end-btn { background: #ef4444; color: #fff; box-shadow: 0 4px 14px rgba(239,68,68,0.5); }
+.end-btn {
+  background: #b91c1c;
+  color: #fff;
+  box-shadow: 0 3px 8px rgba(127,29,29,0.28);
+}
+.end-btn:hover { background: #991b1b; }
+.end-btn svg { width: 21px; height: 21px; fill: currentColor; }
 
 .proximity-wrapper { position: relative; }
 .proximity-selector-btn {

@@ -66,7 +66,7 @@ export async function setupRedisSync(io) {
 }
 
 /**
- * Dispatches an incoming Redis Pub/Sub message to local Socket.IO clients and remote user state.
+ * Updates remote user state and forwards server-directed signaling/proximity events.
  * Exported separately to enable thorough, isolated contract testing without network dependencies.
  *
  * @param {string} channel - Channel name
@@ -92,48 +92,21 @@ export function processIncomingSyncMessage(channel, rawMessage, io = null) {
 
   if (channel === REDIS_CHANNELS.POSITIONS) {
     if (data.event === "user:moved" && data.socketId) {
-      let existingRemote = getRemoteUser(data.socketId);
-      if (!existingRemote) {
-        existingRemote = addRemoteUser(data.socketId, data.username, data.x, data.y, data.serverId);
+      if (!getRemoteUser(data.socketId)) {
+        addRemoteUser(data.socketId, data.username, data.x, data.y, data.serverId);
       } else {
         updateRemoteUserPosition(data.socketId, data.x, data.y);
       }
 
-      // Broadcast remote movement to all locally connected sockets
-      if (io) {
-        io.emit("user:moved", {
-          socketId: data.socketId,
-          id: data.socketId,
-          username: data.username || existingRemote?.username,
-          x: data.x,
-          y: data.y
-        });
-      }
       return data;
     }
   } else if (channel === REDIS_CHANNELS.LIFECYCLE) {
     if (data.event === "user:joined" && data.socketId) {
       addRemoteUser(data.socketId, data.username, data.x, data.y, data.serverId);
 
-      if (io) {
-        io.emit("user:joined", {
-          socketId: data.socketId,
-          id: data.socketId,
-          username: data.username,
-          x: data.x,
-          y: data.y
-        });
-      }
       return data;
     } else if (data.event === "user:left" && data.socketId) {
       removeRemoteUser(data.socketId);
-
-      if (io) {
-        io.emit("user:left", {
-          socketId: data.socketId,
-          id: data.socketId
-        });
-      }
       return data;
     }
   } else if (channel === REDIS_CHANNELS.SIGNALING) {
@@ -167,6 +140,8 @@ export function processIncomingSyncMessage(channel, rawMessage, io = null) {
       }
       return data;
     } else if (data.event === "proximity:enter" && data.peer) {
+      if (!isLocalUser(data.targetId)) return null;
+
       let peerSet = userNearbyMap.get(data.targetId);
       if (!peerSet) {
         peerSet = new Set();
@@ -179,6 +154,8 @@ export function processIncomingSyncMessage(channel, rawMessage, io = null) {
       }
       return data;
     } else if (data.event === "proximity:leave" && data.peerId) {
+      if (!isLocalUser(data.targetId)) return null;
+
       const peerSet = userNearbyMap.get(data.targetId);
       if (peerSet) {
         peerSet.delete(data.peerId);

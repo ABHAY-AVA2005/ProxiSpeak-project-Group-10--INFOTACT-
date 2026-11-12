@@ -4,12 +4,32 @@
 
 ---
 
+## Current project snapshot — 12 November 2026
+
+This snapshot describes the current repository and live deployment. The dated
+entries below remain the historical internship progress log.
+
+- **Live frontend:** [ProxiSpeak on Vercel](https://proxi-speak-project-group-10-infota.vercel.app/).
+- **Realtime backend:** [Render service](https://proxispeak-server-hkvz.onrender.com); [health endpoint](https://proxispeak-server-hkvz.onrender.com/health).
+- **Deployment check:** frontend and backend health endpoint both returned HTTP 200 on 12 November 2026. The health response reported Redis and MongoDB disconnected; the backend was operating without those optional services.
+- **Implemented app:** virtual office and movement, proximity-based WebRTC voice, room and all-meeting chat, direct messages, screen sharing, team presence, and office-room selection.
+- **Chat lifecycle:** room and meeting histories are in memory and clear when their last participant leaves; direct history is in memory and tied to connected participants. A server restart clears in-memory histories.
+- **Latest pushed app commit:** `3e6667a` on `main` (direct messaging and chat controls).
+- **Local work not yet pushed at snapshot time:** application page zoom correction, the supplied image used for the favicon and sidebar logo, leave-button contrast updates, and documentation/deployment configuration updates. Do not assume these are included in the live site until pushed and redeployed.
+- **Redis production preparation:** the local server now wires the Socket.IO Redis adapter and the Render Blueprint enables Redis with a secret `REDIS_URL` field. Upstash has not yet been provisioned/configured; the live health endpoint still reports Redis disconnected. Direct-message routing/history also remain process-local.
+- **Recent checks:** the client production build and targeted server chat test passed during the feature work. Verify again after changing code or dependencies.
+
+See the [deployment guide](../DEPLOYMENT.md) for service configuration and redeploy steps.
+
+---
+
 # PART A: Kajal Kumari Singh — Individual Progress Log (`kajal-backend`)
 
-Update this every night before pushing. The AI reads it at the start of each session.
+This section records the historical individual status. See the project snapshot
+at the top of this file for current shared status.
 
-## Current status
-- Current day: Day 24 (Mon 2 Nov 2026)
+## Historical status (2 November 2026)
+- Current day at the time: Day 24 (Mon 2 Nov 2026)
 - Current task (from 02_TEAM_PLAN.md): chore: multi-instance workflow and live Redis verification
 - Blockers: None. Docker Desktop is running with Redis 7 Alpine (`proxispeak-redis`).
 - Week 2 status: COMPLETE — all Week 2 milestones merged into main, tagged v0.2-mid.

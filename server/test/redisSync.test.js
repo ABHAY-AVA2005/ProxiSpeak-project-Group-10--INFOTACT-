@@ -89,7 +89,7 @@ test("RedisSync - processIncomingSyncMessage discards malformed JSON and self-me
   assert.equal(io.emitted.length, 0, "Self messages must not be re-broadcasted");
 });
 
-test("RedisSync - Synchronizes remote user lifecycle (join, move, leave)", () => {
+test("RedisSync - Synchronizes remote user lifecycle without duplicate adapter broadcasts", () => {
   clearRemoteUsers();
   const io = createMockIO();
 
@@ -117,10 +117,6 @@ test("RedisSync - Synchronizes remote user lifecycle (join, move, leave)", () =>
   assert.equal(isRemoteUser("remote-bob"), true);
   assert.equal(isLocalUser("remote-bob"), false);
 
-  assert.equal(io.emitted.length, 1);
-  assert.equal(io.emitted[0].event, "user:joined");
-  assert.equal(io.emitted[0].data.socketId, "remote-bob");
-
   // 2. Remote user moves
   const moveMsg = JSON.stringify({
     event: "user:moved",
@@ -136,11 +132,6 @@ test("RedisSync - Synchronizes remote user lifecycle (join, move, leave)", () =>
   assert.equal(remoteBob.x, 160);
   assert.equal(remoteBob.y, 210);
 
-  assert.equal(io.emitted.length, 2);
-  assert.equal(io.emitted[1].event, "user:moved");
-  assert.equal(io.emitted[1].data.x, 160);
-  assert.equal(io.emitted[1].data.username, "Bob_Remote");
-
   // 3. Remote user leaves
   const leaveMsg = JSON.stringify({
     event: "user:left",
@@ -153,9 +144,7 @@ test("RedisSync - Synchronizes remote user lifecycle (join, move, leave)", () =>
   assert.equal(getRemoteUser("remote-bob"), undefined, "Bob must be removed from remoteUsers store");
   assert.equal(isRemoteUser("remote-bob"), false);
 
-  assert.equal(io.emitted.length, 3);
-  assert.equal(io.emitted[2].event, "user:left");
-  assert.equal(io.emitted[2].data.socketId, "remote-bob");
+  assert.equal(io.emitted.length, 0, "Socket.IO Redis adapter delivers lifecycle broadcasts directly");
 
   clearRemoteUsers();
 });
