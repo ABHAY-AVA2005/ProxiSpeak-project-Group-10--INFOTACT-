@@ -76,10 +76,17 @@ Optional backend environment variables:
 | `REDIS_ENABLED` | Set to `true` to enable Redis Pub/Sub and the Socket.IO adapter. |
 | `MAX_PEERS` | Maximum nearby WebRTC peer connections per participant. |
 | `INSTANCE_ID` | Optional instance label for logs and multi-instance coordination. |
+| `RESEND_API_KEY` | Optional Resend API secret for meeting email invitations. Store it only in Render. |
+| `EMAIL_FROM` | Optional verified sender address configured with Resend. |
 
 Do not commit production connection strings or other secrets. Configure them in
 the Render dashboard. A free Render service may spin down after inactivity, so
 the first request after a quiet period can take longer.
+
+Meeting schedules are shared per room. MongoDB is required for schedules to
+survive backend restarts; if it is disconnected, schedules use server memory.
+Invitation delivery is enabled only when both `RESEND_API_KEY` and `EMAIL_FROM`
+are configured. The API reports when delivery is unavailable or rejected.
 
 ## Enable Upstash Redis
 

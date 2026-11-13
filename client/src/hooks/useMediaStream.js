@@ -73,6 +73,13 @@ export function useMediaStream() {
     }
   }, [localStream]);
 
+  const setMuted = useCallback((muted) => {
+    const audioTrack = localStream?.getAudioTracks()[0];
+    if (!audioTrack) return;
+    audioTrack.enabled = !muted;
+    setIsMuted(Boolean(muted));
+  }, [localStream]);
+
   const toggleSpeakerMute = useCallback(() => {
     setSpeakerEnabled((current) => !current);
   }, []);
@@ -111,6 +118,7 @@ export function useMediaStream() {
     error,
     startAudio,
     toggleMute,
+    setMuted,
     speakerEnabled,
     speakerVolume,
     setSpeakerVolume: updateSpeakerVolume,

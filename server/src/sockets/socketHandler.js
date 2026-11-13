@@ -271,6 +271,7 @@ export function setupSocketHandlers(io) {
         : "default-room";
       const newUser = addUser(socket.id, username, x, y);
       socket.data.username = newUser.username;
+      socket.data.status = "Available";
       socket.data.roomName = roomName;
       try {
         await Promise.all([socket.join(roomName), socket.join(MEETING_CHAT_ROOM)]);
@@ -305,6 +306,60 @@ export function setupSocketHandlers(io) {
 
       // 4. Calculate and emit initial proximity enter diffs on join
       await queueProximityCheck(socket, newUser);
+    });
+
+    socket.on("presence:status", (status) => {
+      if (!socket.data.roomName || !socket.data.username || !["Available", "Focus", "Do Not Disturb"].includes(status)) return;
+      socket.data.status = status;
+      io.to(socket.data.roomName).emit("presence:status", { socketId: socket.id, status });
+    });
+
+    socket.on("meeting:action", (payload = {}) => {
+      const { action, value } = payload && typeof payload === "object" ? payload : {};
+      if (!socket.data.roomName || !socket.data.username) return;
+      const now = Date.now();
+      if (now - (socket.data.lastMeetingActionAt || 0) < 250) return;
+      socket.data.lastMeetingActionAt = now;
+      if (action === "hand" && typeof value === "boolean") {
+        io.to(socket.data.roomName).emit("meeting:action", {
+          socketId: socket.id,
+          username: socket.data.username,
+          action,
+          value
+        });
+        return;
+      }
+      if (action === "reaction" && ["👏", "❤️", "👍"].includes(value)) {
+        io.to(socket.data.roomName).emit("meeting:action", {
+          socketId: socket.id,
+          username: socket.data.username,
+          action,
+          value
+        });
+      }
+    });
+
+    socket.on("office:announcement", (payload = {}, acknowledge) => {
+      const text = typeof payload?.text === "string" ? payload.text.trim() : "";
+      if (!socket.data.roomName || !socket.data.username || !text || text.length > 240) {
+        acknowledge?.({ ok: false, error: "invalid-announcement" });
+        return;
+      }
+      const now = Date.now();
+      if (now - (socket.data.lastAnnouncementAt || 0) < 10_000) {
+        acknowledge?.({ ok: false, error: "Please wait before sending another announcement." });
+        return;
+      }
+      socket.data.lastAnnouncementAt = now;
+      const message = {
+        id: `${socket.id}:${Date.now()}`,
+        socketId: socket.id,
+        username: socket.data.username,
+        text,
+        time: new Date(now).toISOString()
+      };
+      io.to(socket.data.roomName).emit("office:announcement", message);
+      acknowledge?.({ ok: true, id: message.id });
     });
 
     socket.on("chat:message", (payload = {}, acknowledge) => {

@@ -49,15 +49,30 @@ in-memory state where applicable.
   meeting.
 - **Direct messages:** start a private conversation from the Team directory.
 - **Screen sharing:** share a screen with meeting participants.
+- **Meetings:** create a shared room schedule, choose a time and duration, add
+  invitee emails, and remove meetings you created. MongoDB makes schedules
+  durable; without MongoDB, the server uses temporary in-memory storage.
+- **Meeting invitations:** email delivery uses Resend when `RESEND_API_KEY` and
+  `EMAIL_FROM` are configured privately in Render. The UI reports when delivery
+  is not configured or fails.
+- **In-call controls:** per-person volume, microphone and speaker controls,
+  push-to-talk, camera/screen share, raised hands, and reactions.
+- **Office updates:** send room-wide floor announcements, review recent
+  sessions saved in this browser, and rejoin a previously used room.
+- **Map controls:** zoom, grid, fullscreen, live coordinates, click-to-move,
+  and keyboard navigation.
 - **Live directory:** see who is online and open a teammate's direct chat.
 - **Office-room selection:** choose a listed office room when joining.
 
 Chat history is held in server memory, not a durable database. Room and meeting
 history is cleared when the last participant leaves its scope; direct-message
 history is cleared when either participant disconnects. A server restart also
-clears in-memory chat. Although Redis is connected in production, direct-message
-recipient lookup and chat history are still process-local; they are not shared
-between backend instances.
+clears in-memory chat. Scheduled meetings use MongoDB when connected and
+otherwise fall back to server memory, which is not durable across restarts.
+Recent session history and individual volume preferences are local to the
+browser. Although Redis is connected in production, direct-message recipient
+lookup and chat history are still process-local; they are not shared between
+backend instances.
 
 ## Run locally
 

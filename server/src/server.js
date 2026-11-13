@@ -9,6 +9,7 @@ import { connectDB, isDbConnected, closeDB } from "./config/db.js";
 import { setupRedisAdapter, isRedisConnected, closeRedis } from "./config/redis.js";
 import { SERVER_ID } from "./services/redisSync.js";
 import { listRooms } from "./services/roomService.js";
+import { createMeeting, deleteMeeting, listMeetings, sendMeetingInvitations } from "./services/meetingService.js";
 
 const PORT = Number(process.env.PORT) || 5000;
 const CLIENT_URL = process.env.CLIENT_URL || "http://localhost:5173";
@@ -30,7 +31,7 @@ app.disable("x-powered-by");
 app.use(
   cors({
     origin: CLIENT_URL,
-    methods: ["GET", "POST"],
+    methods: ["GET", "POST", "DELETE"],
     credentials: true
   })
 );
@@ -60,6 +61,59 @@ app.get("/health", (req, res) => {
 app.get("/api/rooms", async (_req, res) => {
   const rooms = await listRooms();
   res.json(rooms.map(({ name }) => name));
+});
+
+const meetingRequestCounts = new Map();
+app.get("/api/meetings", async (req, res) => {
+  const roomName = typeof req.query.roomName === "string" ? req.query.roomName.trim().toLowerCase() : "";
+  const ownerId = typeof req.query.ownerId === "string" ? req.query.ownerId : "";
+  if (!roomName || roomName.length > 40) return res.status(400).json({ error: "A valid roomName is required." });
+  try {
+    const meetings = await listMeetings(roomName, ownerId);
+    res.json({ meetings, storage: isDbConnected() ? "mongodb" : "memory" });
+  } catch (error) {
+    res.status(503).json({ error: error.message });
+  }
+});
+
+app.post("/api/meetings", async (req, res) => {
+  const ip = req.ip || req.socket.remoteAddress || "unknown";
+  const identity = typeof req.body?.ownerId === "string" && req.body.ownerId.length >= 24
+    ? req.body.ownerId
+    : ip;
+  const now = Date.now();
+  const hasInvitees = Array.isArray(req.body?.participantEmails) && req.body.participantEmails.length > 0;
+  const rate = meetingRequestCounts.get(identity);
+  if (hasInvitees && rate && now - rate.startedAt < 60 * 60 * 1000 && rate.count >= 10) {
+    return res.status(429).json({ error: "Too many meeting requests. Try again later." });
+  }
+  if (hasInvitees) {
+    if (!rate || now - rate.startedAt >= 60 * 60 * 1000) meetingRequestCounts.set(identity, { startedAt: now, count: 1 });
+    else rate.count += 1;
+  }
+
+  try {
+    const meeting = await createMeeting(req.body);
+    const invitation = await sendMeetingInvitations(meeting);
+    res.status(201).json({
+      meeting,
+      invitationStatus: invitation.status,
+      storage: isDbConnected() ? "mongodb" : "memory"
+    });
+  } catch (error) {
+    const status = error instanceof TypeError ? 400 : 503;
+    res.status(status).json({ error: error.message });
+  }
+});
+
+app.delete("/api/meetings/:id", async (req, res) => {
+  try {
+    const deleted = await deleteMeeting(req.params.id, req.query.ownerId);
+    if (!deleted) return res.status(404).json({ error: "Meeting not found or you do not own it." });
+    res.json({ ok: true });
+  } catch (error) {
+    res.status(503).json({ error: error.message });
+  }
 });
 
 // Create HTTP server & bind Socket.io

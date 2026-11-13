@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { io } from "socket.io-client";
 
 const serverPort = new URLSearchParams(window.location.search).get("server");
@@ -285,21 +285,41 @@ function VirtualOffice({
   earshotRadius = 100,
   localStream = null,
   onUsersChange = () => {},
+  onSpeakingUsersChange = () => {},
   onChatMessage = () => {},
   onSocketReady = () => {},
   roomName = "default-room",
   screenShareStream = null,
+  cameraStream = null,
   onRemoteScreenShareChange = () => {},
+  onPositionChange = () => {},
+  meetingActions = {},
+  peerVolumes = {},
+  speakerEnabled = true,
+  speakerVolume = 100,
   meetingRooms = [],
   spawnRoom = "Open Work",
   avatarColor = "#2563eb",
 }) {
   const canvasRef = useRef(null);
+  const viewportRef = useRef(null);
+  const [positionDisplay, setPositionDisplay] = useState({ x: 160, y: 44 });
+  const [zoom, setZoom] = useState(1);
+  const [gridVisible, setGridVisible] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
+  const zoomRef = useRef(1);
+  const gridVisibleRef = useRef(false);
+  const peerVolumesRef = useRef(peerVolumes);
+  const meetingActionsRef = useRef(meetingActions);
+  const speakerSettingsRef = useRef({ enabled: speakerEnabled, volume: speakerVolume });
   const earshotRef = useRef(earshotRadius);
   const localStreamRef = useRef(localStream);
   const screenShareStreamRef = useRef(screenShareStream);
   const roomNameRef = useRef(roomName);
   const onRemoteScreenShareChangeRef = useRef(onRemoteScreenShareChange);
+  const onSpeakingUsersChangeRef = useRef(onSpeakingUsersChange);
+  const speakingUserIdsRef = useRef(new Set());
+  const speakingLastHeardRef = useRef(new Map());
   const peerConnectionsRef = useRef({});
   const renegotiatePeersRef = useRef(null);
   const pendingCandidatesRef = useRef({});
@@ -316,9 +336,35 @@ function VirtualOffice({
     onRemoteScreenShareChangeRef.current = onRemoteScreenShareChange;
   }, [roomName, onRemoteScreenShareChange]);
   useEffect(() => {
-    screenShareStreamRef.current = screenShareStream;
+    onSpeakingUsersChangeRef.current = onSpeakingUsersChange;
+  }, [onSpeakingUsersChange]);
+  useEffect(() => {
+    screenShareStreamRef.current = screenShareStream || cameraStream;
     renegotiatePeersRef.current?.();
-  }, [screenShareStream]);
+  }, [screenShareStream, cameraStream]);
+  useEffect(() => { zoomRef.current = zoom; }, [zoom]);
+  useEffect(() => { gridVisibleRef.current = gridVisible; }, [gridVisible]);
+  useEffect(() => { peerVolumesRef.current = peerVolumes; }, [peerVolumes]);
+  useEffect(() => { meetingActionsRef.current = meetingActions; }, [meetingActions]);
+  useEffect(() => {
+    speakerSettingsRef.current = { enabled: speakerEnabled, volume: speakerVolume };
+  }, [speakerEnabled, speakerVolume]);
+  useEffect(() => {
+    const handleFullscreenChange = () => setFullscreen(document.fullscreenElement === viewportRef.current);
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
+  }, []);
+  const toggleFullscreen = async () => {
+    try {
+      if (document.fullscreenElement === viewportRef.current) {
+        await document.exitFullscreen();
+      } else {
+        await viewportRef.current?.requestFullscreen();
+      }
+    } catch (error) {
+      console.error("[ProxiSpeak] Could not change map fullscreen state:", error);
+    }
+  };
 
   const player = useRef({ x: 160, y: 44, username });
   const keys = useRef({});
@@ -408,6 +454,8 @@ function VirtualOffice({
   }, [localStream]);
 
   useEffect(() => {
+    const speakingLastHeard = speakingLastHeardRef.current;
+    let isRunning = true;
     const canvas = canvasRef.current;
     const ctx = canvas.getContext("2d");
     canvas.width = WORLD_W;
@@ -454,11 +502,13 @@ function VirtualOffice({
         socketId: id,
         username: user.username || "Guest",
         joinedAt: user.joinedAt,
-        status: "In office",
+        x: user.x,
+        y: user.y,
+        status: user.status || "Available",
       }));
 
       onUsersChange([
-        { socketId: socket.id || "local-user", username, joinedAt: Date.now(), status: "In office", isSelf: true },
+        { socketId: socket.id || "local-user", username, joinedAt: Date.now(), x: player.current.x, y: player.current.y, status: "In office", isSelf: true },
         ...entries,
       ]);
     };
@@ -494,16 +544,22 @@ function VirtualOffice({
       (Array.isArray(list) ? list : Object.values(list || {})).forEach((u) => {
         const id = u.socketId || u.id;
         if (id && id !== socket.id) {
-          remotePlayers.current[id] = { x: u.x, y: u.y, targetX: u.x, targetY: u.y, username: u.username, joinedAt: u.joinedAt };
+          remotePlayers.current[id] = { x: u.x, y: u.y, targetX: u.x, targetY: u.y, username: u.username, joinedAt: u.joinedAt, status: u.status || "Available" };
         }
       });
+      notifyPresence();
+    });
+
+    socket.on("presence:status", ({ socketId, status } = {}) => {
+      if (!socketId || !["Available", "Focus", "Do Not Disturb"].includes(status)) return;
+      if (remotePlayers.current[socketId]) remotePlayers.current[socketId].status = status;
       notifyPresence();
     });
 
     socket.on("user:joined", (u) => {
       const id = u.socketId || u.id;
       if (id && id !== socket.id) {
-        remotePlayers.current[id] = { x: u.x, y: u.y, targetX: u.x, targetY: u.y, username: u.username, joinedAt: u.joinedAt };
+        remotePlayers.current[id] = { x: u.x, y: u.y, targetX: u.x, targetY: u.y, username: u.username, joinedAt: u.joinedAt, status: u.status || "Available" };
       }
       notifyPresence();
     });
@@ -609,7 +665,9 @@ function VirtualOffice({
         const maxDist = earshotRef.current || 100;
         gain = Math.max(0, Math.min(1, 1 - dist / maxDist));
       }
-      audioEl.volume = Math.max(0.01, gain); // Ensure volume is greater than 0
+      const individualVolume = Math.max(0, Math.min(100, Number(peerVolumesRef.current[peerId] ?? 100))) / 100;
+      const masterVolume = speakerSettingsRef.current.enabled ? speakerSettingsRef.current.volume / 100 : 0;
+      audioEl.volume = Math.max(0, Math.min(1, gain * individualVolume * masterVolume));
 
       let mediaStream = stream;
       if (!mediaStream) {
@@ -723,7 +781,9 @@ function VirtualOffice({
         const dist = Math.hypot(peer.x - myX, peer.y - myY);
         // Linear falloff: 1 at dist=0, 0 at dist >= maxDist
         const gain = Math.max(0, Math.min(1, 1 - dist / maxDist));
-        audioEl.volume = gain;
+        const individualVolume = Math.max(0, Math.min(100, Number(peerVolumesRef.current[peerId] ?? 100))) / 100;
+        const masterVolume = speakerSettingsRef.current.enabled ? speakerSettingsRef.current.volume / 100 : 0;
+        audioEl.volume = Math.max(0, Math.min(1, gain * individualVolume * masterVolume));
       });
     }
 
@@ -878,10 +938,13 @@ function VirtualOffice({
     // ── Click-to-move ──────────────────────────────────────────────────────
     const onCanvasClick = (e) => {
       const rect = canvas.getBoundingClientRect();
-      const scaleX = WORLD_W / rect.width;
+        const scaleX = WORLD_W / rect.width;
       const scaleY = WORLD_H / rect.height;
-      let tx = Math.round((e.clientX - rect.left) * scaleX);
-      let ty = Math.round((e.clientY - rect.top) * scaleY);
+      const currentZoom = zoomRef.current;
+      const screenX = (e.clientX - rect.left) * scaleX;
+      const screenY = (e.clientY - rect.top) * scaleY;
+      let tx = Math.round((screenX - WORLD_W / 2) / currentZoom + WORLD_W / 2);
+      let ty = Math.round((screenY - WORLD_H / 2) / currentZoom + WORLD_H / 2);
       tx = Math.max(25, Math.min(WORLD_W - 25, tx));
       ty = Math.max(25, Math.min(WORLD_H - 25, ty));
       const target = { x: tx, y: ty };
@@ -921,13 +984,81 @@ function VirtualOffice({
 
     // ── Game loop ──────────────────────────────────────────────────────────
     let rafId;
-    let isRunning = true;
     let lastEmitTime = 0;
     let lastSentX = player.current.x;
     let lastSentY = player.current.y;
     const SPEED = 3;
     const LERP = 0.2;
     const CLICK_SPEED = 3;
+    let speakingPollInProgress = false;
+
+    const pollSpeakingActivity = async () => {
+      if (speakingPollInProgress) return;
+      speakingPollInProgress = true;
+
+      try {
+        const now = performance.now();
+        const audioStats = await Promise.all(
+          Object.entries(peerConnections).map(async ([peerId, pc]) => {
+            if (pc.connectionState === "closed" || pc.connectionState === "failed") return null;
+            try {
+              return { peerId, reports: await pc.getStats() };
+            } catch {
+              return null;
+            }
+          })
+        );
+        if (!isRunning) return;
+
+        audioStats.forEach((result) => {
+          if (!result) return;
+          result.reports.forEach((report) => {
+            const isAudio = report.kind === "audio" || report.mediaType === "audio";
+            if (!isAudio || typeof report.audioLevel !== "number" || report.audioLevel < 0.025) return;
+
+            if (report.type === "inbound-rtp") {
+              speakingLastHeardRef.current.set(result.peerId, now);
+            } else if (
+              report.type === "media-source" &&
+              localStreamRef.current?.getAudioTracks().some((track) => track.enabled && track.readyState === "live")
+            ) {
+              speakingLastHeardRef.current.set(socket.id, now);
+            }
+          });
+        });
+
+        const activeUsers = new Set(
+          [...speakingLastHeardRef.current]
+            .filter(([id, lastHeard]) => now - lastHeard < 500 && (id === socket.id || remotePlayers.current[id]))
+            .map(([id]) => id)
+        );
+        for (const id of speakingLastHeardRef.current.keys()) {
+          if (!activeUsers.has(id)) speakingLastHeardRef.current.delete(id);
+        }
+
+        const currentUsers = speakingUserIdsRef.current;
+        const hasChanged = activeUsers.size !== currentUsers.size
+          || [...activeUsers].some((id) => !currentUsers.has(id));
+        if (hasChanged) {
+          speakingUserIdsRef.current = activeUsers;
+          onSpeakingUsersChangeRef.current([...activeUsers]);
+        }
+      } finally {
+        speakingPollInProgress = false;
+      }
+    };
+
+    const speakingPollTimer = window.setInterval(pollSpeakingActivity, 180);
+    const positionDisplayTimer = window.setInterval(() => {
+      const position = {
+        x: Math.round(player.current.x),
+        y: Math.round(player.current.y),
+      };
+      setPositionDisplay((current) =>
+        current.x === position.x && current.y === position.y ? current : position
+      );
+      onPositionChange(position);
+    }, 250);
 
     function gameLoop() {
       if (!isRunning) return;
@@ -993,9 +1124,6 @@ function VirtualOffice({
         playerFacing.current.moving = false;
       }
 
-      let movedX = false;
-      let movedY = false;
-
       // Unstuck emergency escape: If player starts or grazes inside an obstacle/wall, smoothly nudge into nearest free space
       if (checkCollision(player.current.x, player.current.y, AVATAR_RADIUS - 4)) {
         const freePoint = findNearestFreePoint(player.current.x, player.current.y, AVATAR_RADIUS - 4);
@@ -1007,14 +1135,12 @@ function VirtualOffice({
         const nx = Math.max(25, Math.min(WORLD_W - 25, player.current.x + dx));
         if (!checkCollision(nx, player.current.y, AVATAR_RADIUS - 4)) {
           player.current.x = nx;
-          movedX = true;
         }
       }
       if (dy !== 0) {
         const ny = Math.max(25, Math.min(WORLD_H - 25, player.current.y + dy));
         if (!checkCollision(player.current.x, ny, AVATAR_RADIUS - 4)) {
           player.current.y = ny;
-          movedY = true;
         }
       }
 
@@ -1103,7 +1229,12 @@ function VirtualOffice({
       updateAudioSpatialMixer();
 
       // ─── Render ───────────────────────────────────────────────────────
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.clearRect(0, 0, WORLD_W, WORLD_H);
+      ctx.save();
+      ctx.translate(WORLD_W / 2, WORLD_H / 2);
+      ctx.scale(zoomRef.current, zoomRef.current);
+      ctx.translate(-WORLD_W / 2, -WORLD_H / 2);
 
       // ── HELPER: draw rounded rect path ──────────────────────────────
       const rr = (rx, ry, rw, rh, rad) => { drawRoundedRect(ctx, rx, ry, rw, rh, rad); };
@@ -1121,6 +1252,20 @@ function VirtualOffice({
         for (let gy = 30; gy < WORLD_H; gy += 30) {
           ctx.beginPath(); ctx.arc(gx, gy, 1.5, 0, Math.PI * 2); ctx.fill();
         }
+      }
+      if (gridVisibleRef.current) {
+        ctx.beginPath();
+        for (let gx = 0; gx <= WORLD_W; gx += GRID_SIZE) {
+          ctx.moveTo(gx, 0);
+          ctx.lineTo(gx, WORLD_H);
+        }
+        for (let gy = 0; gy <= WORLD_H; gy += GRID_SIZE) {
+          ctx.moveTo(0, gy);
+          ctx.lineTo(WORLD_W, gy);
+        }
+        ctx.strokeStyle = "rgba(89,82,129,0.18)";
+        ctx.lineWidth = 0.6;
+        ctx.stroke();
       }
 
       // ── 2. ROOM ZONES (no overlap) ───────────────────────────────────
@@ -1285,9 +1430,6 @@ function VirtualOffice({
       ctx.beginPath(); ctx.moveTo(697, 395); ctx.lineTo(982, 395); ctx.stroke();
       ctx.restore();
 
-      // Suppress old room layout variable (not used anymore)
-      const roomLayout = [];
-
       // ── 10. DESTINATION MARKER & PATH PREVIEW (A* pathfinding feedback) ───
       if (clickTarget.current || routeRef.current.length > 0) {
         const route = routeRef.current.length > 1 ? routeRef.current : [];
@@ -1345,8 +1487,21 @@ function VirtualOffice({
       ctx.setLineDash([5, 4]); ctx.stroke(); ctx.setLineDash([]);
 
       // ── 12. AVATAR DRAWING HELPER (with Directional Animation) ─────
-      const drawAvatar = (ax, ay, color, initials, name, isLocal, facingAngle = 0, isMoving = false) => {
+      const drawAvatar = (ax, ay, color, initials, name, isLocal, facingAngle = 0, isMoving = false, isSpeaking = false, action = null) => {
         const R = AVATAR_RADIUS;
+        if (isSpeaking) {
+          const phase = performance.now() / 90;
+          ctx.save();
+          ctx.fillStyle = "#2bd67b";
+          ctx.shadowColor = "rgba(43,214,123,0.65)";
+          ctx.shadowBlur = 7;
+          [-1, 0, 1].forEach((bar, index) => {
+            const height = 4 + (Math.sin(phase + index * 1.3) + 1) * 3;
+            ctx.fillRect(ax + bar * 5 - 1.5, ay - R - 7 - height, 3, height);
+          });
+          ctx.restore();
+        }
+
         // Glow ring for local user
         if (isLocal) {
           ctx.save();
@@ -1398,6 +1553,13 @@ function VirtualOffice({
         ctx.fillStyle = "rgba(18,16,46,0.65)"; ctx.fill();
         ctx.fillStyle = "#fff"; ctx.font = "bold 10px Inter, sans-serif";
         ctx.textAlign = "center"; ctx.fillText(name, ax, ay + R + 17);
+        if (action?.action === "hand" && action.value) {
+          ctx.font = "16px sans-serif";
+          ctx.fillText("✋", ax, ay - R - 12);
+        } else if (action?.action === "reaction") {
+          ctx.font = "18px sans-serif";
+          ctx.fillText(action.value, ax, ay - R - 12);
+        }
         ctx.restore();
       };
 
@@ -1410,7 +1572,7 @@ function VirtualOffice({
         const ini = displayName.split(" ").map(p => p[0] || "").slice(0, 2).join("").toUpperCase() || "?";
         const moving = Math.abs(rp.targetX - rp.x) > 0.5 || Math.abs(rp.targetY - rp.y) > 0.5;
         const angle = moving ? Math.atan2(rp.targetY - rp.y, rp.targetX - rp.x) : 0;
-        drawAvatar(rp.x, rp.y, colour, ini, displayName, false, angle, moving);
+        drawAvatar(rp.x, rp.y, colour, ini, displayName, false, angle, moving, speakingUserIdsRef.current.has(id), meetingActionsRef.current[id]);
       });
 
       // ── 14. LOCAL PLAYER ────────────────────────────────────────────
@@ -1423,9 +1585,12 @@ function VirtualOffice({
         "You",
         true,
         playerFacing.current.angle,
-        playerFacing.current.moving
+        playerFacing.current.moving,
+        speakingUserIdsRef.current.has(socket.id),
+        meetingActionsRef.current[socket.id]
       );
 
+      ctx.restore();
       rafId = requestAnimationFrame(gameLoop);
     }
 
@@ -1434,6 +1599,11 @@ function VirtualOffice({
     return () => {
       isRunning = false;
       cancelAnimationFrame(rafId);
+      window.clearInterval(speakingPollTimer);
+      window.clearInterval(positionDisplayTimer);
+      speakingUserIdsRef.current = new Set();
+      speakingLastHeard.clear();
+      onSpeakingUsersChangeRef.current([]);
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
       window.removeEventListener("click", unlockAudio);
@@ -1462,16 +1632,34 @@ function VirtualOffice({
   }, [username]);
 
   return (
-    <canvas
-      ref={canvasRef}
-      style={{
-        border: "2px solid #334155",
-        borderRadius: "8px",
-        display: "block",
-        cursor: "crosshair",
-        maxWidth: "100%",
-      }}
-    />
+    <div className="office-canvas-container" ref={viewportRef}>
+      <canvas
+        ref={canvasRef}
+        style={{
+          border: "2px solid #334155",
+          borderRadius: "8px",
+          display: "block",
+          cursor: "crosshair",
+          maxWidth: "100%",
+        }}
+      />
+      <div className="map-controls" role="group" aria-label="Map controls">
+        <button type="button" onClick={() => setZoom((current) => Math.min(1.6, Math.round((current + 0.1) * 10) / 10))} aria-label="Zoom in">+</button>
+        <span aria-live="polite">{Math.round(zoom * 100)}%</span>
+        <button type="button" onClick={() => setZoom((current) => Math.max(0.7, Math.round((current - 0.1) * 10) / 10))} aria-label="Zoom out">−</button>
+        <button type="button" className={gridVisible ? "selected" : ""} onClick={() => setGridVisible((visible) => !visible)} aria-pressed={gridVisible} aria-label={gridVisible ? "Hide map grid" : "Show map grid"}>▦</button>
+        <button type="button" onClick={() => setZoom(1)} aria-label="Reset map zoom">↺</button>
+        <button type="button" onClick={toggleFullscreen} aria-label={fullscreen ? "Exit fullscreen" : "Enter fullscreen"}>{fullscreen ? "⤢" : "⛶"}</button>
+      </div>
+      <div className="movement-hints" aria-label="Movement controls">
+        <kbd>W A S D</kbd>
+        <span>or arrow keys to move</span>
+        <span>Click office to move</span>
+        <span className="movement-position">
+          Position: {positionDisplay.x}, {positionDisplay.y}
+        </span>
+      </div>
+    </div>
   );
 }
 
