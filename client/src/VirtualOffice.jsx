@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { io } from "socket.io-client";
+import { findPath } from "./officePathfinding.js";
 
 const serverPort = new URLSearchParams(window.location.search).get("server");
 
@@ -12,8 +13,9 @@ const SERVER_URL =
 const WORLD_W = 1000;
 const WORLD_H = 600;
 const GRID_SIZE = 20;
+const PATH_GRID_SIZE = 10;
 const AVATAR_RADIUS = 18;
-const PATH_STEP = 18;
+const PATH_SAMPLE_SPACING = 3;
 const OPEN_WORKSPACE_BASE = { x: 312, y: 195, width: 376, height: 190 };
 const OPEN_WORKSPACE_INSET = OPEN_WORKSPACE_BASE.width * 0.15;
 const OPEN_WORKSPACE = {
@@ -84,13 +86,13 @@ const ROOM_BOUNDARIES = [
 
 // Collision bounds follow the visible furniture; circles use x/y as their center.
 const OBSTACLES = [
-  { x: 52, y: 68, width: 205, height: 82, label: "Meeting table" },
+  { x: 52, y: 68, width: 205, height: 68, label: "Meeting table" },
   ...[0, 1, 2, 3].flatMap((chair) => [
     { x: 64 + chair * 48, y: 54, width: 28, height: 12, label: "Chair" },
-    { x: 64 + chair * 48, y: 150, width: 28, height: 12, label: "Chair" },
+    { x: 64 + chair * 48, y: 138, width: 28, height: 12, label: "Chair" },
   ]),
   { x: 34, y: 95, width: 12, height: 28, label: "Chair" },
-  { x: 262, y: 95, width: 12, height: 28, label: "Chair" },
+  { x: 230, y: 95, width: 12, height: 28, label: "Chair" },
   { x: 40, y: 172, radius: 19, label: "Plant" },
   ...[0, 1, 2].map((desk) => ({
     x: 712 + desk * 86, y: 48, width: 70, height: 65, label: "Focus desk",
@@ -246,10 +248,28 @@ function checkCollision(cx, cy, radius = AVATAR_RADIUS, layout) {
   return false;
 }
 
+function findOfficePath(start, goal, layout) {
+  return findPath(start, goal, {
+    width: WORLD_W,
+    height: WORLD_H,
+    gridSize: PATH_GRID_SIZE,
+    sampleSpacing: PATH_SAMPLE_SPACING,
+    isBlocked: (x, y) => checkCollision(x, y, AVATAR_RADIUS, layout),
+  });
+}
+
 // Find nearest collision-free point in 16 radial directions
 function findNearestFreePoint(x, y, radius = AVATAR_RADIUS, layout) {
   if (!checkCollision(x, y, radius, layout)) return { x, y };
-  for (let r = 2; r <= 40; r += 2) {
+  const maxSearchRadius = Math.max(
+    40,
+    ...layout.solids
+      .filter((solid) => solid.label)
+      .map((solid) => solid.radius
+        ? solid.radius + radius
+        : Math.hypot(solid.width, solid.height) / 2 + radius * 2)
+  );
+  for (let r = 2; r <= maxSearchRadius; r += 2) {
     for (let a = 0; a < Math.PI * 2; a += Math.PI / 8) {
       const tx = Math.max(25, Math.min(WORLD_W - 25, x + Math.cos(a) * r));
       const ty = Math.max(25, Math.min(WORLD_H - 25, y + Math.sin(a) * r));
@@ -259,20 +279,6 @@ function findNearestFreePoint(x, y, radius = AVATAR_RADIUS, layout) {
     }
   }
   return { x, y };
-}
-
-function pointToCell(x, y) {
-  return {
-    x: Math.max(0, Math.min(Math.floor(x / GRID_SIZE), Math.ceil(WORLD_W / GRID_SIZE) - 1)),
-    y: Math.max(0, Math.min(Math.floor(y / GRID_SIZE), Math.ceil(WORLD_H / GRID_SIZE) - 1)),
-  };
-}
-
-function cellToPoint(cell) {
-  return {
-    x: cell.x * GRID_SIZE + GRID_SIZE / 2,
-    y: cell.y * GRID_SIZE + GRID_SIZE / 2,
-  };
 }
 
 function drawRoundedRect(ctx, x, y, width, height, radius) {
@@ -288,133 +294,6 @@ function drawRoundedRect(ctx, x, y, width, height, radius) {
   ctx.lineTo(x, y + r);
   ctx.quadraticCurveTo(x, y, x + r, y);
   ctx.closePath();
-}
-
-function isCellBlocked(cellX, cellY, layout) {
-  if (cellX < 0 || cellY < 0 || cellX >= Math.ceil(WORLD_W / GRID_SIZE) || cellY >= Math.ceil(WORLD_H / GRID_SIZE)) {
-    return true;
-  }
-
-  const pointX = cellX * GRID_SIZE + GRID_SIZE / 2;
-  const pointY = cellY * GRID_SIZE + GRID_SIZE / 2;
-  return checkCollision(pointX, pointY, AVATAR_RADIUS, layout);
-}
-
-function findPath(start, goal, layout) {
-  let startCell = pointToCell(start.x, start.y);
-  let goalPosition = goal;
-  if (checkCollision(goalPosition.x, goalPosition.y, AVATAR_RADIUS, layout)) {
-    goalPosition = findNearestFreePoint(goalPosition.x, goalPosition.y, AVATAR_RADIUS, layout);
-    if (checkCollision(goalPosition.x, goalPosition.y, AVATAR_RADIUS, layout)) return [];
-  }
-  let goalCell = pointToCell(goalPosition.x, goalPosition.y);
-
-  // If start is in or near a blocked cell, find closest free cell near start
-  if (isCellBlocked(startCell.x, startCell.y, layout)) {
-    let foundStart = null;
-    for (let r = 1; r <= 4; r++) {
-      for (let dx = -r; dx <= r; dx++) {
-        for (let dy = -r; dy <= r; dy++) {
-          const testX = startCell.x + dx;
-          const testY = startCell.y + dy;
-          if (!isCellBlocked(testX, testY, layout)) {
-            foundStart = { x: testX, y: testY };
-            break;
-          }
-        }
-        if (foundStart) break;
-      }
-      if (foundStart) break;
-    }
-    if (foundStart) startCell = foundStart;
-  }
-
-  // If goal is slightly blocked, find closest free cell near goal
-  if (isCellBlocked(goalCell.x, goalCell.y, layout)) {
-    let foundGoal = null;
-    for (let r = 1; r <= 4; r++) {
-      for (let dx = -r; dx <= r; dx++) {
-        for (let dy = -r; dy <= r; dy++) {
-          const testX = goalCell.x + dx;
-          const testY = goalCell.y + dy;
-          if (!isCellBlocked(testX, testY, layout)) {
-            foundGoal = { x: testX, y: testY };
-            break;
-          }
-        }
-        if (foundGoal) break;
-      }
-      if (foundGoal) break;
-    }
-    if (foundGoal) {
-      goalCell = foundGoal;
-      goalPosition = cellToPoint(goalCell);
-    } else return [];
-  }
-
-  const openSet = new Set([`${startCell.x},${startCell.y}`]);
-  const cameFrom = new Map();
-  const gScore = new Map([[`${startCell.x},${startCell.y}`, 0]]);
-  const fScore = new Map([[`${startCell.x},${startCell.y}`, Math.abs(startCell.x - goalCell.x) + Math.abs(startCell.y - goalCell.y)]]);
-
-  while (openSet.size > 0) {
-    let currentKey = null;
-    let currentScore = Infinity;
-    for (const key of openSet) {
-      const score = fScore.get(key) ?? Infinity;
-      if (score < currentScore) {
-        currentScore = score;
-        currentKey = key;
-      }
-    }
-
-    if (!currentKey) break;
-    const [cx, cy] = currentKey.split(",").map(Number);
-    if (cx === goalCell.x && cy === goalCell.y) {
-      const path = [goalPosition];
-      let cursor = currentKey;
-      while (cameFrom.has(cursor)) {
-        cursor = cameFrom.get(cursor);
-        const [px, py] = cursor.split(",").map(Number);
-        path.unshift(cellToPoint({ x: px, y: py }));
-      }
-      if (path.length > 1 && Math.hypot(path[0].x - start.x, path[0].y - start.y) < 14) {
-        path.shift();
-      }
-      return path;
-    }
-
-    openSet.delete(currentKey);
-    const neighbors = [
-      [0, -1], [1, 0], [0, 1], [-1, 0],
-      [-1, -1], [-1, 1], [1, -1], [1, 1],
-    ];
-
-    for (const [dx, dy] of neighbors) {
-      const nextX = cx + dx;
-      const nextY = cy + dy;
-      if (nextX < 0 || nextY < 0 || nextX >= Math.ceil(WORLD_W / GRID_SIZE) || nextY >= Math.ceil(WORLD_H / GRID_SIZE)) {
-        continue;
-      }
-      if (isCellBlocked(nextX, nextY, layout)) continue;
-      if (dx !== 0 && dy !== 0 && (
-        isCellBlocked(cx + dx, cy, layout) ||
-        isCellBlocked(cx, cy + dy, layout)
-      )) continue;
-
-      const nextKey = `${nextX},${nextY}`;
-      const tentative = (gScore.get(currentKey) ?? Infinity) + (dx === 0 || dy === 0 ? 1 : 1.4);
-      if (tentative < (gScore.get(nextKey) ?? Infinity)) {
-        cameFrom.set(nextKey, currentKey);
-        gScore.set(nextKey, tentative);
-        const heuristic = Math.abs(nextX - goalCell.x) + Math.abs(nextY - goalCell.y);
-        fScore.set(nextKey, tentative + heuristic);
-        openSet.add(nextKey);
-      }
-    }
-  }
-
-  return [];
 }
 
 // ─── Colour helpers ───────────────────────────────────────────────────────────
@@ -1133,7 +1012,7 @@ function VirtualOffice({
         }
       }
 
-      const path = findPath({ x: player.current.x, y: player.current.y }, target, layout);
+      const path = findOfficePath({ x: player.current.x, y: player.current.y }, target, layout);
       if (!path.length) {
         routeRef.current = [];
         clickTargetRef.current = null;
@@ -1256,30 +1135,20 @@ function VirtualOffice({
         const tdy = nextPoint.y - player.current.y;
         const dist = Math.hypot(tdx, tdy);
 
-        if (dist <= PATH_STEP) {
-          routeRef.current.shift();
-          if (routeRef.current.length === 0) {
+        if (dist <= CLICK_SPEED) {
+          if (checkCollision(nextPoint.x, nextPoint.y, AVATAR_RADIUS, layout)) {
+            routeRef.current = [];
             clickTarget.current = null;
+            clickTargetRef.current = null;
+          } else {
+            player.current.x = nextPoint.x;
+            player.current.y = nextPoint.y;
+            routeRef.current.shift();
+            if (routeRef.current.length === 0) {
+              clickTarget.current = null;
+              clickTargetRef.current = null;
+            }
           }
-        } else {
-          dx = (tdx / dist) * CLICK_SPEED;
-          dy = (tdy / dist) * CLICK_SPEED;
-        }
-      }
-
-      // Click-to-move fallback when no path route is available
-      if (dx === 0 && dy === 0 && clickTarget.current) {
-        const tdx = clickTarget.current.x - player.current.x;
-        const tdy = clickTarget.current.y - player.current.y;
-        const dist = Math.hypot(tdx, tdy);
-        if (dist < CLICK_SPEED) {
-          const target = clickTarget.current;
-          if (!checkCollision(target.x, target.y, AVATAR_RADIUS, layout)) {
-            player.current.x = target.x;
-            player.current.y = target.y;
-          }
-          clickTarget.current = null;
-          clickTargetRef.current = null;
         } else {
           dx = (tdx / dist) * CLICK_SPEED;
           dy = (tdy / dist) * CLICK_SPEED;
@@ -1339,27 +1208,11 @@ function VirtualOffice({
 
         const target = clickTargetRef.current;
         if (target) {
-          // 2. Rebuild the A* path dynamically to the destination
-          let newPath = findPath({ x: player.current.x, y: player.current.y }, target, layout);
-
-          // 3. If direct path is not immediately found, probe 8 surrounding neighbor cells for an open route
-          if (!newPath || newPath.length === 0) {
-            const probeOffsets = [
-              [0, -18], [0, 18], [-18, 0], [18, 0],
-              [-18, -18], [18, -18], [-18, 18], [18, 18]
-            ];
-            for (const [ox, oy] of probeOffsets) {
-              const probeX = Math.max(25, Math.min(WORLD_W - 25, player.current.x + ox));
-              const probeY = Math.max(25, Math.min(WORLD_H - 25, player.current.y + oy));
-              if (!checkCollision(probeX, probeY, AVATAR_RADIUS, layout)) {
-                const altPath = findPath({ x: probeX, y: probeY }, target, layout);
-                if (altPath && altPath.length > 0) {
-                  newPath = [{ x: probeX, y: probeY }, ...altPath];
-                  break;
-                }
-              }
-            }
-          }
+          const newPath = findOfficePath(
+            { x: player.current.x, y: player.current.y },
+            target,
+            layout
+          );
 
           if (newPath && newPath.length > 0) {
             routeRef.current = newPath;
@@ -1528,16 +1381,16 @@ function VirtualOffice({
       // ── 4. MEETING ROOM FURNITURE ────────────────────────────────────
       ctx.save();
       // Large conference table
-      rr(52, 68, 205, 82, 10);
+      rr(52, 68, 205, 68, 10);
       ctx.fillStyle = "#c8b98a"; ctx.fill();
       ctx.strokeStyle = "#a89060"; ctx.lineWidth = 1.5; ctx.stroke();
       // Chairs top
       for (let i = 0; i < 4; i++) { rr(64 + i * 48, 54, 28, 12, 4); ctx.fillStyle = "#3a3a5a"; ctx.fill(); }
       // Chairs bottom
-      for (let i = 0; i < 4; i++) { rr(64 + i * 48, 150, 28, 12, 4); ctx.fillStyle = "#3a3a5a"; ctx.fill(); }
+      for (let i = 0; i < 4; i++) { rr(64 + i * 48, 138, 28, 12, 4); ctx.fillStyle = "#3a3a5a"; ctx.fill(); }
       // Chairs sides
       rr(34, 95, 12, 28, 4); ctx.fillStyle = "#3a3a5a"; ctx.fill();
-      rr(262, 95, 12, 28, 4); ctx.fillStyle = "#3a3a5a"; ctx.fill();
+      rr(230, 95, 12, 28, 4); ctx.fillStyle = "#3a3a5a"; ctx.fill();
       drawPlant(40, 172);
       ctx.restore();
 
@@ -1685,78 +1538,81 @@ function VirtualOffice({
       // ── 12. AVATAR DRAWING HELPER (with Directional Animation) ─────
       const drawAvatar = (ax, ay, color, initials, name, isLocal, facingAngle = 0, isMoving = false, isSpeaking = false, action = null) => {
         const R = AVATAR_RADIUS;
+        const avatarX = mapX(ax);
+        const avatarY = mapY(ay);
         if (isSpeaking) {
           const phase = performance.now() / 90;
-          ctx.save();
-          ctx.fillStyle = "#2bd67b";
-          ctx.shadowColor = "rgba(43,214,123,0.65)";
-          ctx.shadowBlur = 7;
+          rawCtx.save();
+          rawCtx.fillStyle = "#2bd67b";
+          rawCtx.shadowColor = "rgba(43,214,123,0.65)";
+          rawCtx.shadowBlur = 7;
           [-1, 0, 1].forEach((bar, index) => {
             const height = 4 + (Math.sin(phase + index * 1.3) + 1) * 3;
-            ctx.fillRect(ax + bar * 5 - 1.5, ay - R - 7 - height, 3, height);
+            rawCtx.fillRect(avatarX + bar * 5 - 1.5, avatarY - R - 7 - height, 3, height);
           });
-          ctx.restore();
+          rawCtx.restore();
         }
 
         // Glow ring for local user
         if (isLocal) {
-          ctx.save();
-          ctx.shadowBlur = 20; ctx.shadowColor = "rgba(99,102,241,0.9)";
-          ctx.beginPath(); ctx.arc(ax, ay, R + 4, 0, Math.PI * 2);
-          ctx.strokeStyle = "rgba(140,120,255,0.75)"; ctx.lineWidth = 2.5; ctx.stroke();
-          ctx.restore();
+          rawCtx.save();
+          rawCtx.shadowBlur = 20; rawCtx.shadowColor = "rgba(99,102,241,0.9)";
+          rawCtx.beginPath(); rawCtx.arc(avatarX, avatarY, R + 4, 0, Math.PI * 2);
+          rawCtx.strokeStyle = "rgba(140,120,255,0.75)"; rawCtx.lineWidth = 2.5; rawCtx.stroke();
+          rawCtx.restore();
         }
 
         // Direction pointer / visor indicator when moving or facing
-        ctx.save();
-        ctx.translate(ax, ay);
-        ctx.rotate(facingAngle);
+        rawCtx.save();
+        rawCtx.translate(avatarX, avatarY);
+        rawCtx.rotate(facingAngle);
         // Small directional arrowhead / pointer on avatar rim
-        ctx.beginPath();
-        ctx.moveTo(R + 5, 0);
-        ctx.lineTo(R - 2, -4);
-        ctx.lineTo(R - 2, 4);
-        ctx.closePath();
-        ctx.fillStyle = isLocal ? "#6350ff" : "#4ade80";
-        ctx.fill();
-        ctx.restore();
+        rawCtx.beginPath();
+        rawCtx.moveTo(R + 5, 0);
+        rawCtx.lineTo(R - 2, -4);
+        rawCtx.lineTo(R - 2, 4);
+        rawCtx.closePath();
+        rawCtx.fillStyle = isLocal ? "#6350ff" : "#4ade80";
+        rawCtx.fill();
+        rawCtx.restore();
 
         // Walking wobble bounce when moving
         const bounce = isMoving ? Math.sin(performance.now() / 100) * 1.5 : 0;
+        const avatarDrawY = avatarY + bounce;
 
         // Avatar fill
-        ctx.save();
-        ctx.beginPath(); ctx.arc(ax, ay + bounce, R, 0, Math.PI * 2);
-        ctx.fillStyle = color; ctx.fill();
-        ctx.strokeStyle = "#fff"; ctx.lineWidth = 2.5; ctx.stroke();
-        ctx.restore();
+        rawCtx.save();
+        rawCtx.beginPath(); rawCtx.arc(avatarX, avatarDrawY, R, 0, Math.PI * 2);
+        rawCtx.fillStyle = color; rawCtx.fill();
+        rawCtx.strokeStyle = "#fff"; rawCtx.lineWidth = 2.5; rawCtx.stroke();
+        rawCtx.restore();
 
         // Green online dot
-        ctx.save();
-        ctx.beginPath(); ctx.arc(ax + R * 0.65, ay + R * 0.65 + bounce, 5, 0, Math.PI * 2);
-        ctx.fillStyle = "#2bd67b"; ctx.fill();
-        ctx.strokeStyle = "#fff"; ctx.lineWidth = 1.5; ctx.stroke();
-        ctx.restore();
+        rawCtx.save();
+        rawCtx.beginPath(); rawCtx.arc(avatarX + R * 0.65, avatarDrawY + R * 0.65, 5, 0, Math.PI * 2);
+        rawCtx.fillStyle = "#2bd67b"; rawCtx.fill();
+        rawCtx.strokeStyle = "#fff"; rawCtx.lineWidth = 1.5; rawCtx.stroke();
+        rawCtx.restore();
 
         // Initials
-        ctx.fillStyle = "#fff"; ctx.font = "bold 11px Inter, sans-serif";
-        ctx.textAlign = "center"; ctx.fillText(initials, ax, ay + 4 + bounce);
+        rawCtx.fillStyle = "#fff"; rawCtx.font = "bold 11px Inter, sans-serif";
+        rawCtx.textAlign = "center"; rawCtx.fillText(initials, avatarX, avatarDrawY + 4);
 
         // Name pill below
-        ctx.save();
-        const nameW = ctx.measureText(name).width + 14;
-        rr(ax - nameW / 2, ay + R + 6, nameW, 17, 8);
-        ctx.fillStyle = "rgba(18,16,46,0.65)"; ctx.fill();
-        ctx.fillStyle = "#fff"; ctx.font = "bold 10px Inter, sans-serif";
-        ctx.textAlign = "center"; ctx.fillText(name, ax, ay + R + 17);
+        rawCtx.save();
+        const nameW = rawCtx.measureText(name).width + 14;
+        drawRoundedRect(rawCtx, avatarX - nameW / 2, avatarDrawY + R + 6, nameW, 17, 8);
+        rawCtx.fillStyle = "rgba(18,16,46,0.65)"; rawCtx.fill();
+        rawCtx.fillStyle = "#fff"; rawCtx.font = "bold 10px Inter, sans-serif";
+        rawCtx.textAlign = "center"; rawCtx.fillText(name, avatarX, avatarDrawY + R + 17);
         if (action?.action === "hand" && action.value) {
-          ctx.font = "16px sans-serif";
-          ctx.fillText("✋", ax, ay - R - 12);
+          rawCtx.font = "16px sans-serif";
+          rawCtx.fillText("✋", avatarX, avatarDrawY - R - 12);
         } else if (action?.action === "reaction") {
-          ctx.font = "18px sans-serif";
-          ctx.fillText(action.value, ax, ay - R - 12);
+          rawCtx.font = "18px sans-serif";
+          rawCtx.fillText(action.value, avatarX, avatarDrawY - R - 12);
         }
-        ctx.restore();
+        rawCtx.restore();
       };
 
       // ── 13. REMOTE AVATARS ──────────────────────────────────────────

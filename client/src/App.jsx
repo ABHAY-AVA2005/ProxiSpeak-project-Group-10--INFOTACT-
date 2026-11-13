@@ -794,21 +794,7 @@ function App() {
             <small>In Office • Floor 2</small>
           </div>
         </div>
-        <button
-          type="button"
-          className={`nav-quick-mic ${isMuted ? "muted" : ""}`}
-          onClick={permissionGranted ? toggleMute : startAudio}
-          aria-label={permissionGranted ? (isMuted ? "Unmute microphone" : "Mute microphone") : "Enable microphone"}
-          title={permissionGranted ? (isMuted ? "Unmute microphone" : "Mute microphone") : "Enable microphone"}
-        >
-          {permissionGranted ? (isMuted ? "Mic off" : "Mic on") : "Enable mic"}
-        </button>
-      </header>
-
-      {/* ── MAIN CONTENT WRAPPER ── */}
-      <div className="main-content">
-        {/* ── TOP HEADER ── */}
-        <header className="app-top-header">
+        <div className="navigation-actions">
           <div className="header-right">
             <button
               className={`hdr-icon-btn ${searchOpen ? "active" : ""}`}
@@ -826,7 +812,6 @@ function App() {
               <span className="hdr-avatar">{(username[0] || "U").toUpperCase()}</span>
             </button>
           </div>
-
           {notificationOpen && (
             <div className="hdr-popover">
               <strong>Notifications</strong>
@@ -844,13 +829,21 @@ function App() {
               </div>
             </div>
           )}
-        </header>
+        </div>
+        <button
+          type="button"
+          className={`nav-quick-mic ${isMuted ? "muted" : ""}`}
+          onClick={permissionGranted ? toggleMute : startAudio}
+          aria-label={permissionGranted ? (isMuted ? "Unmute microphone" : "Mute microphone") : "Enable microphone"}
+          title={permissionGranted ? (isMuted ? "Unmute microphone" : "Mute microphone") : "Enable microphone"}
+        >
+          {permissionGranted ? (isMuted ? "Mic off" : "Mic on") : "Enable mic"}
+        </button>
+      </header>
 
+      {/* ── MAIN CONTENT WRAPPER ── */}
+      <div className="main-content">
         <section className="office-summary-bar" aria-label="Office status">
-          <div className="office-summary-title">
-            <span className="online-dot small" />
-            <div><strong>ProxiSpeak HQ</strong><small>Floor 2 · {activeRoom}</small></div>
-          </div>
           <div className="office-summary-position" aria-live="polite">
             <span>⌖</span> {officePosition.x}, {officePosition.y}
           </div>
@@ -1387,7 +1380,7 @@ function App() {
               </div>
             </div>
             <div className="presence-head">
-              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <div className="presence-users-heading">
                 <span className="online-dot small" />
                 <strong>Online Users ({presenceUsers.length})</strong>
               </div>
