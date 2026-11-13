@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { io } from "socket.io-client";
+import Icon from "./components/Icon";
 import { findPath } from "./officePathfinding.js";
 
 const serverPort = new URLSearchParams(window.location.search).get("server");
@@ -102,6 +103,8 @@ const OBSTACLES = [
   })),
   { x: 42, y: 440, width: 115, height: 55, label: "Sofa" },
   { x: 52, y: 508, width: 95, height: 38, label: "Coffee table" },
+  { x: 180, y: 440, width: 57, height: 52, label: "Lounge armchair" },
+  { x: 260, y: 550, radius: 18, label: "Plant" },
   { x: 702, y: 396, width: 268, height: 62, label: "Pantry counter" },
   { x: 940, y: 535, radius: 19, label: "Plant" },
 ];
@@ -330,6 +333,7 @@ function VirtualOffice({
   meetingRooms = [],
   spawnRoom = "Open Work",
   avatarColor = "#2563eb",
+  themeMode = "light",
 }) {
   const canvasRef = useRef(null);
   const viewportRef = useRef(null);
@@ -342,6 +346,8 @@ function VirtualOffice({
   const gridVisibleRef = useRef(false);
   const peerVolumesRef = useRef(peerVolumes);
   const meetingActionsRef = useRef(meetingActions);
+  const avatarColorRef = useRef(avatarColor);
+  const themeModeRef = useRef(themeMode);
   const speakerSettingsRef = useRef({ enabled: speakerEnabled, volume: speakerVolume });
   const earshotRef = useRef(earshotRadius);
   const localStreamRef = useRef(localStream);
@@ -377,6 +383,8 @@ function VirtualOffice({
   useEffect(() => { gridVisibleRef.current = gridVisible; }, [gridVisible]);
   useEffect(() => { peerVolumesRef.current = peerVolumes; }, [peerVolumes]);
   useEffect(() => { meetingActionsRef.current = meetingActions; }, [meetingActions]);
+  useEffect(() => { avatarColorRef.current = avatarColor; }, [avatarColor]);
+  useEffect(() => { themeModeRef.current = themeMode; }, [themeMode]);
   useEffect(() => {
     speakerSettingsRef.current = { enabled: speakerEnabled, volume: speakerVolume };
   }, [speakerEnabled, speakerVolume]);
@@ -1308,14 +1316,15 @@ function VirtualOffice({
       };
 
       // ── 1. FLOOR BACKGROUND ──────────────────────────────────────────
+      const darkMode = themeModeRef.current === "dark";
       const bgGrad = ctx.createLinearGradient(0, 0, WORLD_W, WORLD_H);
-      bgGrad.addColorStop(0, "#ede9f6");
-      bgGrad.addColorStop(1, "#e0dbf0");
+      bgGrad.addColorStop(0, darkMode ? "#171b29" : "#ede9f6");
+      bgGrad.addColorStop(1, darkMode ? "#202437" : "#e0dbf0");
       ctx.fillStyle = bgGrad;
       ctx.fillRect(0, 0, layout.width, layout.height);
 
       // Subtle floor texture dots
-      ctx.fillStyle = "rgba(140,120,200,0.055)";
+      ctx.fillStyle = darkMode ? "rgba(190,180,255,0.045)" : "rgba(140,120,200,0.055)";
       for (let gx = 30; gx < WORLD_W; gx += 30) {
         for (let gy = 30; gy < WORLD_H; gy += 30) {
           ctx.beginPath(); ctx.arc(gx, gy, 1.5, 0, Math.PI * 2); ctx.fill();
@@ -1331,7 +1340,7 @@ function VirtualOffice({
           ctx.moveTo(0, gy);
           ctx.lineTo(WORLD_W, gy);
         }
-        ctx.strokeStyle = "rgba(89,82,129,0.18)";
+        ctx.strokeStyle = darkMode ? "rgba(190,195,225,0.13)" : "rgba(89,82,129,0.18)";
         ctx.lineWidth = 0.6;
         ctx.stroke();
       }
@@ -1342,10 +1351,10 @@ function VirtualOffice({
         drawRoundedRect(rawCtx, mapX(rx), mapY(ry), mapX(rx + rw) - mapX(rx), mapY(ry + rh) - mapY(ry), 16);
         ctx.fillStyle = fillColor;
         ctx.fill();
-        ctx.strokeStyle = "rgba(140,120,200,0.3)";
+        ctx.strokeStyle = darkMode ? "rgba(177,168,230,0.32)" : "rgba(140,120,200,0.3)";
         ctx.lineWidth = 1.5;
         ctx.stroke();
-        ctx.fillStyle = "rgba(55,50,100,0.7)";
+        ctx.fillStyle = darkMode ? "rgba(226,228,245,0.82)" : "rgba(55,50,100,0.7)";
         ctx.font = "bold 11px Inter, sans-serif";
         ctx.textAlign = "center";
         ctx.fillText(label, rx + rw / 2, ry + 18);
@@ -1353,11 +1362,11 @@ function VirtualOffice({
       };
 
       // Layout: Meeting Room TL, Focus Zone TR, Lounge BL, Pantry BR
-      drawRoom(18, 18, 285, 185, "Meeting Room", "rgba(228,224,248,0.88)");
-      drawRoom(697, 18, 285, 185, "Focus Zone",   "rgba(220,232,248,0.88)");
-      drawRoom(OPEN_WORKSPACE.x, OPEN_WORKSPACE.y, OPEN_WORKSPACE.width, OPEN_WORKSPACE.height, "Open Workspace", "rgba(240,238,252,0.65)");
-      drawRoom(18,  395, 285, 190, "Lounge",      "rgba(238,228,250,0.88)");
-      drawRoom(697, 395, 285, 190, "Pantry",      "rgba(220,236,250,0.88)");
+      drawRoom(18, 18, 285, 185, "Meeting Room", darkMode ? "rgba(45,50,69,0.96)" : "rgba(228,224,248,0.88)");
+      drawRoom(697, 18, 285, 185, "Focus Zone", darkMode ? "rgba(40,54,70,0.96)" : "rgba(220,232,248,0.88)");
+      drawRoom(OPEN_WORKSPACE.x, OPEN_WORKSPACE.y, OPEN_WORKSPACE.width, OPEN_WORKSPACE.height, "Open Workspace", darkMode ? "rgba(38,43,61,0.92)" : "rgba(240,238,252,0.65)");
+      drawRoom(18, 395, 285, 190, "Lounge", darkMode ? "rgba(51,45,68,0.96)" : "rgba(238,228,250,0.88)");
+      drawRoom(697, 395, 285, 190, "Pantry", darkMode ? "rgba(39,54,68,0.96)" : "rgba(220,236,250,0.88)");
 
       // ── 3. CENTER HEADER LOGO ────────────────────────────────────────
       ctx.save();
@@ -1425,6 +1434,13 @@ function VirtualOffice({
       rr(102, 448, 48, 38, 8); ctx.fillStyle="#7a8fc0"; ctx.fill();
       rr(52, 508, 95, 38, 8); ctx.fillStyle="#b8a870"; ctx.fill();
       ctx.strokeStyle="#988850"; ctx.lineWidth=1; ctx.stroke();
+      rr(180, 440, 57, 52, 10); ctx.fillStyle="#8490b8"; ctx.fill();
+      ctx.strokeStyle="#68769f"; ctx.lineWidth=1; ctx.stroke();
+      rr(187, 446, 43, 13, 5); ctx.fillStyle="#aab4d4"; ctx.fill();
+      rr(187, 462, 43, 23, 6); ctx.fillStyle="#929fc6"; ctx.fill();
+      rr(182, 458, 6, 27, 3); ctx.fillStyle="#68769f"; ctx.fill();
+      rr(229, 458, 6, 27, 3); ctx.fillStyle="#68769f"; ctx.fill();
+      drawPlant(260, 550);
       ctx.restore();
 
       // ── 8. PANTRY FURNITURE ──────────────────────────────────────────
@@ -1437,12 +1453,21 @@ function VirtualOffice({
       rr(702, 396, 268, 20, 4); ctx.fillStyle="#c8d0d8"; ctx.fill();
       rr(870, 420, 60, 38, 6); ctx.fillStyle="#c0c8d0"; ctx.fill();
       rr(880, 428, 40, 22, 4); ctx.fillStyle="#a0a8b0"; ctx.fill();
+      rr(798, 418, 42, 30, 5); ctx.fillStyle="#555968"; ctx.fill();
+      ctx.strokeStyle="#858b9b"; ctx.lineWidth=1; ctx.stroke();
+      rr(804, 422, 13, 9, 2); ctx.fillStyle="#252a38"; ctx.fill();
+      ctx.fillStyle="#e0b879"; ctx.beginPath(); ctx.arc(810, 426, 2, 0, Math.PI * 2); ctx.fill();
+      rr(820, 432, 5, 9, 2); ctx.fillStyle="#353947"; ctx.fill();
+      rr(814, 442, 17, 9, 3); ctx.fillStyle="#f1eee8"; ctx.fill();
+      ctx.strokeStyle="#c6c1b8"; ctx.lineWidth=1; ctx.stroke();
+      ctx.beginPath(); ctx.arc(832, 446, 4, -Math.PI / 2, Math.PI / 2);
+      ctx.strokeStyle="#f1eee8"; ctx.lineWidth=2; ctx.stroke();
       drawPlant(940, 535);
       ctx.restore();
 
       // ── 9. GLASS PARTITION LINES WITH VISIBLE ENTRANCES ────────────
       ctx.save();
-      ctx.strokeStyle = "rgba(110,100,180,0.45)";
+      ctx.strokeStyle = darkMode ? "rgba(171,162,225,0.5)" : "rgba(110,100,180,0.45)";
       ctx.lineWidth = 3;
 
       // Vertical partitions with doorway gaps (doorway = 100px clear gap for walking)
@@ -1450,26 +1475,26 @@ function VirtualOffice({
       ctx.beginPath(); ctx.moveTo(303, 18); ctx.lineTo(303, 65); ctx.stroke();
       ctx.beginPath(); ctx.moveTo(303, 165); ctx.lineTo(303, 205); ctx.stroke();
       // Doorway indicator (Meeting room entrance)
-      ctx.fillStyle = "rgba(99,102,241,0.15)";
+      ctx.fillStyle = darkMode ? "rgba(145,137,255,0.12)" : "rgba(99,102,241,0.15)";
       ctx.fillRect(298, 65, 10, 100);
 
       // Top right Focus zone (left wall x: 697, entrance at y: 65..165)
       ctx.beginPath(); ctx.moveTo(697, 18); ctx.lineTo(697, 65); ctx.stroke();
       ctx.beginPath(); ctx.moveTo(697, 165); ctx.lineTo(697, 205); ctx.stroke();
       // Doorway indicator (Focus zone entrance)
-      ctx.fillStyle = "rgba(99,102,241,0.15)";
+      ctx.fillStyle = darkMode ? "rgba(145,137,255,0.12)" : "rgba(99,102,241,0.15)";
       ctx.fillRect(692, 65, 10, 100);
 
       // Bottom left Lounge (right wall x: 303, entrance at y: 420..525)
       ctx.beginPath(); ctx.moveTo(303, 395); ctx.lineTo(303, 420); ctx.stroke();
       ctx.beginPath(); ctx.moveTo(303, 525); ctx.lineTo(303, 582); ctx.stroke();
-      ctx.fillStyle = "rgba(99,102,241,0.15)";
+      ctx.fillStyle = darkMode ? "rgba(145,137,255,0.12)" : "rgba(99,102,241,0.15)";
       ctx.fillRect(298, 420, 10, 105);
 
       // Bottom right Pantry (left wall x: 697, entrance at y: 420..525)
       ctx.beginPath(); ctx.moveTo(697, 395); ctx.lineTo(697, 420); ctx.stroke();
       ctx.beginPath(); ctx.moveTo(697, 525); ctx.lineTo(697, 582); ctx.stroke();
-      ctx.fillStyle = "rgba(99,102,241,0.15)";
+      ctx.fillStyle = darkMode ? "rgba(145,137,255,0.12)" : "rgba(99,102,241,0.15)";
       ctx.fillRect(692, 420, 10, 105);
 
       // Horizontal dividers
@@ -1632,7 +1657,7 @@ function VirtualOffice({
       drawAvatar(
         player.current.x,
         player.current.y,
-        avatarColor || "#6350ff",
+        avatarColorRef.current || "#6350ff",
         selfIni,
         "You",
         true,
@@ -1699,12 +1724,12 @@ function VirtualOffice({
         }}
       />
       <div className="map-controls" role="group" aria-label="Map controls">
-        <button type="button" onClick={() => setZoom((current) => Math.min(1.6, Math.round((current + 0.1) * 10) / 10))} aria-label="Zoom in">+</button>
+        <button type="button" onClick={() => setZoom((current) => Math.min(1.6, Math.round((current + 0.1) * 10) / 10))} aria-label="Zoom in"><Icon name="zoomIn" size={17} /></button>
         <span aria-live="polite">{Math.round(zoom * 100)}%</span>
-        <button type="button" onClick={() => setZoom((current) => Math.max(0.7, Math.round((current - 0.1) * 10) / 10))} aria-label="Zoom out">−</button>
-        <button type="button" className={gridVisible ? "selected" : ""} onClick={() => setGridVisible((visible) => !visible)} aria-pressed={gridVisible} aria-label={gridVisible ? "Hide map grid" : "Show map grid"}>▦</button>
-        <button type="button" onClick={() => setZoom(1)} aria-label="Reset map zoom">↺</button>
-        <button type="button" onClick={toggleFullscreen} aria-label={fullscreen ? "Exit fullscreen" : "Enter fullscreen"}>{fullscreen ? "⤢" : "⛶"}</button>
+        <button type="button" onClick={() => setZoom((current) => Math.max(0.7, Math.round((current - 0.1) * 10) / 10))} aria-label="Zoom out"><Icon name="zoomOut" size={17} /></button>
+        <button type="button" className={gridVisible ? "selected" : ""} onClick={() => setGridVisible((visible) => !visible)} aria-pressed={gridVisible} aria-label={gridVisible ? "Hide map grid" : "Show map grid"}><Icon name="grid" size={16} /></button>
+        <button type="button" onClick={() => setZoom(1)} aria-label="Reset map zoom"><Icon name="reset" size={16} /></button>
+        <button type="button" onClick={toggleFullscreen} aria-label={fullscreen ? "Exit fullscreen" : "Enter fullscreen"}><Icon name="expand" size={16} /></button>
       </div>
       <div className="movement-hints" aria-label="Movement controls">
         <kbd>W A S D</kbd>

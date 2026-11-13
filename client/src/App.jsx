@@ -1,18 +1,28 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import brandIcon from "./assets/favicon.png";
 import { JoinScreen } from "./components/JoinScreen";
+import Icon from "./components/Icon";
 import VirtualOffice from "./VirtualOffice";
 import { useMediaStream } from "./hooks/useMediaStream";
 
 const navItems = [
-  { id: "Office", icon: "⊞", label: "Office" },
-  { id: "Team", icon: "◎", label: "Team" },
-  { id: "Chat", icon: "◌", label: "Chat" },
-  { id: "Meetings", icon: "▣", label: "Meetings" },
-  { id: "Settings", icon: "⚙", label: "Settings" },
+  { id: "Office", icon: "office", label: "Office" },
+  { id: "Team", icon: "people", label: "Team" },
+  { id: "Chat", icon: "chat", label: "Chat" },
+  { id: "Meetings", icon: "calendar", label: "Meetings" },
+  { id: "Settings", icon: "settings", label: "Settings" },
 ];
 
 const palette = ["purple","pink","gold","mint","amber","teal","salmon","sky","lavender"];
+const AVATAR_COLORS = [
+  { name: "Blue", value: "#2563eb" },
+  { name: "Violet", value: "#8b5cf6" },
+  { name: "Orange", value: "#f97316" },
+  { name: "Green", value: "#10b981" },
+  { name: "Pink", value: "#ec4899" },
+  { name: "Yellow", value: "#facc15" },
+  { name: "Red", value: "#ef4444" },
+];
 
 const baseRooms = [
   { id: "Meeting Room", name: "Meeting Room", x: 18, y: 18, width: 285, height: 187, fill: "rgba(230,235,245,0.92)" },
@@ -25,11 +35,50 @@ const baseRooms = [
 const PROXIMITY_OPTIONS = [50, 75, 100, 150, 200];
 const SCHEDULED_MEETINGS_KEY = "proxispeak_scheduled_meetings";
 const MEETING_OWNER_KEY = "proxispeak_meeting_owner";
+const THEME_MODE_KEY = "proxispeak_theme_mode";
 const API_URL = import.meta.env.VITE_SERVER_URL || "http://localhost:5000";
 const DEFAULT_SETTINGS = {
   autoJoinAudio: true, focusMode: false, quietHours: false,
-  desktopAlerts: true, screenShare: false, doNotDisturb: false,
+  desktopAlerts: false, screenShare: false, doNotDisturb: false, pushToTalk: false,
 };
+
+function loadSettings() {
+  try {
+    const saved = JSON.parse(localStorage.getItem("proxispeak_settings") || "{}");
+    const settings = saved && typeof saved === "object" && !Array.isArray(saved)
+      ? Object.fromEntries(Object.entries(DEFAULT_SETTINGS).map(([key, defaultValue]) => [
+        key,
+        typeof saved[key] === "boolean" ? saved[key] : defaultValue,
+      ]))
+      : { ...DEFAULT_SETTINGS };
+    if (settings.desktopAlerts && (typeof Notification === "undefined" || Notification.permission !== "granted")) {
+      settings.desktopAlerts = false;
+    }
+    return settings;
+  } catch (settingsError) {
+    console.error("[ProxiSpeak] Could not read settings:", settingsError);
+    return { ...DEFAULT_SETTINGS };
+  }
+}
+
+function loadAvatarColor() {
+  try {
+    const saved = localStorage.getItem("proxispeak_avatar_color");
+    return AVATAR_COLORS.find(({ value }) => value === saved)?.value || AVATAR_COLORS[0].value;
+  } catch (colorError) {
+    console.error("[ProxiSpeak] Could not read avatar color:", colorError);
+    return AVATAR_COLORS[0].value;
+  }
+}
+
+function loadThemeMode() {
+  try {
+    return localStorage.getItem(THEME_MODE_KEY) === "dark" ? "dark" : "light";
+  } catch (themeError) {
+    console.error("[ProxiSpeak] Could not read theme preference:", themeError);
+    return "light";
+  }
+}
 
 function getMeetingOwnerId() {
   const existing = localStorage.getItem(MEETING_OWNER_KEY);
@@ -109,8 +158,8 @@ function App() {
     duration: "60",
     participants: "",
   }));
-  const [themeMode] = useState("dark");
-  const [avatarColor, setAvatarColor] = useState("#2563eb");
+  const [themeMode, setThemeMode] = useState(loadThemeMode);
+  const [avatarColor, setAvatarColor] = useState(loadAvatarColor);
   const [searchOpen, setSearchOpen] = useState(false);
   const [presenceCollapsed, setPresenceCollapsed] = useState(false);
   const [notificationOpen, setNotificationOpen] = useState(false);
@@ -147,7 +196,6 @@ function App() {
       return {};
     }
   });
-  const [pushToTalk, setPushToTalk] = useState(false);
   const [cameraStream, setCameraStream] = useState(null);
   const [cameraError, setCameraError] = useState("");
   const [recentSessions, setRecentSessions] = useState(() => {
@@ -159,17 +207,8 @@ function App() {
       return [];
     }
   });
-  const [settings, setSettings] = useState(() => {
-    try {
-      const saved = JSON.parse(localStorage.getItem("proxispeak_settings") || "{}");
-      return saved && typeof saved === "object" && !Array.isArray(saved)
-        ? { ...DEFAULT_SETTINGS, ...saved }
-        : DEFAULT_SETTINGS;
-    } catch (settingsError) {
-      console.error("[ProxiSpeak] Could not read settings:", settingsError);
-      return DEFAULT_SETTINGS;
-    }
-  });
+  const [settings, setSettings] = useState(loadSettings);
+  const [desktopAlertMessage, setDesktopAlertMessage] = useState("");
   const [notifications, setNotifications] = useState([]);
   const [presenceClock, setPresenceClock] = useState(0);
   const screenShareVideoRef = useRef(null);
@@ -180,6 +219,7 @@ function App() {
   const directChatRef = useRef(null);
   const chatListRef = useRef(null);
   const meetingOwnerIdRef = useRef(meetingOwnerId);
+  const settingsRef = useRef(settings);
 
   const {
     localStream, isMuted, permissionGranted, error,
@@ -252,12 +292,27 @@ function App() {
 
   const selfStatus = settings.doNotDisturb ? "Do Not Disturb" : settings.focusMode ? "Focus" : "Available";
   useEffect(() => {
+    settingsRef.current = settings;
     try {
       localStorage.setItem("proxispeak_settings", JSON.stringify(settings));
     } catch (settingsError) {
       console.error("[ProxiSpeak] Could not save settings:", settingsError);
     }
   }, [settings]);
+  useEffect(() => {
+    try {
+      localStorage.setItem(THEME_MODE_KEY, themeMode);
+    } catch (themeError) {
+      console.error("[ProxiSpeak] Could not save theme preference:", themeError);
+    }
+  }, [themeMode]);
+  useEffect(() => {
+    try {
+      localStorage.setItem("proxispeak_avatar_color", avatarColor);
+    } catch (colorError) {
+      console.error("[ProxiSpeak] Could not save avatar color:", colorError);
+    }
+  }, [avatarColor]);
   useEffect(() => {
     try {
       localStorage.setItem("proxispeak_peer_volumes", JSON.stringify(peerVolumes));
@@ -296,6 +351,7 @@ function App() {
     setUsername(cleanName);
     setRoomName(cleanRoom);
     setActiveRoom(cleanRoom);
+    if (settings.autoJoinAudio && !permissionGranted) void startAudio();
   };
 
   const handleLeave = () => {
@@ -443,8 +499,23 @@ function App() {
   };
 
   const addNotification = (title, detail) => {
-    if (settings.focusMode || settings.doNotDisturb) return;
-    setNotifications(c => [{ id: Date.now(), title, detail }, ...c].slice(0, 8));
+    const activeSettings = settingsRef.current;
+    if (activeSettings.focusMode || activeSettings.doNotDisturb || activeSettings.quietHours) return;
+    setNotifications((current) => [{ id: Date.now(), title, detail }, ...current].slice(0, 8));
+    if (
+      activeSettings.desktopAlerts
+      && document.hidden
+      && typeof Notification !== "undefined"
+      && Notification.permission === "granted"
+    ) {
+      try {
+        const desktopNotification = new Notification(title, { body: detail, icon: brandIcon });
+        desktopNotification.onclick = () => window.focus();
+      } catch (notificationError) {
+        console.error("[ProxiSpeak] Could not show desktop notification:", notificationError);
+        setDesktopAlertMessage("A desktop notification could not be displayed.");
+      }
+    }
   };
 
   const handleChatMessage = (msg) => {
@@ -709,7 +780,7 @@ function App() {
     };
     const onAnnouncement = (message) => {
       setAnnouncement(message);
-      setNotifications((current) => [{ id: `${Date.now()}-${Math.random()}`, title: "Office announcement", detail: message.text }, ...current].slice(0, 20));
+      addNotification("Office announcement", message.text);
       window.setTimeout(() => setAnnouncement((current) => current?.id === message.id ? null : current), 12_000);
     };
     socket.on("meeting:action", onMeetingAction);
@@ -721,11 +792,17 @@ function App() {
   }, [chatConnected]);
 
   useEffect(() => {
-    if (!pushToTalk || !permissionGranted) return undefined;
+    if (!settings.pushToTalk || !permissionGranted) return undefined;
     setMuted(true);
     const releaseOnBlur = () => setMuted(true);
     const press = (event) => {
-      if (event.code !== "Space" || event.repeat || ["INPUT", "TEXTAREA"].includes(document.activeElement?.tagName)) return;
+      const target = event.target;
+      if (
+        event.code !== "Space"
+        || event.repeat
+        || target?.isContentEditable
+        || target?.closest?.("input, textarea, select, button, [contenteditable='true']")
+      ) return;
       event.preventDefault();
       setMuted(false);
     };
@@ -739,8 +816,9 @@ function App() {
       window.removeEventListener("keydown", press);
       window.removeEventListener("keyup", release);
       window.removeEventListener("blur", releaseOnBlur);
+      setMuted(true);
     };
-  }, [pushToTalk, permissionGranted, setMuted]);
+  }, [settings.pushToTalk, permissionGranted, setMuted]);
 
   const handleRemoteScreenShareChange = (share) => {
     setRemoteScreenShare((current) => {
@@ -749,8 +827,32 @@ function App() {
     });
   };
 
-  const handleToggleSetting = (key) => {
-    setSettings(c => ({ ...c, [key]: !c[key] }));
+  const handleToggleSetting = async (key) => {
+    if (key === "desktopAlerts" && !settings.desktopAlerts) {
+      if (typeof Notification === "undefined") {
+        setDesktopAlertMessage("Desktop notifications are not supported in this browser.");
+        return;
+      }
+      if (Notification.permission === "denied") {
+        setDesktopAlertMessage("Notifications are blocked by your browser. Allow them in site settings, then try again.");
+        return;
+      }
+      if (Notification.permission !== "granted") {
+        try {
+          const permission = await Notification.requestPermission();
+          if (permission !== "granted") {
+            setDesktopAlertMessage("Notification permission was not granted.");
+            return;
+          }
+        } catch (permissionError) {
+          console.error("[ProxiSpeak] Could not request notification permission:", permissionError);
+          setDesktopAlertMessage("Could not request notification permission.");
+          return;
+        }
+      }
+    }
+    setDesktopAlertMessage("");
+    setSettings((current) => ({ ...current, [key]: !current[key] }));
   };
 
   const timeAgo = (user) => {
@@ -759,8 +861,16 @@ function App() {
     const minutes = Math.max(0, Math.floor((presenceClock - user.joinedAt) / 60_000));
     return minutes === 0 ? "Just now" : `${minutes}m ago`;
   };
+  const desktopAlertStatus = desktopAlertMessage
+    || (typeof Notification === "undefined"
+      ? "Desktop notifications are not supported in this browser."
+      : Notification.permission === "granted"
+        ? settings.desktopAlerts ? "Browser permission is enabled." : "Browser permission is ready; turn this on to receive alerts."
+        : Notification.permission === "denied"
+          ? "Notifications are blocked in browser site settings."
+          : "Turning this on will ask your browser for permission.");
 
-  if (!username) return <JoinScreen onJoin={handleJoin} rooms={officeRooms} />;
+  if (!username) return <JoinScreen onJoin={handleJoin} rooms={officeRooms} themeMode={themeMode} />;
 
   return (
     <div className={`proxi-app-shell theme-${themeMode} ${activeTab === "Office" ? "office-layout" : ""}`}>
@@ -781,7 +891,7 @@ function App() {
               className={`nav-item ${activeTab === item.id ? "active" : ""}`}
               onClick={() => setActiveTab(item.id)}
             >
-              <span className="nav-icon">{item.icon}</span>
+              <span className="nav-icon"><Icon name={item.icon} size={17} /></span>
               {item.label}
             </button>
           ))}
@@ -797,15 +907,25 @@ function App() {
         <div className="navigation-actions">
           <div className="header-right">
             <button
+              type="button"
+              className="hdr-icon-btn theme-toggle-btn"
+              aria-label={`Switch to ${themeMode === "dark" ? "light" : "dark"} mode`}
+              aria-pressed={themeMode === "dark"}
+              title={`Switch to ${themeMode === "dark" ? "light" : "dark"} mode`}
+              onClick={() => setThemeMode((current) => current === "dark" ? "light" : "dark")}
+            >
+              <Icon name={themeMode === "dark" ? "sun" : "moon"} size={19} />
+            </button>
+            <button
               className={`hdr-icon-btn ${searchOpen ? "active" : ""}`}
               aria-label="Search"
               onClick={() => setSearchOpen(o => !o)}
               title="Search teammates"
             >
-              🔍
+              <Icon name="search" />
             </button>
-            <button className="hdr-icon-btn notif-btn" aria-label="Notifications" onClick={() => { setNotificationOpen(o => !o); setProfileOpen(false); }}>
-              🔔
+            <button className="hdr-icon-btn notif-btn" aria-label="Notifications" aria-expanded={notificationOpen} onClick={() => { setNotificationOpen(o => !o); setProfileOpen(false); }}>
+              <Icon name="bell" />
               {notifications.length > 0 && <span className="notif-badge">{notifications.length}</span>}
             </button>
             <button className="hdr-profile-btn" aria-label="Profile" onClick={() => { setProfileOpen(o => !o); setNotificationOpen(false); }}>
@@ -912,6 +1032,7 @@ function App() {
                   meetingRooms={officeRooms}
                   spawnRoom={activeRoom}
                   avatarColor={avatarColor}
+                  themeMode={themeMode}
                 />
               </div>
 
@@ -1096,7 +1217,7 @@ function App() {
                         <div className="meeting-list">
                           {scheduledMeetings.length === 0 ? (
                             <div className="meeting-empty">
-                              <span className="meeting-empty-icon" aria-hidden="true">▣</span>
+                              <span className="meeting-empty-icon" aria-hidden="true"><Icon name="calendar" size={22} /></span>
                               <strong>No meetings scheduled yet</strong>
                               <span>Schedule a meeting to share it with your office.</span>
                             </div>
@@ -1166,7 +1287,7 @@ function App() {
                                 <h2 id="schedule-meeting-title">Schedule a new meeting</h2>
                                 <p>Set a time and add participants for your virtual office meeting.</p>
                               </div>
-                              <button type="button" className="meeting-dialog-close" aria-label="Close" onClick={() => setIsScheduleFormOpen(false)}>×</button>
+                              <button type="button" className="meeting-dialog-close" aria-label="Close" onClick={() => setIsScheduleFormOpen(false)}><Icon name="close" size={18} /></button>
                             </div>
                             <form className="meeting-form" onSubmit={handleCreateMeeting}>
                               <label>
@@ -1231,7 +1352,7 @@ function App() {
                                 <small>Separate addresses with commas or new lines. Delivery requires RESEND_API_KEY and EMAIL_FROM on the server.</small>
                               </label>
                               <div className="meeting-location">
-                                <span aria-hidden="true">◎</span>
+                                <Icon name="mapPin" size={18} />
                                 <div><strong>Meeting location: ProxiSpeak Virtual Office</strong><small>Participants can join through your existing office.</small></div>
                               </div>
                               {meetingFormError && <p role="alert" className="meeting-form-error">{meetingFormError}</p>}
@@ -1249,15 +1370,45 @@ function App() {
                     <div className="workspace-card">
                       <div className="card-header-row"><h2>Settings</h2><span>Preferences</span></div>
                       <div className="setting-list">
+                        <div className="setting-row theme-setting-row">
+                          <div className="theme-setting-copy">
+                            <span>Appearance</span>
+                            <small>Choose light or dark mode</small>
+                          </div>
+                          <div className="theme-mode-switch" role="group" aria-label="Appearance">
+                            <button
+                              type="button"
+                              className={themeMode === "light" ? "selected" : ""}
+                              aria-pressed={themeMode === "light"}
+                              onClick={() => setThemeMode("light")}
+                            >
+                              <Icon name="sun" size={16} />
+                              Light
+                            </button>
+                            <button
+                              type="button"
+                              className={themeMode === "dark" ? "selected" : ""}
+                              aria-pressed={themeMode === "dark"}
+                              onClick={() => setThemeMode("dark")}
+                            >
+                              <Icon name="moon" size={16} />
+                              Dark
+                            </button>
+                          </div>
+                        </div>
                         {[["autoJoinAudio","Auto-join audio"],["focusMode","Focus mode"],["quietHours","Quiet hours"],["desktopAlerts","Desktop alerts"],["doNotDisturb","Do not disturb"]].map(([key, label]) => (
                           <label key={key} className="setting-row">
                             <span>{label}</span>
                             <input type="checkbox" checked={settings[key]} onChange={() => handleToggleSetting(key)} />
                           </label>
                         ))}
+                        <small className="settings-help">
+                          Auto-join requests microphone access when you enter. Focus mode, Quiet hours, and Do not disturb silence new alerts.
+                        </small>
+                        <small className="settings-help" aria-live="polite">{desktopAlertStatus}</small>
                         <label className="setting-row">
                           <span>Push to talk (hold Space)</span>
-                          <input type="checkbox" checked={pushToTalk} onChange={(event) => setPushToTalk(event.target.checked)} />
+                          <input type="checkbox" checked={settings.pushToTalk} onChange={() => handleToggleSetting("pushToTalk")} />
                         </label>
                         <label className="setting-row audio-volume-row">
                           <span>Speaker volume ({speakerVolume}%)</span>
@@ -1266,8 +1417,17 @@ function App() {
                         <div className="setting-row avatar-row">
                           <span>Avatar colour</span>
                           <div className="avatar-colour-picker">
-                            {["#2563eb","#8b5cf6","#f97316","#10b981","#ec4899","#facc15","#ef4444"].map(c => (
-                              <button key={c} type="button" className={`avatar-color-swatch ${avatarColor === c ? "selected" : ""}`} style={{ background: c }} onClick={() => setAvatarColor(c)} />
+                            {AVATAR_COLORS.map(({ name, value }) => (
+                              <button
+                                key={value}
+                                type="button"
+                                className={`avatar-color-swatch ${avatarColor === value ? "selected" : ""}`}
+                                style={{ background: value }}
+                                onClick={() => setAvatarColor(value)}
+                                aria-label={`Set avatar colour to ${name}`}
+                                aria-pressed={avatarColor === value}
+                                title={name}
+                              />
                             ))}
                           </div>
                         </div>
@@ -1281,11 +1441,13 @@ function App() {
             {/* ── BOTTOM VOICE CONTROLS BAR ── */}
             <div className="voice-controls-bar">
               <button
+                type="button"
                 className={`voice-btn mic-btn ${isMuted ? "muted" : "active"}`}
                 onClick={permissionGranted ? toggleMute : startAudio}
-                title={isMuted ? "Unmute microphone" : "Mute microphone"}
+                title={!permissionGranted ? "Enable microphone" : isMuted ? "Unmute microphone" : "Mute microphone"}
+                aria-label={!permissionGranted ? "Enable microphone" : isMuted ? "Unmute microphone" : "Mute microphone"}
               >
-                {isMuted ? "🎙️" : "🎤"}
+                <Icon name={isMuted ? "micOff" : "mic"} size={18} />
               </button>
 
               <button
@@ -1295,7 +1457,7 @@ function App() {
                 title={cameraStream ? "Turn camera off" : "Turn camera on"}
                 aria-label={cameraStream ? "Turn camera off" : "Turn camera on"}
               >
-                {cameraStream ? "▣" : "▢"}
+                <Icon name={cameraStream ? "video" : "videoOff"} size={18} />
               </button>
               <button
                 type="button"
@@ -1304,7 +1466,7 @@ function App() {
                 title={screenShareStream ? "Stop screen sharing" : "Share screen"}
                 aria-label={screenShareStream ? "Stop screen sharing" : "Share screen"}
               >
-                ▤
+                <Icon name="screenShare" size={18} />
               </button>
               <button
                 type="button"
@@ -1313,7 +1475,7 @@ function App() {
                 title={raisedHand ? "Lower hand" : "Raise hand"}
                 aria-pressed={raisedHand}
               >
-                ✋
+                <Icon name="hand" size={18} />
               </button>
               <div className="reaction-picker" role="group" aria-label="Send a reaction">
                 {["👏", "❤️", "👍"].map((emoji) => (
@@ -1321,24 +1483,27 @@ function App() {
                 ))}
               </div>
               <label className="push-to-talk-toggle">
-                <input type="checkbox" checked={pushToTalk} onChange={(event) => setPushToTalk(event.target.checked)} />
+                <input type="checkbox" checked={settings.pushToTalk} onChange={() => handleToggleSetting("pushToTalk")} />
                 <span>Push to talk (Space)</span>
               </label>
               <button
                 className={`voice-btn speaker-btn ${!speakerEnabled ? "muted" : ""}`}
                 onClick={toggleSpeakerMute}
                 title="Toggle speaker"
+                aria-label={speakerEnabled ? "Mute speakers" : "Enable speakers"}
               >
-                {speakerEnabled ? "🔊" : "🔇"}
+                <Icon name={speakerEnabled ? "volume" : "volumeOff"} size={18} />
               </button>
 
               <div className="proximity-wrapper">
                 <button
                   className="proximity-selector-btn"
                   onClick={() => setProximityOpen(o => !o)}
+                  aria-expanded={proximityOpen}
+                  aria-haspopup="menu"
                 >
                   <span className="prox-dot" />
-                  Proximity: {earshotRadius}px <span className="caret-icon">▾</span>
+                  Proximity: {earshotRadius}px <Icon name="chevronDown" size={15} />
                 </button>
                 {proximityOpen && (
                   <div className="proximity-dropdown">
@@ -1355,11 +1520,11 @@ function App() {
                 )}
               </div>
 
-              <button className="voice-btn settings-btn" title="Audio settings" onClick={() => setActiveTab("Settings")}>
-                ⚙
+              <button type="button" className="voice-btn settings-btn" title="Audio settings" aria-label="Open settings" onClick={() => setActiveTab("Settings")}>
+                <Icon name="settings" size={18} />
               </button>
 
-              <button className="voice-btn end-btn" onClick={handleLeave} title="Leave office">
+              <button type="button" className="voice-btn end-btn" onClick={handleLeave} title="Leave office" aria-label="Leave office">
                 <svg viewBox="0 0 24 24" aria-hidden="true">
                   <path d="M12 9c-1.6 0-3.15.25-4.6.72v3.1c0 .39-.23.74-.56.9-.98.49-1.87 1.12-2.65 1.87-.18.18-.42.28-.68.28-.28 0-.52-.11-.71-.29L.29 12.88a.996.996 0 0 1 0-1.41C3.34 8.44 7.46 6.5 12 6.5s8.66 1.94 11.71 4.97c.39.39.39 1.02 0 1.41l-2.5 2.5a.996.996 0 0 1-.71.29c-.26 0-.5-.1-.68-.28a11.8 11.8 0 0 0-2.65-1.87.996.996 0 0 1-.56-.9v-3.1C15.15 9.25 13.6 9 12 9Z" />
                 </svg>
@@ -1376,7 +1541,7 @@ function App() {
                 <span className="team-dot" /><span>ProxiSpeak HQ</span><span className="caret-icon">· Floor 2</span>
               </div>
               <div className="online-count-btn">
-                <span className="users-icon">👥</span><span>{presenceUsers.length} Online</span>
+                <span className="users-icon"><Icon name="people" size={16} /></span><span>{presenceUsers.length} Online</span>
               </div>
             </div>
             <div className="presence-head">
@@ -1400,7 +1565,7 @@ function App() {
                   transition: "background 0.15s ease"
                 }}
               >
-                🔍
+                <Icon name="search" size={16} />
               </button>
               <button
                 type="button"
@@ -1410,13 +1575,13 @@ function App() {
                 aria-pressed={presenceCollapsed}
                 title={presenceCollapsed ? "Expand sidebar" : "Collapse sidebar"}
               >
-                {presenceCollapsed ? "›" : "‹"}
+                <Icon name={presenceCollapsed ? "chevronRight" : "chevronLeft"} size={16} />
               </button>
             </div>
 
             {searchOpen && (
               <div className="presence-search">
-                <span>🔍</span>
+                <span><Icon name="search" size={15} /></span>
                 <input
                   type="text"
                   autoFocus

@@ -1,3 +1,5 @@
+import Icon from "./Icon";
+
 export function AudioControls({
   isMuted,
   toggleMute,
@@ -19,7 +21,7 @@ export function AudioControls({
         onClick={toggleSpeakerMute}
         title={speakerEnabled ? 'Mute system sound' : 'Enable system sound'}
       >
-        {speakerEnabled ? '🔊' : '🔇'}
+        <Icon name={speakerEnabled ? "volume" : "volumeOff"} />
       </button>
 
       <button
@@ -29,7 +31,7 @@ export function AudioControls({
         onClick={() => setSpeakerVolume(Math.max(0, speakerVolume - 10))}
         title="Decrease system sound."
       >
-        −
+        <Icon name="volumeDown" size={16} />
       </button>
 
       <button
@@ -39,7 +41,7 @@ export function AudioControls({
         onClick={() => setSpeakerVolume(Math.min(100, speakerVolume + 10))}
         title="Increase system sound."
       >
-        +
+        <Icon name="volumeUp" size={16} />
       </button>
 
       <span
