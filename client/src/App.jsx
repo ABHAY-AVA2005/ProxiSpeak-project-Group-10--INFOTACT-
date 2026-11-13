@@ -889,7 +889,10 @@ function App() {
               key={item.id}
               type="button"
               className={`nav-item ${activeTab === item.id ? "active" : ""}`}
-              onClick={() => setActiveTab(item.id)}
+              aria-current={activeTab === item.id ? "page" : undefined}
+              onClick={() => setActiveTab((currentTab) => (
+                currentTab === item.id && item.id !== "Office" ? "Office" : item.id
+              ))}
             >
               <span className="nav-icon"><Icon name={item.icon} size={17} /></span>
               {item.label}
