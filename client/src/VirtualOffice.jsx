@@ -14,9 +14,24 @@ const WORLD_H = 600;
 const GRID_SIZE = 20;
 const AVATAR_RADIUS = 18;
 const PATH_STEP = 18;
+const OPEN_WORKSPACE_BASE = { x: 312, y: 195, width: 376, height: 190 };
+const OPEN_WORKSPACE_INSET = OPEN_WORKSPACE_BASE.width * 0.15;
+const OPEN_WORKSPACE = {
+  ...OPEN_WORKSPACE_BASE,
+  x: OPEN_WORKSPACE_BASE.x + OPEN_WORKSPACE_INSET,
+  width: OPEN_WORKSPACE_BASE.width - OPEN_WORKSPACE_INSET * 2,
+};
+const OPEN_WORKSPACE_DESK_WIDTH = 85;
+const OPEN_WORKSPACE_DESKS = [0, 1, 2].flatMap((column) => {
+  const x = OPEN_WORKSPACE.x + column * (
+    OPEN_WORKSPACE_DESK_WIDTH +
+    (OPEN_WORKSPACE.width - OPEN_WORKSPACE_DESK_WIDTH * 3) / 2
+  );
+  return [{ x, y: 220 }, { x, y: 315 }];
+});
 
 // ─── Wall / obstacle definitions ─────────────────────────────────────────────
-// Each rect: { x, y, width, height, label? }
+// Rectangles use x/y as their top-left; circles use x/y as their center.
 const buildRoomBoundary = (room, doorSide, doorStart = 0, doorWidth = 100) => {
   const { x, y, width, height } = room;
   const left = x;
@@ -56,14 +71,6 @@ const buildRoomBoundary = (room, doorSide, doorStart = 0, doorWidth = 100) => {
   return walls;
 };
 
-const WALLS = [
-  // Outer boundary walls (inset 10px)
-  { x: 10, y: 10, width: WORLD_W - 20, height: 6, label: null },
-  { x: 10, y: WORLD_H - 16, width: WORLD_W - 20, height: 6, label: null },
-  { x: 10, y: 10, width: 6, height: WORLD_H - 20, label: null },
-  { x: WORLD_W - 16, y: 10, width: 6, height: WORLD_H - 20, label: null },
-];
-
 const ROOM_BOUNDARIES = [
   // Meeting Room (top-left: x 18..303, y 18..205) -> doorway on right wall at y: 65..165 (gap: 100px)
   ...buildRoomBoundary({ x: 18, y: 18, width: 285, height: 187 }, "right", 65, 100),
@@ -75,45 +82,178 @@ const ROOM_BOUNDARIES = [
   ...buildRoomBoundary({ x: 697, y: 395, width: 285, height: 190 }, "left", 420, 105),
 ];
 
-// Solid obstacles that avatars navigate around
-// Note: We use compact collision bounds so avatars can walk around furniture, sit at desks, and NEVER get trapped inside
+// Collision bounds follow the visible furniture; circles use x/y as their center.
 const OBSTACLES = [
-  // Meeting room conference table: table is drawn at (52, 68, 205, 82)
-  // Collision box only occupies the central core (70, 76, 168, 66) so avatars can walk around it freely
-  { x: 70, y: 76, width: 168, height: 66, label: "Table" },
-  // Open workspace desks (compact collision box)
-  { x: 335, y: 225, width: 70, height: 35, label: "Desk" },
-  { x: 440, y: 225, width: 70, height: 35, label: "Desk" },
-  { x: 545, y: 225, width: 70, height: 35, label: "Desk" },
-  { x: 335, y: 320, width: 70, height: 35, label: "Desk" },
-  { x: 440, y: 320, width: 70, height: 35, label: "Desk" },
-  { x: 545, y: 320, width: 70, height: 35, label: "Desk" },
-  // Lounge sofa
-  { x: 45, y: 445, width: 105, height: 45, label: "Sofa" },
-  // Pantry counter
-  { x: 710, y: 425, width: 250, height: 30, label: "Counter" },
+  { x: 52, y: 68, width: 205, height: 82, label: "Meeting table" },
+  ...[0, 1, 2, 3].flatMap((chair) => [
+    { x: 64 + chair * 48, y: 54, width: 28, height: 12, label: "Chair" },
+    { x: 64 + chair * 48, y: 150, width: 28, height: 12, label: "Chair" },
+  ]),
+  { x: 34, y: 95, width: 12, height: 28, label: "Chair" },
+  { x: 262, y: 95, width: 12, height: 28, label: "Chair" },
+  { x: 40, y: 172, radius: 19, label: "Plant" },
+  ...[0, 1, 2].map((desk) => ({
+    x: 712 + desk * 86, y: 48, width: 70, height: 65, label: "Focus desk",
+  })),
+  ...OPEN_WORKSPACE_DESKS.map(({ x, y }) => ({
+    x, y, width: OPEN_WORKSPACE_DESK_WIDTH, height: 66, label: "Desk",
+  })),
+  { x: 42, y: 440, width: 115, height: 55, label: "Sofa" },
+  { x: 52, y: 508, width: 95, height: 38, label: "Coffee table" },
+  { x: 702, y: 396, width: 268, height: 62, label: "Pantry counter" },
+  { x: 940, y: 535, radius: 19, label: "Plant" },
 ];
 
-// Combined for collision
-const ALL_SOLID = [...WALLS, ...ROOM_BOUNDARIES, ...OBSTACLES];
+function mapAxisCoordinate(value, renderedSize, baseSize, middleStart, middleEnd) {
+  const extraSpace = Math.max(0, renderedSize - baseSize);
+  if (value <= middleStart) return value;
+  if (value < middleEnd) {
+    const expandedScale = 1 + extraSpace / (middleEnd - middleStart);
+    return middleStart + (value - middleStart) * expandedScale;
+  }
+  return value + extraSpace;
+}
 
-function checkCollision(cx, cy, radius = AVATAR_RADIUS) {
-  for (const rect of ALL_SOLID) {
-    const nearX = Math.max(rect.x, Math.min(cx, rect.x + rect.width));
-    const nearY = Math.max(rect.y, Math.min(cy, rect.y + rect.height));
-    if ((cx - nearX) ** 2 + (cy - nearY) ** 2 < radius * radius) return true;
+function unmapAxisCoordinate(value, renderedSize, baseSize, middleStart, middleEnd) {
+  const extraSpace = Math.max(0, renderedSize - baseSize);
+  const expandedMiddleEnd = middleEnd + extraSpace;
+  if (value <= middleStart) return value;
+  if (value < expandedMiddleEnd) {
+    const expandedScale = 1 + extraSpace / (middleEnd - middleStart);
+    return middleStart + (value - middleStart) / expandedScale;
+  }
+  return value - extraSpace;
+}
+
+function createRenderLayout(cssWidth, cssHeight, dpr = 1) {
+  const safeWidth = Math.max(1, cssWidth);
+  const safeHeight = Math.max(1, cssHeight);
+  const scale = Math.min(safeWidth / WORLD_W, safeHeight / WORLD_H);
+  const width = safeWidth / scale;
+  const height = safeHeight / scale;
+  const layout = { width, height, scale, dpr, cssWidth: safeWidth, cssHeight: safeHeight };
+  const mapX = (x) => mapAxisCoordinate(x, width, WORLD_W, 303, 697);
+  const mapY = (y) => mapAxisCoordinate(y, height, WORLD_H, 205, 395);
+  const outerWalls = [
+    { x: 10, y: 10, width: width - 20, height: 6 },
+    { x: 10, y: height - 16, width: width - 20, height: 6 },
+    { x: 10, y: 10, width: 6, height: height - 20 },
+    { x: width - 16, y: 10, width: 6, height: height - 20 },
+  ];
+  const remapObstacle = (rect) => {
+    return {
+      ...rect,
+      x: mapX(rect.x),
+      y: mapY(rect.y),
+    };
+  };
+  const remapWall = (rect) => {
+    const x = mapX(rect.x);
+    const y = mapY(rect.y);
+    return {
+      ...rect,
+      x,
+      y,
+      width: mapX(rect.x + rect.width) - x,
+      height: mapY(rect.y + rect.height) - y,
+    };
+  };
+  layout.solids = [
+    ...outerWalls,
+    ...ROOM_BOUNDARIES.map(remapWall),
+    ...OBSTACLES.map(remapObstacle),
+  ];
+  return layout;
+}
+
+function createMappedContext(context, layoutRef) {
+  const mapPoint = (x, y) => {
+    const { width, height } = layoutRef.current;
+    return [
+      mapAxisCoordinate(x, width, WORLD_W, 303, 697),
+      mapAxisCoordinate(y, height, WORLD_H, 205, 395),
+    ];
+  };
+  const pointMethods = new Set(["moveTo", "lineTo", "translate", "rect"]);
+  const curveMethods = new Set(["quadraticCurveTo"]);
+  const rectMethods = new Set(["fillRect", "strokeRect", "clearRect"]);
+  return new Proxy(context, {
+    get(target, property) {
+      const method = Reflect.get(target, property, target);
+      if (typeof method !== "function") return method;
+      if (pointMethods.has(property) || rectMethods.has(property)) {
+        return (x, y, ...rest) => {
+          const [mappedX, mappedY] = mapPoint(x, y);
+          return method.call(target, mappedX, mappedY, ...rest);
+        };
+      }
+      if (property === "fillText" || property === "strokeText") {
+        return (text, x, y, ...rest) => {
+          const [mappedX, mappedY] = mapPoint(x, y);
+          return method.call(target, text, mappedX, mappedY, ...rest);
+        };
+      }
+      if (curveMethods.has(property)) {
+        return (controlX, controlY, x, y) => {
+          const [mappedControlX, mappedControlY] = mapPoint(controlX, controlY);
+          const [mappedX, mappedY] = mapPoint(x, y);
+          return method.call(target, mappedControlX, mappedControlY, mappedX, mappedY);
+        };
+      }
+      if (property === "bezierCurveTo") {
+        return (control1X, control1Y, control2X, control2Y, x, y) => {
+          const [mappedControl1X, mappedControl1Y] = mapPoint(control1X, control1Y);
+          const [mappedControl2X, mappedControl2Y] = mapPoint(control2X, control2Y);
+          const [mappedX, mappedY] = mapPoint(x, y);
+          return method.call(target, mappedControl1X, mappedControl1Y, mappedControl2X, mappedControl2Y, mappedX, mappedY);
+        };
+      }
+      if (property === "arc" || property === "ellipse") {
+        return (x, y, ...rest) => {
+          const [mappedX, mappedY] = mapPoint(x, y);
+          return method.call(target, mappedX, mappedY, ...rest);
+        };
+      }
+      if (property === "createLinearGradient") {
+        return (x1, y1, x2, y2) => {
+          const [mappedX1, mappedY1] = mapPoint(x1, y1);
+          const [mappedX2, mappedY2] = mapPoint(x2, y2);
+          return method.call(target, mappedX1, mappedY1, mappedX2, mappedY2);
+        };
+      }
+      return method.bind(target);
+    },
+    set(target, property, value) {
+      return Reflect.set(target, property, value, target);
+    },
+  });
+}
+
+function checkCollision(cx, cy, radius = AVATAR_RADIUS, layout) {
+  const mappedX = mapAxisCoordinate(cx, layout.width, WORLD_W, 303, 697);
+  const mappedY = mapAxisCoordinate(cy, layout.height, WORLD_H, 205, 395);
+  for (const rect of layout.solids) {
+    if (rect.radius) {
+      if ((mappedX - rect.x) ** 2 + (mappedY - rect.y) ** 2 < (radius + rect.radius) ** 2) {
+        return true;
+      }
+      continue;
+    }
+    const nearX = Math.max(rect.x, Math.min(mappedX, rect.x + rect.width));
+    const nearY = Math.max(rect.y, Math.min(mappedY, rect.y + rect.height));
+    if ((mappedX - nearX) ** 2 + (mappedY - nearY) ** 2 < radius * radius) return true;
   }
   return false;
 }
 
 // Find nearest collision-free point in 16 radial directions
-function findNearestFreePoint(x, y, radius = AVATAR_RADIUS - 4) {
-  if (!checkCollision(x, y, radius)) return { x, y };
+function findNearestFreePoint(x, y, radius = AVATAR_RADIUS, layout) {
+  if (!checkCollision(x, y, radius, layout)) return { x, y };
   for (let r = 2; r <= 40; r += 2) {
     for (let a = 0; a < Math.PI * 2; a += Math.PI / 8) {
       const tx = Math.max(25, Math.min(WORLD_W - 25, x + Math.cos(a) * r));
       const ty = Math.max(25, Math.min(WORLD_H - 25, y + Math.sin(a) * r));
-      if (!checkCollision(tx, ty, radius)) {
+      if (!checkCollision(tx, ty, radius, layout)) {
         return { x: tx, y: ty };
       }
     }
@@ -150,29 +290,34 @@ function drawRoundedRect(ctx, x, y, width, height, radius) {
   ctx.closePath();
 }
 
-function isCellBlocked(cellX, cellY) {
+function isCellBlocked(cellX, cellY, layout) {
   if (cellX < 0 || cellY < 0 || cellX >= Math.ceil(WORLD_W / GRID_SIZE) || cellY >= Math.ceil(WORLD_H / GRID_SIZE)) {
     return true;
   }
 
   const pointX = cellX * GRID_SIZE + GRID_SIZE / 2;
   const pointY = cellY * GRID_SIZE + GRID_SIZE / 2;
-  return checkCollision(pointX, pointY, AVATAR_RADIUS - 4);
+  return checkCollision(pointX, pointY, AVATAR_RADIUS, layout);
 }
 
-function findPath(start, goal) {
+function findPath(start, goal, layout) {
   let startCell = pointToCell(start.x, start.y);
-  let goalCell = pointToCell(goal.x, goal.y);
+  let goalPosition = goal;
+  if (checkCollision(goalPosition.x, goalPosition.y, AVATAR_RADIUS, layout)) {
+    goalPosition = findNearestFreePoint(goalPosition.x, goalPosition.y, AVATAR_RADIUS, layout);
+    if (checkCollision(goalPosition.x, goalPosition.y, AVATAR_RADIUS, layout)) return [];
+  }
+  let goalCell = pointToCell(goalPosition.x, goalPosition.y);
 
   // If start is in or near a blocked cell, find closest free cell near start
-  if (isCellBlocked(startCell.x, startCell.y)) {
+  if (isCellBlocked(startCell.x, startCell.y, layout)) {
     let foundStart = null;
     for (let r = 1; r <= 4; r++) {
       for (let dx = -r; dx <= r; dx++) {
         for (let dy = -r; dy <= r; dy++) {
           const testX = startCell.x + dx;
           const testY = startCell.y + dy;
-          if (!isCellBlocked(testX, testY)) {
+          if (!isCellBlocked(testX, testY, layout)) {
             foundStart = { x: testX, y: testY };
             break;
           }
@@ -185,14 +330,14 @@ function findPath(start, goal) {
   }
 
   // If goal is slightly blocked, find closest free cell near goal
-  if (isCellBlocked(goalCell.x, goalCell.y)) {
+  if (isCellBlocked(goalCell.x, goalCell.y, layout)) {
     let foundGoal = null;
     for (let r = 1; r <= 4; r++) {
       for (let dx = -r; dx <= r; dx++) {
         for (let dy = -r; dy <= r; dy++) {
           const testX = goalCell.x + dx;
           const testY = goalCell.y + dy;
-          if (!isCellBlocked(testX, testY)) {
+          if (!isCellBlocked(testX, testY, layout)) {
             foundGoal = { x: testX, y: testY };
             break;
           }
@@ -201,8 +346,10 @@ function findPath(start, goal) {
       }
       if (foundGoal) break;
     }
-    if (foundGoal) goalCell = foundGoal;
-    else return [{ x: goal.x, y: goal.y }];
+    if (foundGoal) {
+      goalCell = foundGoal;
+      goalPosition = cellToPoint(goalCell);
+    } else return [];
   }
 
   const openSet = new Set([`${startCell.x},${startCell.y}`]);
@@ -224,7 +371,7 @@ function findPath(start, goal) {
     if (!currentKey) break;
     const [cx, cy] = currentKey.split(",").map(Number);
     if (cx === goalCell.x && cy === goalCell.y) {
-      const path = [{ x: goal.x, y: goal.y }];
+      const path = [goalPosition];
       let cursor = currentKey;
       while (cameFrom.has(cursor)) {
         cursor = cameFrom.get(cursor);
@@ -249,7 +396,11 @@ function findPath(start, goal) {
       if (nextX < 0 || nextY < 0 || nextX >= Math.ceil(WORLD_W / GRID_SIZE) || nextY >= Math.ceil(WORLD_H / GRID_SIZE)) {
         continue;
       }
-      if (isCellBlocked(nextX, nextY)) continue;
+      if (isCellBlocked(nextX, nextY, layout)) continue;
+      if (dx !== 0 && dy !== 0 && (
+        isCellBlocked(cx + dx, cy, layout) ||
+        isCellBlocked(cx, cy + dy, layout)
+      )) continue;
 
       const nextKey = `${nextX},${nextY}`;
       const tentative = (gScore.get(currentKey) ?? Infinity) + (dx === 0 || dy === 0 ? 1 : 1.4);
@@ -303,6 +454,7 @@ function VirtualOffice({
 }) {
   const canvasRef = useRef(null);
   const viewportRef = useRef(null);
+  const renderLayoutRef = useRef(createRenderLayout(WORLD_W, WORLD_H, 1));
   const [positionDisplay, setPositionDisplay] = useState({ x: 160, y: 44 });
   const [zoom, setZoom] = useState(1);
   const [gridVisible, setGridVisible] = useState(false);
@@ -381,10 +533,16 @@ function VirtualOffice({
       room.name.trim().toLowerCase() === spawnRoom || room.id.trim().toLowerCase() === spawnRoom
     );
     if (targetRoom) {
-      // If spawning in Meeting Room, place avatar in the open walkway above the table
+      // Start in clear walkways rather than inside the room's furniture.
       if (targetRoom.id.toLowerCase() === "meeting room" || targetRoom.name.toLowerCase() === "meeting room") {
         player.current.x = 160;
-        player.current.y = 44;
+        player.current.y = 180;
+      } else if (targetRoom.id.toLowerCase() === "open workspace" || targetRoom.name.toLowerCase() === "open workspace") {
+        player.current.x = WORLD_W / 2;
+        player.current.y = 180;
+      } else if (targetRoom.id.toLowerCase() === "focus zone" || targetRoom.name.toLowerCase() === "focus zone") {
+        player.current.x = 839;
+        player.current.y = 140;
       } else {
         const x = targetRoom.x + targetRoom.width / 2;
         const y = targetRoom.y + targetRoom.height / 2;
@@ -398,9 +556,9 @@ function VirtualOffice({
       clickTarget.current = null;
       stuckFramesRef.current = 0;
     } else {
-      // Default spawn inside Meeting Room
+      // Default spawn in the clear walkway below the meeting table.
       player.current.x = 160;
-      player.current.y = 44;
+      player.current.y = 180;
       routeRef.current = [];
       clickTargetRef.current = null;
       clickTarget.current = null;
@@ -457,9 +615,25 @@ function VirtualOffice({
     const speakingLastHeard = speakingLastHeardRef.current;
     let isRunning = true;
     const canvas = canvasRef.current;
-    const ctx = canvas.getContext("2d");
-    canvas.width = WORLD_W;
-    canvas.height = WORLD_H;
+    const rawCtx = canvas.getContext("2d");
+    const ctx = createMappedContext(rawCtx, renderLayoutRef);
+    const resizeCanvas = () => {
+      const viewport = viewportRef.current;
+      if (!viewport) return;
+      const { width, height } = viewport.getBoundingClientRect();
+      if (width <= 0 || height <= 0) return;
+      const dpr = window.devicePixelRatio || 1;
+      const layout = createRenderLayout(width, height, dpr);
+      const pixelWidth = Math.max(1, Math.round(width * dpr));
+      const pixelHeight = Math.max(1, Math.round(height * dpr));
+      if (canvas.width !== pixelWidth) canvas.width = pixelWidth;
+      if (canvas.height !== pixelHeight) canvas.height = pixelHeight;
+      renderLayoutRef.current = layout;
+    };
+    const resizeObserver = new ResizeObserver(resizeCanvas);
+    resizeObserver.observe(viewportRef.current);
+    window.addEventListener("resize", resizeCanvas);
+    resizeCanvas();
 
     // ── Socket.IO ──────────────────────────────────────────────────────────
     const socket = io(SERVER_URL, { transports: ["websocket"], reconnectionAttempts: 5 });
@@ -938,47 +1112,38 @@ function VirtualOffice({
     // ── Click-to-move ──────────────────────────────────────────────────────
     const onCanvasClick = (e) => {
       const rect = canvas.getBoundingClientRect();
-        const scaleX = WORLD_W / rect.width;
-      const scaleY = WORLD_H / rect.height;
+      const layout = renderLayoutRef.current;
       const currentZoom = zoomRef.current;
-      const screenX = (e.clientX - rect.left) * scaleX;
-      const screenY = (e.clientY - rect.top) * scaleY;
-      let tx = Math.round((screenX - WORLD_W / 2) / currentZoom + WORLD_W / 2);
-      let ty = Math.round((screenY - WORLD_H / 2) / currentZoom + WORLD_H / 2);
+      const screenX = (e.clientX - rect.left) / layout.scale;
+      const screenY = (e.clientY - rect.top) / layout.scale;
+      const renderedX = (screenX - layout.width / 2) / currentZoom + layout.width / 2;
+      const renderedY = (screenY - layout.height / 2) / currentZoom + layout.height / 2;
+      let tx = Math.round(unmapAxisCoordinate(renderedX, layout.width, WORLD_W, 303, 697));
+      let ty = Math.round(unmapAxisCoordinate(renderedY, layout.height, WORLD_H, 205, 395));
       tx = Math.max(25, Math.min(WORLD_W - 25, tx));
       ty = Math.max(25, Math.min(WORLD_H - 25, ty));
-      const target = { x: tx, y: ty };
-
-      // If clicked point is inside an obstacle, find nearest unblocked spot nearby
-      if (checkCollision(tx, ty, AVATAR_RADIUS)) {
-        let foundSpot = null;
-        for (let r = 10; r <= 80; r += 10) {
-          for (let a = 0; a < Math.PI * 2; a += Math.PI / 4) {
-            const testX = Math.round(tx + Math.cos(a) * r);
-            const testY = Math.round(ty + Math.sin(a) * r);
-            if (!checkCollision(testX, testY, AVATAR_RADIUS + 4)) {
-              foundSpot = { x: testX, y: testY };
-              break;
-            }
-          }
-          if (foundSpot) break;
-        }
-        if (foundSpot) {
-          target.x = foundSpot.x;
-          target.y = foundSpot.y;
+      let target = { x: tx, y: ty };
+      if (checkCollision(target.x, target.y, AVATAR_RADIUS, layout)) {
+        target = findNearestFreePoint(target.x, target.y, AVATAR_RADIUS, layout);
+        if (checkCollision(target.x, target.y, AVATAR_RADIUS, layout)) {
+          routeRef.current = [];
+          clickTargetRef.current = null;
+          clickTarget.current = null;
+          return;
         }
       }
 
-      const path = findPath({ x: player.current.x, y: player.current.y }, target);
-      if (path && path.length > 0) {
-        routeRef.current = path;
-        clickTargetRef.current = target;
-        clickTarget.current = target;
-      } else {
-        routeRef.current = [{ x: target.x, y: target.y }];
-        clickTargetRef.current = target;
-        clickTarget.current = target;
+      const path = findPath({ x: player.current.x, y: player.current.y }, target, layout);
+      if (!path.length) {
+        routeRef.current = [];
+        clickTargetRef.current = null;
+        clickTarget.current = null;
+        return;
       }
+      const destination = path[path.length - 1];
+      routeRef.current = path;
+      clickTargetRef.current = destination;
+      clickTarget.current = destination;
     };
     canvas.addEventListener("click", onCanvasClick);
 
@@ -1062,6 +1227,7 @@ function VirtualOffice({
 
     function gameLoop() {
       if (!isRunning) return;
+      const layout = renderLayoutRef.current;
 
       // ─── Movement ─────────────────────────────────────────────────────
       let dx = 0;
@@ -1107,8 +1273,11 @@ function VirtualOffice({
         const tdy = clickTarget.current.y - player.current.y;
         const dist = Math.hypot(tdx, tdy);
         if (dist < CLICK_SPEED) {
-          player.current.x = clickTarget.current.x;
-          player.current.y = clickTarget.current.y;
+          const target = clickTarget.current;
+          if (!checkCollision(target.x, target.y, AVATAR_RADIUS, layout)) {
+            player.current.x = target.x;
+            player.current.y = target.y;
+          }
           clickTarget.current = null;
           clickTargetRef.current = null;
         } else {
@@ -1125,21 +1294,21 @@ function VirtualOffice({
       }
 
       // Unstuck emergency escape: If player starts or grazes inside an obstacle/wall, smoothly nudge into nearest free space
-      if (checkCollision(player.current.x, player.current.y, AVATAR_RADIUS - 4)) {
-        const freePoint = findNearestFreePoint(player.current.x, player.current.y, AVATAR_RADIUS - 4);
+      if (checkCollision(player.current.x, player.current.y, AVATAR_RADIUS, layout)) {
+        const freePoint = findNearestFreePoint(player.current.x, player.current.y, AVATAR_RADIUS, layout);
         player.current.x = freePoint.x;
         player.current.y = freePoint.y;
       }
 
       if (dx !== 0) {
         const nx = Math.max(25, Math.min(WORLD_W - 25, player.current.x + dx));
-        if (!checkCollision(nx, player.current.y, AVATAR_RADIUS - 4)) {
+        if (!checkCollision(nx, player.current.y, AVATAR_RADIUS, layout)) {
           player.current.x = nx;
         }
       }
       if (dy !== 0) {
         const ny = Math.max(25, Math.min(WORLD_H - 25, player.current.y + dy));
-        if (!checkCollision(player.current.x, ny, AVATAR_RADIUS - 4)) {
+        if (!checkCollision(player.current.x, ny, AVATAR_RADIUS, layout)) {
           player.current.y = ny;
         }
       }
@@ -1164,14 +1333,14 @@ function VirtualOffice({
         repathCooldownRef.current = 10; // Prevent thrashing
 
         // 1. First gently nudge away from any collision boundary
-        const nudged = findNearestFreePoint(player.current.x, player.current.y, AVATAR_RADIUS - 3);
+        const nudged = findNearestFreePoint(player.current.x, player.current.y, AVATAR_RADIUS, layout);
         player.current.x = nudged.x;
         player.current.y = nudged.y;
 
         const target = clickTargetRef.current;
         if (target) {
           // 2. Rebuild the A* path dynamically to the destination
-          let newPath = findPath({ x: player.current.x, y: player.current.y }, target);
+          let newPath = findPath({ x: player.current.x, y: player.current.y }, target, layout);
 
           // 3. If direct path is not immediately found, probe 8 surrounding neighbor cells for an open route
           if (!newPath || newPath.length === 0) {
@@ -1182,8 +1351,8 @@ function VirtualOffice({
             for (const [ox, oy] of probeOffsets) {
               const probeX = Math.max(25, Math.min(WORLD_W - 25, player.current.x + ox));
               const probeY = Math.max(25, Math.min(WORLD_H - 25, player.current.y + oy));
-              if (!checkCollision(probeX, probeY, AVATAR_RADIUS - 4)) {
-                const altPath = findPath({ x: probeX, y: probeY }, target);
+              if (!checkCollision(probeX, probeY, AVATAR_RADIUS, layout)) {
+                const altPath = findPath({ x: probeX, y: probeY }, target, layout);
                 if (altPath && altPath.length > 0) {
                   newPath = [{ x: probeX, y: probeY }, ...altPath];
                   break;
@@ -1229,22 +1398,68 @@ function VirtualOffice({
       updateAudioSpatialMixer();
 
       // ─── Render ───────────────────────────────────────────────────────
-      ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.clearRect(0, 0, WORLD_W, WORLD_H);
+      rawCtx.setTransform(layout.scale * layout.dpr, 0, 0, layout.scale * layout.dpr, 0, 0);
+      rawCtx.clearRect(0, 0, layout.width, layout.height);
+      rawCtx.save();
+      rawCtx.translate(layout.width / 2, layout.height / 2);
+      rawCtx.scale(zoomRef.current, zoomRef.current);
+      rawCtx.translate(-layout.width / 2, -layout.height / 2);
       ctx.save();
-      ctx.translate(WORLD_W / 2, WORLD_H / 2);
-      ctx.scale(zoomRef.current, zoomRef.current);
-      ctx.translate(-WORLD_W / 2, -WORLD_H / 2);
 
       // ── HELPER: draw rounded rect path ──────────────────────────────
-      const rr = (rx, ry, rw, rh, rad) => { drawRoundedRect(ctx, rx, ry, rw, rh, rad); };
+      const mapX = (x) => mapAxisCoordinate(x, layout.width, WORLD_W, 303, 697);
+      const mapY = (y) => mapAxisCoordinate(y, layout.height, WORLD_H, 205, 395);
+      const rr = (rx, ry, rw, rh, rad) => {
+        drawRoundedRect(rawCtx, mapX(rx), mapY(ry), rw, rh, rad);
+      };
+      const drawPlant = (px, py) => {
+        ctx.save();
+        ctx.beginPath();
+        ctx.ellipse(px, py + 16, 11, 3, 0, 0, Math.PI * 2);
+        ctx.fillStyle = "rgba(35,42,38,0.12)";
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.moveTo(px, py + 8);
+        ctx.lineTo(px, py - 9);
+        ctx.moveTo(px, py - 1);
+        ctx.lineTo(px - 8, py - 9);
+        ctx.moveTo(px, py + 2);
+        ctx.lineTo(px + 8, py - 7);
+        ctx.strokeStyle = "#587451";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        [
+          [px, py - 11, 5, 8, 0, "#6f9466"],
+          [px - 9, py - 10, 5, 8, -0.75, "#789a6d"],
+          [px + 9, py - 8, 5, 8, 0.75, "#62875b"],
+        ].forEach(([x, y, radiusX, radiusY, rotation, color]) => {
+          ctx.beginPath();
+          ctx.ellipse(x, y, radiusX, radiusY, rotation, 0, Math.PI * 2);
+          ctx.fillStyle = color;
+          ctx.fill();
+        });
+
+        rr(px - 9, py + 5, 18, 12, 3);
+        ctx.fillStyle = "#a96f54";
+        ctx.fill();
+        ctx.strokeStyle = "#8b5843";
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.ellipse(px, py + 5, 8, 2, 0, 0, Math.PI * 2);
+        ctx.fillStyle = "#6b503c";
+        ctx.fill();
+        ctx.restore();
+      };
 
       // ── 1. FLOOR BACKGROUND ──────────────────────────────────────────
       const bgGrad = ctx.createLinearGradient(0, 0, WORLD_W, WORLD_H);
       bgGrad.addColorStop(0, "#ede9f6");
       bgGrad.addColorStop(1, "#e0dbf0");
       ctx.fillStyle = bgGrad;
-      ctx.fillRect(0, 0, WORLD_W, WORLD_H);
+      ctx.fillRect(0, 0, layout.width, layout.height);
 
       // Subtle floor texture dots
       ctx.fillStyle = "rgba(140,120,200,0.055)";
@@ -1271,7 +1486,7 @@ function VirtualOffice({
       // ── 2. ROOM ZONES (no overlap) ───────────────────────────────────
       const drawRoom = (rx, ry, rw, rh, label, fillColor) => {
         ctx.save();
-        rr(rx, ry, rw, rh, 16);
+        drawRoundedRect(rawCtx, mapX(rx), mapY(ry), mapX(rx + rw) - mapX(rx), mapY(ry + rh) - mapY(ry), 16);
         ctx.fillStyle = fillColor;
         ctx.fill();
         ctx.strokeStyle = "rgba(140,120,200,0.3)";
@@ -1285,10 +1500,9 @@ function VirtualOffice({
       };
 
       // Layout: Meeting Room TL, Focus Zone TR, Lounge BL, Pantry BR
-      // Center open workspace 320..680 x 210..385 (no overlap with rooms)
       drawRoom(18, 18, 285, 185, "Meeting Room", "rgba(228,224,248,0.88)");
       drawRoom(697, 18, 285, 185, "Focus Zone",   "rgba(220,232,248,0.88)");
-      drawRoom(312, 195, 376, 190, "Open Workspace", "rgba(240,238,252,0.65)");
+      drawRoom(OPEN_WORKSPACE.x, OPEN_WORKSPACE.y, OPEN_WORKSPACE.width, OPEN_WORKSPACE.height, "Open Workspace", "rgba(240,238,252,0.65)");
       drawRoom(18,  395, 285, 190, "Lounge",      "rgba(238,228,250,0.88)");
       drawRoom(697, 395, 285, 190, "Pantry",      "rgba(220,236,250,0.88)");
 
@@ -1324,9 +1538,7 @@ function VirtualOffice({
       // Chairs sides
       rr(34, 95, 12, 28, 4); ctx.fillStyle = "#3a3a5a"; ctx.fill();
       rr(262, 95, 12, 28, 4); ctx.fillStyle = "#3a3a5a"; ctx.fill();
-      // Plant TL corner
-      ctx.beginPath(); ctx.arc(40, 172, 13, 0, Math.PI*2); ctx.fillStyle = "#4a9e4a"; ctx.fill();
-      ctx.beginPath(); ctx.arc(40, 172, 7, 0, Math.PI*2); ctx.fillStyle = "#3a7e3a"; ctx.fill();
+      drawPlant(40, 172);
       ctx.restore();
 
       // ── 5. FOCUS ZONE FURNITURE ──────────────────────────────────────
@@ -1339,28 +1551,16 @@ function VirtualOffice({
         rr(dx + 19, dy + 8, 32, 20, 2); ctx.fillStyle = i % 2 === 0 ? "#2d3a7a" : "#1a3050"; ctx.fill();
         rr(dx + 17, dy + 50, 36, 15, 5); ctx.fillStyle = "#3a3a5a"; ctx.fill();
       }
-      ctx.beginPath(); ctx.arc(958, 168, 14, 0, Math.PI*2); ctx.fillStyle = "#4a9e4a"; ctx.fill();
-      ctx.beginPath(); ctx.arc(958, 168, 8, 0, Math.PI*2); ctx.fillStyle = "#3a7e3a"; ctx.fill();
       ctx.restore();
 
       // ── 6. OPEN WORKSPACE DESKS (CENTER AREA) ───────────────────────
       ctx.save();
-      // 2 rows × 3 desks, well inside 320..680 x 210..385
-      const deskPos = [
-        {x:325,y:220},{x:430,y:220},{x:535,y:220},
-        {x:325,y:315},{x:430,y:315},{x:535,y:315},
-      ];
-      deskPos.forEach((dp, idx) => {
+      OPEN_WORKSPACE_DESKS.forEach((dp, idx) => {
         rr(dp.x, dp.y, 85, 46, 6); ctx.fillStyle = "#c8b98a"; ctx.fill();
         ctx.strokeStyle = "#a89060"; ctx.lineWidth = 1; ctx.stroke();
         rr(dp.x+22, dp.y+6, 40, 26, 3); ctx.fillStyle = "#1e1e34"; ctx.fill();
         rr(dp.x+24, dp.y+8, 36, 22, 2); ctx.fillStyle = idx%2===0?"#2d3a7a":"#1a3050"; ctx.fill();
         rr(dp.x+24, dp.y+52, 36, 14, 5); ctx.fillStyle = "#3a3a5a"; ctx.fill();
-      });
-      // Plants in open area
-      [[312,390],[676,220],[676,390]].forEach(([px,py]) => {
-        ctx.beginPath(); ctx.arc(px,py,13,0,Math.PI*2); ctx.fillStyle="#4a9e4a"; ctx.fill();
-        ctx.beginPath(); ctx.arc(px,py,7,0,Math.PI*2); ctx.fillStyle="#3a7e3a"; ctx.fill();
       });
       ctx.restore();
 
@@ -1372,9 +1572,6 @@ function VirtualOffice({
       rr(102, 448, 48, 38, 8); ctx.fillStyle="#7a8fc0"; ctx.fill();
       rr(52, 508, 95, 38, 8); ctx.fillStyle="#b8a870"; ctx.fill();
       ctx.strokeStyle="#988850"; ctx.lineWidth=1; ctx.stroke();
-      ctx.beginPath(); ctx.arc(255,420,15,0,Math.PI*2); ctx.fillStyle="#4a9e4a"; ctx.fill();
-      ctx.beginPath(); ctx.arc(255,420,9,0,Math.PI*2); ctx.fillStyle="#3a7e3a"; ctx.fill();
-      ctx.beginPath(); ctx.arc(42,565,12,0,Math.PI*2); ctx.fillStyle="#4a9e4a"; ctx.fill();
       ctx.restore();
 
       // ── 8. PANTRY FURNITURE ──────────────────────────────────────────
@@ -1387,8 +1584,7 @@ function VirtualOffice({
       rr(702, 396, 268, 20, 4); ctx.fillStyle="#c8d0d8"; ctx.fill();
       rr(870, 420, 60, 38, 6); ctx.fillStyle="#c0c8d0"; ctx.fill();
       rr(880, 428, 40, 22, 4); ctx.fillStyle="#a0a8b0"; ctx.fill();
-      ctx.beginPath(); ctx.arc(958, 572, 13, 0, Math.PI*2); ctx.fillStyle="#4a9e4a"; ctx.fill();
-      ctx.beginPath(); ctx.arc(958, 572, 7, 0, Math.PI*2); ctx.fillStyle="#3a7e3a"; ctx.fill();
+      drawPlant(940, 535);
       ctx.restore();
 
       // ── 9. GLASS PARTITION LINES WITH VISIBLE ENTRANCES ────────────
@@ -1591,6 +1787,7 @@ function VirtualOffice({
       );
 
       ctx.restore();
+      rawCtx.restore();
       rafId = requestAnimationFrame(gameLoop);
     }
 
@@ -1599,6 +1796,8 @@ function VirtualOffice({
     return () => {
       isRunning = false;
       cancelAnimationFrame(rafId);
+      resizeObserver.disconnect();
+      window.removeEventListener("resize", resizeCanvas);
       window.clearInterval(speakingPollTimer);
       window.clearInterval(positionDisplayTimer);
       speakingUserIdsRef.current = new Set();

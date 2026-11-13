@@ -112,6 +112,7 @@ function App() {
   const [themeMode] = useState("dark");
   const [avatarColor, setAvatarColor] = useState("#2563eb");
   const [searchOpen, setSearchOpen] = useState(false);
+  const [presenceCollapsed, setPresenceCollapsed] = useState(false);
   const [notificationOpen, setNotificationOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [onlineUsers, setOnlineUsers] = useState([]);
@@ -762,7 +763,7 @@ function App() {
   if (!username) return <JoinScreen onJoin={handleJoin} rooms={officeRooms} />;
 
   return (
-    <div className={`proxi-app-shell theme-${themeMode}`}>
+    <div className={`proxi-app-shell theme-${themeMode} ${activeTab === "Office" ? "office-layout" : ""}`}>
       <header className="app-navigation">
         <div className="brand-block">
           <img className="brand-signal" src={brandIcon} alt="" />
@@ -808,14 +809,6 @@ function App() {
       <div className="main-content">
         {/* ── TOP HEADER ── */}
         <header className="app-top-header">
-          <div className="header-left">
-            <button className="team-selector-btn">
-              <span className="team-dot" />ProxiSpeak HQ <span className="caret-icon">· Floor 2</span>
-            </button>
-            <button className="online-count-btn">
-              <span className="users-icon">👥</span>{presenceUsers.length} Online
-            </button>
-          </div>
           <div className="header-right">
             <button
               className={`hdr-icon-btn ${searchOpen ? "active" : ""}`}
@@ -1065,7 +1058,13 @@ function App() {
                         </div>
                       </div>
                       <div className="chat-list" ref={chatListRef}>
-                        {chatMessages.map(m => (
+                        {chatMessages.length === 0 ? (
+                          <div className="chat-empty-state">
+                            <span className="chat-empty-icon" aria-hidden="true">✦</span>
+                            <strong>No messages yet</strong>
+                            <span>Start the conversation with your office.</span>
+                          </div>
+                        ) : chatMessages.map(m => (
                           <div key={m.id} className={`chat-item ${m.isSelf ? "self" : ""}`}>
                             <div className="chat-bubble"><strong>{m.sender}</strong><p>{m.text}</p><small>{m.time}</small></div>
                           </div>
@@ -1377,8 +1376,16 @@ function App() {
             {error && <p className="media-control-error" role="status">Microphone: {error}</p>}
           </section>
 
-          {/* ── RIGHT PRESENCE PANEL ── */}
-          <aside className="presence-panel">
+          {/* ── LEFT PRESENCE PANEL ── */}
+          <aside className={`presence-panel ${presenceCollapsed ? "is-collapsed" : ""}`}>
+            <div className="presence-status-badges" role="group" aria-label="Workspace status">
+              <div className="team-selector-btn">
+                <span className="team-dot" /><span>ProxiSpeak HQ</span><span className="caret-icon">· Floor 2</span>
+              </div>
+              <div className="online-count-btn">
+                <span className="users-icon">👥</span><span>{presenceUsers.length} Online</span>
+              </div>
+            </div>
             <div className="presence-head">
               <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                 <span className="online-dot small" />
@@ -1401,6 +1408,16 @@ function App() {
                 }}
               >
                 🔍
+              </button>
+              <button
+                type="button"
+                className="presence-collapse-toggle"
+                onClick={() => setPresenceCollapsed((collapsed) => !collapsed)}
+                aria-label={presenceCollapsed ? "Expand online users panel" : "Collapse online users panel"}
+                aria-pressed={presenceCollapsed}
+                title={presenceCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+              >
+                {presenceCollapsed ? "›" : "‹"}
               </button>
             </div>
 

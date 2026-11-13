@@ -96,6 +96,18 @@ input { outline: none; border: none; }
   object-fit: cover;
   flex-shrink: 0;
 }
+.presence-collapse-toggle {
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  background: transparent;
+  color: #78839a;
+  font-size: 1.2rem;
+}
+.presence-collapse-toggle:hover { background: #f1f3fa; color: #5146d8; }
 
 .brand-text { display: flex; flex-direction: column; }
 .brand-text h1 {
@@ -315,8 +327,19 @@ input { outline: none; border: none; }
   display: block;
   cursor: crosshair;
   border-radius: var(--radius-xl);
+  object-fit: contain;
 }
-.office-canvas-container { position: relative; width: 100%; height: 100%; }
+.office-canvas-container {
+  position: relative;
+  display: grid;
+  grid-template: minmax(0, 1fr) / minmax(0, 1fr);
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
 .movement-hints {
   position: absolute;
   left: 12px;
@@ -353,9 +376,10 @@ input { outline: none; border: none; }
 
 .tab-content-wrapper {
   width: 100%; height: 100%;
-  display: flex; align-items: stretch; justify-content: center;
+  min-width: 0; min-height: 0;
+  display: flex; align-items: stretch; justify-content: stretch;
   padding: 20px;
-  overflow-y: auto;
+  overflow: hidden;
 }
 
 /* ── VOICE CONTROLS BAR ── */
@@ -451,7 +475,7 @@ input { outline: none; border: none; }
 .prox-option:hover { background: rgba(99,80,255,0.3); }
 .prox-option.selected { background: rgba(99,80,255,0.6); color: #fff; }
 
-/* ── RIGHT PRESENCE PANEL ── */
+/* ── PRESENCE PANEL ── */
 .presence-panel {
   width: 280px;
   min-width: 280px;
@@ -749,7 +773,30 @@ input { outline: none; border: none; }
 }
 
 .chat-card { display: flex; flex-direction: column; }
-.chat-list { flex: 1; display: flex; flex-direction: column; gap: 10px; overflow: auto; padding-right: 6px; min-height: 200px; }
+.chat-list { flex: 1; display: flex; flex-direction: column; gap: 10px; overflow: auto; padding-right: 6px; min-height: 0; }
+.chat-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  flex: 1;
+  margin: auto;
+  color: #78839a;
+  text-align: center;
+}
+.chat-empty-state strong { color: #34415d; font-size: 0.9rem; }
+.chat-empty-state span:last-child { font-size: 0.78rem; }
+.chat-empty-icon {
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  border-radius: 14px;
+  background: #eef0ff;
+  color: #5146d8;
+  font-size: 1.15rem;
+}
 .chat-item { display: flex; justify-content: flex-start; }
 .chat-item.self { justify-content: flex-end; }
 .chat-bubble {
@@ -915,7 +962,7 @@ input { outline: none; border: none; }
 .announcement-form label { color: #33415f; font-size: 0.75rem; font-weight: 700; }
 .announcement-form input { flex: 1; min-width: 80px; padding: 9px 10px; border: 1px solid #dfe3ec; border-radius: 8px; }
 .announcement-form .meeting-form-error { flex-basis: 100%; }
-.workspace-grid { gap: 16px; padding: 0 22px 8px; overflow: auto; }
+.workspace-grid { gap: 16px; padding: 0 22px 8px; min-height: 0; overflow: hidden; }
 .presence-panel {
   order: -1;
   width: 270px;
@@ -925,6 +972,55 @@ input { outline: none; border: none; }
   border: 1px solid #e5e9f1;
   border-radius: 16px;
   box-shadow: 0 8px 24px rgba(34, 48, 80, 0.06);
+}
+.presence-status-badges {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.presence-status-badges .team-selector-btn,
+.presence-status-badges .online-count-btn {
+  width: 100%;
+  min-width: 0;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 9px 10px;
+  border-radius: 11px;
+  font-size: 0.76rem;
+  white-space: nowrap;
+}
+.presence-panel.is-collapsed {
+  flex: 0 0 64px;
+  width: 64px;
+  min-width: 64px;
+  padding: 12px 8px;
+  align-items: center;
+}
+.presence-panel.is-collapsed .presence-head {
+  width: 100%;
+  justify-content: center;
+  padding-bottom: 6px;
+}
+.presence-panel.is-collapsed .presence-head > div,
+.presence-panel.is-collapsed .presence-search-toggle,
+.presence-panel.is-collapsed .presence-list,
+.presence-panel.is-collapsed .nearby-voices-widget { display: none; }
+.presence-panel.is-collapsed .presence-collapse-toggle { color: #5146d8; }
+.presence-panel.is-collapsed .presence-status-badges {
+  width: 100%;
+  align-items: center;
+}
+.presence-panel.is-collapsed .presence-status-badges .team-selector-btn,
+.presence-panel.is-collapsed .presence-status-badges .online-count-btn {
+  width: 36px;
+  height: 36px;
+  justify-content: center;
+  padding: 0;
+}
+.presence-panel.is-collapsed .presence-status-badges .team-selector-btn > span:not(.team-dot),
+.presence-panel.is-collapsed .presence-status-badges .online-count-btn > span:not(.users-icon) {
+  display: none;
 }
 .presence-head { border-color: #edf0f5; }
 .presence-search { background: #f7f8fb; border-color: #e7eaf0; }
@@ -940,8 +1036,14 @@ input { outline: none; border: none; }
 .nearby-voice-item { color: #46536c; }
 .nearby-empty { color: #7e899d; }
 .office-stage { min-height: 0; gap: 12px; }
-.office-map-frame { min-height: 360px; border-radius: 18px; background: #e7e9f2; box-shadow: 0 8px 26px rgba(34, 48, 80, 0.1); }
+.office-map-frame { min-height: 0; border-radius: 18px; background: #e7e9f2; box-shadow: 0 8px 26px rgba(34, 48, 80, 0.1); }
 .office-map-frame canvas { border: 0 !important; border-radius: 18px; }
+.tab-content-wrapper > .workspace-card { flex: 1 1 0; min-width: 0; min-height: 0; }
+.tab-content-wrapper > .workspace-card:not(.chat-card) { overflow-y: auto; }
+.tab-content-wrapper > .meetings-page { width: 100%; min-width: 0; min-height: 0; flex: 1 1 auto; overflow: hidden; }
+.meetings-page > .workspace-card { flex: 1 1 0; min-height: 0; overflow-y: auto; }
+.chat-card { min-height: 0; overflow: hidden; }
+.chat-list { min-height: 0; }
 .office-video-preview {
   position: absolute;
   z-index: 4;
@@ -1019,7 +1121,7 @@ input { outline: none; border: none; }
   .app-navigation .nav-item .nav-icon { display: none; }
   .navigation-presence { display: none; }
   .presence-panel { display: none; }
-  .office-stage { min-height: 500px; }
+  .office-stage { min-height: 0; }
 }
 @media (max-width: 640px) {
   html, body, #root { height: auto; min-height: 100%; overflow-y: auto; }
@@ -1036,7 +1138,7 @@ input { outline: none; border: none; }
   .office-summary-bar { padding: 8px 12px; gap: 10px; }
   .office-summary-position { padding-left: 10px; font-size: 0.68rem; }
   .office-summary-bar > .secondary-button { padding: 7px 9px; font-size: 0.68rem; }
-  .workspace-grid { padding: 0 10px 12px; }
+  .workspace-grid { padding: 0 10px 12px; overflow: visible; }
   .office-stage { min-height: 470px; }
   .office-map-frame { min-height: 330px; }
   .map-controls { top: 8px; right: 8px; gap: 1px; }
@@ -1046,4 +1148,86 @@ input { outline: none; border: none; }
   .push-to-talk-toggle { font-size: 0.61rem; }
   .announcement-form { flex-wrap: wrap; margin: 0 10px 8px; }
   .announcement-form input { order: 2; flex-basis: 100%; }
+}
+
+@media (min-width: 901px) and (max-height: 680px) {
+  .app-navigation { min-height: 58px; padding-block: 7px; }
+  .app-navigation .nav-item { min-height: 38px; padding-block: 6px; }
+  .app-top-header { padding-block: 4px; }
+  .office-summary-bar { min-height: 52px; padding-block: 4px; }
+  .workspace-grid { padding-bottom: 6px; }
+  .voice-controls-bar { min-height: 42px; flex-wrap: nowrap; gap: 5px; padding: 4px 8px; }
+  .voice-controls-bar .voice-btn { width: 32px; height: 32px; font-size: 0.82rem; }
+  .reaction-picker { gap: 2px; padding-inline: 3px; }
+  .push-to-talk-toggle { gap: 4px; font-size: 0.62rem; white-space: nowrap; }
+  .proximity-selector-btn { gap: 5px; padding: 8px 10px; font-size: 0.72rem; }
+  .chat-empty-state { gap: 6px; }
+  .chat-empty-icon { width: 34px; height: 34px; }
+}
+
+@media (min-width: 901px) {
+  /* The office map uses the full main workspace; its status controls float above it. */
+  .office-layout .main-content { position: relative; }
+  .office-layout .app-top-header {
+    position: absolute;
+    top: 8px;
+    right: 20px;
+    left: 290px;
+    z-index: 20;
+    padding: 0;
+    pointer-events: none;
+  }
+  .office-layout .app-top-header > * { pointer-events: auto; }
+  .office-layout .office-summary-bar {
+    position: absolute;
+    top: 56px;
+    right: 20px;
+    left: 290px;
+    z-index: 20;
+    min-height: 48px;
+    padding: 4px 0;
+    pointer-events: none;
+  }
+  .office-layout .office-summary-bar > * { pointer-events: auto; }
+  .office-layout .workspace-grid {
+    position: absolute;
+    inset: 0;
+    gap: 0;
+    padding: 0;
+    overflow: hidden;
+  }
+  .office-layout .presence-panel {
+    flex: 0 0 270px;
+    width: 270px;
+    min-width: 0;
+    height: 100%;
+    margin: 0;
+    border-radius: 0 16px 16px 0;
+  }
+  .office-layout .presence-panel.is-collapsed {
+    flex-basis: 64px;
+    width: 64px;
+  }
+  .office-layout .office-stage {
+    flex: 1 1 0;
+    min-width: 0;
+    min-height: 0;
+    height: 100%;
+    gap: 0;
+  }
+  .office-layout .office-map-frame {
+    flex: 1 1 0;
+    width: 100%;
+    min-width: 0;
+    min-height: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+  .office-layout .office-map-frame canvas { border-radius: 0; }
+  .office-layout .voice-controls-bar {
+    position: relative;
+    z-index: 4;
+    align-self: center;
+    margin: 8px 0 10px;
+  }
 }
