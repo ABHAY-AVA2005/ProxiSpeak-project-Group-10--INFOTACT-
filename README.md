@@ -1,101 +1,104 @@
 # ProxiSpeak
 
-**A browser-based virtual office for spatial conversations and remote teamwork.**
-Move through a shared 2D office, talk with nearby teammates, chat with a room or
-the whole meeting, send direct messages, and share your screen.
+ProxiSpeak is a browser-based virtual office built for remote teams who want a more natural, spatial way to collaborate. Users can move through a shared office floorplan, hear coworkers who are nearby, chat by room or globally, direct-message teammates, share a screen, and coordinate meetings in one place.
 
-## Live app
+## Overview
 
-**https://proxi-speak-project-group-10-infota.vercel.app/**
+The project combines:
+
+- a React + Vite frontend for the office UI and workspace interactions
+- a Node.js + Express + Socket.IO backend for realtime presence, movement, chat, and signaling
+- WebRTC for peer-to-peer proximity audio and screen sharing
+- optional Redis and MongoDB integrations for shared state and persistence
+
+## Live deployment
 
 | Service | URL | Purpose |
 |---|---|---|
-| Web app | https://proxi-speak-project-group-10-infota.vercel.app/ | React + Vite frontend hosted on Vercel |
-| Socket server health | [Render health check](https://proxispeak-server-hkvz.onrender.com/health) | Express and Socket.IO backend hosted on Render |
-| Server health | [/health](https://proxispeak-server-hkvz.onrender.com/health) | Backend health and optional-service status |
+| Web app | https://proxi-speak-project-group-10-infota.vercel.app/ | Frontend hosted on Vercel |
+| Backend health | https://proxispeak-server-hkvz.onrender.com/health | Express and Socket.IO server health |
 
-The live app and backend health endpoint were checked on **12 November 2026**.
-The backend reports healthy and Redis connected. MongoDB is not connected;
-database persistence is optional, so chat and presence continue to use
-in-memory state where applicable.
+The production deployment is intended to show a live office experience. Health checks should confirm whether Redis is connected and whether optional persistence services are enabled for that deployment.
 
-## Technology stack
+## Key features
 
-| Technology | Where it is used |
+- Virtual office map with rooms such as Meeting Room, Focus Zone, Open Workspace, Lounge, and Pantry
+- Click-to-move navigation and keyboard movement with A* pathfinding around furniture and walls
+- Proximity-based voice chat with adjustable listening distance, attenuation, and room-aware audio behavior
+- Room chat and all-chat modes for team communication
+- Direct messaging from the online directory
+- Screen sharing and in-call controls
+- Meeting scheduling with invitee management and email notifications when configured
+- Live announcements, recent session history, and office-wide room selection
+
+## Repository structure
+
+```text
+.
+├── README.md
+├── docker-compose.yml
+├── start.bat
+├── start-multi.bat
+├── client/                 # React frontend
+├── server/                 # Express + Socket.IO backend
+├── docs/                   # Deployment, architecture, and project notes
+├── scripts/                # Utility and multi-instance setup scripts
+└── main.html               # Additional prototype or reference entry point
+```
+
+## Tech stack
+
+| Area | Stack |
 |---|---|
-| React 19 | Builds the interactive office, chat, team directory, and call controls as reusable UI components. |
-| JavaScript (ES modules), HTML, and CSS | Client and server application code, page structure, and responsive styling. |
-| Canvas and A* pathfinding | Draws the 2D office and finds routes around furniture and walls when users click to move. |
-| Vite | Runs the client development server and bundles the frontend for production. |
-| Node.js | Runtime for the JavaScript backend. |
-| Express | Provides backend HTTP endpoints, including `/health` and the room list API. |
-| Socket.IO | Maintains realtime connections for presence, movement, chat, and WebRTC signaling. |
-| WebRTC | Connects browsers peer-to-peer for proximity voice and screen sharing; Socket.IO relays signaling, not media. |
-| Redis (Upstash) with `ioredis` and `@socket.io/redis-adapter` | Shares presence, proximity signaling, and Socket.IO broadcasts across backend instances. Production health currently reports Redis connected. |
-| MongoDB with Mongoose (optional) | Provides database persistence when configured. It is not connected in the current production health check. |
-| Vercel | Hosts the built static React/Vite frontend. |
-| Render | Hosts the persistent Node.js/Express/Socket.IO backend. |
+| Frontend | React 19, Vite, JavaScript, HTML, CSS |
+| Backend | Node.js, Express, Socket.IO |
+| Real-time media | WebRTC |
+| Shared state | Redis with `ioredis` and `@socket.io/redis-adapter` |
+| Persistence | MongoDB with Mongoose (optional) |
+| Hosting | Vercel for frontend, Render for backend |
 
-## Features
+## Getting started
 
-- **Virtual office:** a 2D office map with Meeting Room, Focus Zone, Open
-  Workspace, Lounge, and Pantry.
-- **Movement and pathfinding:** keyboard movement plus click-to-move navigation
-  using the A* pathfinding algorithm to route around office furniture and walls.
-- **Proximity voice:** WebRTC audio connections with adjustable listening
-  distance, volume attenuation, and stereo positioning.
-- **Room chat and All chat:** two audience modes in the chat panel. Room chat
-  follows the room selected when joining; All chat is for everyone in the
-  meeting.
-- **Direct messages:** start a private conversation from the Team directory.
-- **Screen sharing:** share a screen with meeting participants.
-- **Meetings:** create a shared room schedule, choose a time and duration, add
-  invitee emails, and remove meetings you created. MongoDB makes schedules
-  durable; without MongoDB, the server uses temporary in-memory storage.
-- **Meeting invitations:** email delivery uses Resend when `RESEND_API_KEY` and
-  `EMAIL_FROM` are configured privately in Render. The UI reports when delivery
-  is not configured or fails.
-- **In-call controls:** per-person volume, microphone and speaker controls,
-  push-to-talk, camera/screen share, raised hands, and reactions.
-- **Office updates:** send room-wide floor announcements, review recent
-  sessions saved in this browser, and rejoin a previously used room.
-- **Map controls:** zoom, grid, fullscreen, live coordinates, click-to-move,
-  and keyboard navigation.
-- **Live directory:** see who is online and open a teammate's direct chat.
-- **Office-room selection:** choose a listed office room when joining.
+### Prerequisites
 
-Chat history is held in server memory, not a durable database. Room and meeting
-history is cleared when the last participant leaves its scope; direct-message
-history is cleared when either participant disconnects. A server restart also
-clears in-memory chat. Scheduled meetings use MongoDB when connected and
-otherwise fall back to server memory, which is not durable across restarts.
-Recent session history and individual volume preferences are local to the
-browser. Although Redis is connected in production, direct-message recipient
-lookup and chat history are still process-local; they are not shared between
-backend instances.
+- Node.js LTS
+- npm
+- A modern browser with microphone access enabled for voice chat
 
-## Run locally
+### One-click local setup (Windows)
 
-**Requirements:** a recent Node.js LTS release and a modern browser. Microphone
-access is required for voice chat; allow it when prompted.
-
-### Windows quick start
-
-Run [`start.bat`](./start.bat) to start the backend and frontend. The client
-opens at `http://localhost:5173`; the server uses port `5000`.
-
-### Manual start
-
-In PowerShell, from the repository root:
+From the repository root, run:
 
 ```powershell
-Copy-Item .env.example server\.env
+start.bat
+```
+
+This launches:
+
+- backend on `http://localhost:5000`
+- frontend on `http://localhost:5173`
+
+### Multi-instance development
+
+For testing a multi-server setup with two backend instances:
+
+```powershell
+start-multi.bat
+```
+
+This starts two backend processes and a single frontend instance for cluster-style testing.
+
+### Manual startup
+
+Terminal 1:
+
+```powershell
 Set-Location server
 npm install
 npm run dev
 ```
 
-In a second terminal:
+Terminal 2:
 
 ```powershell
 Set-Location client
@@ -103,24 +106,34 @@ npm install
 npm run dev
 ```
 
-Open `http://localhost:5173`. To try the live office with other people, use
-separate browser profiles or devices and join the same room.
+Then open `http://localhost:5173` in the browser.
 
-## Deployment
+### Optional Redis for local development
 
-The frontend and realtime backend are separate services:
+A local Redis instance can be started with Docker Compose:
 
-- **Vercel** builds the `client` directory and serves the static Vite app.
-- **Render** runs the persistent Express + Socket.IO server from `server`.
+```powershell
+docker compose up -d
+```
 
-The live URLs, required environment variables, health checks, and redeployment
-steps are documented in [Deployment guide](./docs/DEPLOYMENT.md). Keep
-environment secrets in the hosting provider's environment settings, not in
-Git.
+This starts the Redis service defined in [docker-compose.yml](./docker-compose.yml) on port `6379`.
 
-## Development and tests
+## Environment configuration
 
-Build and lint the frontend:
+The backend expects a `.env` file in `server/` for optional service configuration. Typical variables include:
+
+- `PORT`
+- `REDIS_ENABLED`
+- `REDIS_URL` or equivalent host configuration
+- `MONGODB_URI`
+- `RESEND_API_KEY`
+- `EMAIL_FROM`
+
+Keep secrets in the hosting provider's environment settings rather than committing them to the repository.
+
+## Testing and validation
+
+Run frontend checks:
 
 ```powershell
 Set-Location client
@@ -135,7 +148,7 @@ Set-Location server
 npm test
 ```
 
-Other useful backend checks:
+Useful backend verification commands:
 
 ```powershell
 npm run test:multi-instance
@@ -143,33 +156,31 @@ npm run test:clients
 npm run audit:spatial
 ```
 
-The multi-instance checks require a reachable Redis service and
-`REDIS_ENABLED=true`. See the [deployment guide](./docs/DEPLOYMENT.md) to
-configure Upstash and verify Redis in production.
+The multi-instance checks depend on Redis being reachable and `REDIS_ENABLED=true`.
 
-## Architecture
+## Architecture summary
 
 ```mermaid
 flowchart LR
-    Browser[React + Canvas client] <-->|Socket.IO: presence, movement, chat, signaling| Server[Express + Socket.IO server]
+    Browser[React + Canvas client] <-->|Socket.IO presence, movement, chat, signaling| Server[Express + Socket.IO server]
     Browser <-->|WebRTC peer-to-peer audio and screen share| Peers[Other browsers]
     Server -. optional persistence .-> MongoDB[(MongoDB)]
-    Server -. optional cross-instance events .-> Redis[(Redis)]
+    Server -. optional cross-instance coordination .-> Redis[(Redis)]
 ```
 
-The server validates signaling and coordinates presence. Audio and screen-share
-media are negotiated between browsers using WebRTC. MongoDB persistence and
-Redis cross-instance coordination are optional; check `/health` to see whether
-they are connected in a particular deployment.
+The server coordinates presence and signaling. Audio and screen sharing are negotiated directly between browsers with WebRTC. MongoDB and Redis are optional service layers that improve persistence and multi-instance behavior.
 
 ## Project documentation
 
-- [Deployment guide](./docs/DEPLOYMENT.md) — hosting layout, configuration,
-  health checks, and troubleshooting.
-- [Progress log](./docs/context/06_PROGRESS_LOG.md) — dated project status and
-  historical milestones.
-- [Project brief](./docs/context/01_PROJECT_BRIEF.md) — original goals and
-  requirements.
-- [Database schema](./docs/database-schema.md) — persistence model and indexes.
-- [Redis scaling](./docs/REDIS_SCALING.md) — optional multi-instance design.
-- [Mid-review checklist](./docs/mid-review-checklist.md) — review materials.
+- [Deployment guide](./docs/DEPLOYMENT.md) — deployment layout, configuration, health checks, and troubleshooting
+- [Project brief](./docs/context/01_PROJECT_BRIEF.md) — original goals and requirements
+- [Progress log](./docs/context/06_PROGRESS_LOG.md) — project status and milestones
+- [Database schema](./docs/database-schema.md) — persistence model and indexes
+- [Redis scaling](./docs/REDIS_SCALING.md) — optional multi-instance design notes
+- [Mid-review checklist](./docs/mid-review-checklist.md) — review and QA materials
+
+## Notes
+
+- Chat and presence state are primarily in-memory and may reset on restart.
+- MongoDB-backed meeting scheduling is optional; without it, scheduling may fall back to temporary local memory.
+- Redis enables cross-instance coordination and helps scale realtime state across server instances.
