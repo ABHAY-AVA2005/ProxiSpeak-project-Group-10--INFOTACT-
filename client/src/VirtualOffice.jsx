@@ -984,7 +984,28 @@ function VirtualOffice({
     window.addEventListener("touchstart", unlockAudio);
 
     // ── Keyboard ───────────────────────────────────────────────────────────
+    const isEditingText = (target) => {
+      const active = document.activeElement;
+      return Boolean(
+        target?.tagName === "INPUT" ||
+        target?.tagName === "TEXTAREA" ||
+        target?.tagName === "SELECT" ||
+        target?.isContentEditable ||
+        target?.closest?.("input, textarea, select, [contenteditable='true']") ||
+        active?.tagName === "INPUT" ||
+        active?.tagName === "TEXTAREA" ||
+        active?.tagName === "SELECT" ||
+        active?.isContentEditable
+      );
+    };
+
     const onKeyDown = (e) => {
+      // Do not intercept keystrokes if the user is typing in a textarea, input, or announcement field,
+      // or if the virtual office canvas is currently hidden (e.g. user is on Announcements or other tabs)
+      if (isEditingText(e.target) || canvas.offsetParent === null) {
+        return;
+      }
+
       const k = e.key.toLowerCase();
       if (["arrowup", "arrowdown", "arrowleft", "arrowright", "w", "a", "s", "d"].includes(k)) {
         e.preventDefault();
@@ -992,9 +1013,19 @@ function VirtualOffice({
       }
       keys.current[k] = true;
     };
-    const onKeyUp = (e) => { keys.current[e.key.toLowerCase()] = false; };
+    const onKeyUp = (e) => {
+      if (isEditingText(e.target)) {
+        return;
+      }
+      keys.current[e.key.toLowerCase()] = false;
+    };
+    const onWindowBlur = () => {
+      keys.current = {};
+    };
+
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("keyup", onKeyUp);
+    window.addEventListener("blur", onWindowBlur);
 
     // ── Click-to-move ──────────────────────────────────────────────────────
     const onCanvasClick = (e) => {
@@ -1686,6 +1717,7 @@ function VirtualOffice({
       onSpeakingUsersChangeRef.current([]);
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
+      window.removeEventListener("blur", onWindowBlur);
       window.removeEventListener("click", unlockAudio);
       window.removeEventListener("keydown", unlockAudio);
       window.removeEventListener("touchstart", unlockAudio);
