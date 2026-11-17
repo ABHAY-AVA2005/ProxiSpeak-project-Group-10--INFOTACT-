@@ -198,7 +198,6 @@ function App() {
   });
   const [unreadAnnouncementsCount, setUnreadAnnouncementsCount] = useState(0);
   const [announcementCategory, setAnnouncementCategory] = useState("General");
-  const [announcementScope, setAnnouncementScope] = useState("all");
   const [peerVolumes, setPeerVolumes] = useState(() => {
     try {
       const saved = JSON.parse(localStorage.getItem("proxispeak_peer_volumes") || "{}");
@@ -750,7 +749,7 @@ function App() {
     setAnnouncementError("");
     socketRef.current.emit(
       "office:announcement",
-      { text, category: announcementCategory, scope: announcementScope },
+      { text, category: announcementCategory, scope: "all" },
       (response) => {
         if (!response?.ok) {
           setAnnouncementError(response?.error || "Announcement could not be sent.");
@@ -1522,23 +1521,6 @@ function App() {
                             ))}
                           </div>
 
-                          <div className="scope-selector" role="group" aria-label="Broadcast Scope">
-                            <span className="selector-title">Send to:</span>
-                            {[
-                              { id: "all", label: "Entire Office" },
-                              { id: "room", label: "Current Room" },
-                            ].map((sc) => (
-                              <button
-                                type="button"
-                                key={sc.id}
-                                className={`scope-pill ${announcementScope === sc.id ? "selected" : ""}`}
-                                onClick={() => setAnnouncementScope(sc.id)}
-                              >
-                                {sc.label}
-                              </button>
-                            ))}
-                          </div>
-
                           <button
                             type="submit"
                             className="primary-button broadcast-submit-btn"
@@ -1597,11 +1579,6 @@ function App() {
                                         {item.category === "Shoutout" && "🎉 "}
                                         {item.category || "General"}
                                       </span>
-                                      {item.scope && (
-                                        <span className="scope-tag">
-                                          {item.scope === "all" ? "Office" : "Room"}
-                                        </span>
-                                      )}
                                     </div>
                                   </div>
                                   <p className="announcement-body-text">{item.text}</p>
