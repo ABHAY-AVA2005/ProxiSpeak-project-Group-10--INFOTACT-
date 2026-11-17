@@ -10,6 +10,7 @@ const navItems = [
   { id: "Team", icon: "people", label: "Team" },
   { id: "Chat", icon: "chat", label: "Chat" },
   { id: "Meetings", icon: "calendar", label: "Meetings" },
+  { id: "Announcements", icon: "megaphone", label: "Announcements" },
   { id: "Settings", icon: "settings", label: "Settings" },
 ];
 
@@ -187,6 +188,17 @@ function App() {
   const [announcementDraft, setAnnouncementDraft] = useState("");
   const [announcementOpen, setAnnouncementOpen] = useState(false);
   const [announcementError, setAnnouncementError] = useState("");
+  const [announcementsList, setAnnouncementsList] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem("proxispeak_announcements") || "[]");
+      return Array.isArray(saved) ? saved : [];
+    } catch {
+      return [];
+    }
+  });
+  const [unreadAnnouncementsCount, setUnreadAnnouncementsCount] = useState(0);
+  const [announcementCategory, setAnnouncementCategory] = useState("General");
+  const [announcementScope, setAnnouncementScope] = useState("all");
   const [peerVolumes, setPeerVolumes] = useState(() => {
     try {
       const saved = JSON.parse(localStorage.getItem("proxispeak_peer_volumes") || "{}");
@@ -248,6 +260,12 @@ function App() {
     const list = chatListRef.current;
     if (list) list.scrollTop = list.scrollHeight;
   }, [chatMessages]);
+
+  useEffect(() => {
+    if (activeTab === "Announcements") {
+      setUnreadAnnouncementsCount(0);
+    }
+  }, [activeTab]);
 
   useEffect(() => {
     if (!isScheduleFormOpen) return undefined;
@@ -722,21 +740,27 @@ function App() {
   };
 
   const handleAnnouncement = (event) => {
-    event.preventDefault();
+    if (event?.preventDefault) event.preventDefault();
     const text = announcementDraft.trim();
-    if (!text || !socketRef.current?.connected) {
+    if (!text) return;
+    if (!socketRef.current?.connected) {
       setAnnouncementError("Reconnect to the office before sending an announcement.");
       return;
     }
-    socketRef.current.emit("office:announcement", { text }, (response) => {
-      if (!response?.ok) {
-        setAnnouncementError(response?.error || "Announcement could not be sent.");
-        return;
+    setAnnouncementError("");
+    socketRef.current.emit(
+      "office:announcement",
+      { text, category: announcementCategory, scope: announcementScope },
+      (response) => {
+        if (!response?.ok) {
+          setAnnouncementError(response?.error || "Announcement could not be sent.");
+          return;
+        }
+        setAnnouncementDraft("");
+        setAnnouncementError("");
+        setAnnouncementOpen(false);
       }
-      setAnnouncementDraft("");
-      setAnnouncementError("");
-      setAnnouncementOpen(false);
-    });
+    );
   };
 
   const handleToggleCamera = async () => {
@@ -779,9 +803,25 @@ function App() {
       }
     };
     const onAnnouncement = (message) => {
+      if (!message || !message.text) return;
       setAnnouncement(message);
-      addNotification("Office announcement", message.text);
-      window.setTimeout(() => setAnnouncement((current) => current?.id === message.id ? null : current), 12_000);
+      setAnnouncementsList((current) => {
+        const updated = [message, ...current.filter((item) => item.id !== message.id)].slice(0, 50);
+        try {
+          localStorage.setItem("proxispeak_announcements", JSON.stringify(updated));
+        } catch (storageError) {
+          console.error("Could not persist announcements:", storageError);
+        }
+        return updated;
+      });
+      if (activeTab !== "Announcements") {
+        setUnreadAnnouncementsCount((count) => count + 1);
+      }
+      addNotification(
+        `📢 ${message.category ? `[${message.category}] ` : ""}Announcement from ${message.username}`,
+        message.text
+      );
+      window.setTimeout(() => setAnnouncement((current) => (current?.id === message.id ? null : current)), 15_000);
     };
     socket.on("meeting:action", onMeetingAction);
     socket.on("office:announcement", onAnnouncement);
@@ -896,6 +936,11 @@ function App() {
             >
               <span className="nav-icon"><Icon name={item.icon} size={17} /></span>
               {item.label}
+              {item.id === "Announcements" && unreadAnnouncementsCount > 0 && (
+                <span className="nav-badge" aria-label={`${unreadAnnouncementsCount} unread announcements`}>
+                  {unreadAnnouncementsCount}
+                </span>
+              )}
             </button>
           ))}
         </nav>
@@ -970,22 +1015,59 @@ function App() {
           <div className="office-summary-position" aria-live="polite">
             <span>⌖</span> {officePosition.x}, {officePosition.y}
           </div>
-          <button type="button" className="secondary-button" onClick={() => { setAnnouncementError(""); setAnnouncementOpen(true); }}>
-            Announce to floor
+          <button
+            type="button"
+            className="secondary-button announce-nav-shortcut"
+            onClick={() => setActiveTab("Announcements")}
+            title="Open Announcements Hub"
+          >
+            <Icon name="megaphone" size={15} /> Announce to floor
           </button>
         </section>
         {announcement && (
           <div className="office-announcement-banner" role="status">
-            <strong>📢 {announcement.username}:</strong> {announcement.text}
-            <button type="button" aria-label="Dismiss announcement" onClick={() => setAnnouncement(null)}>×</button>
+            <span className="announcement-banner-icon"><Icon name="megaphone" size={17} /></span>
+            <div className="announcement-banner-body">
+              <strong>
+                {announcement.category ? `[${announcement.category}] ` : ""}
+                {announcement.username}:
+              </strong>{" "}
+              <span>{announcement.text}</span>
+            </div>
+            <button
+              type="button"
+              className="announcement-banner-view"
+              onClick={() => setActiveTab("Announcements")}
+            >
+              View all
+            </button>
+            <button
+              type="button"
+              aria-label="Dismiss announcement"
+              onClick={() => setAnnouncement(null)}
+            >
+              ×
+            </button>
           </div>
         )}
         {announcementOpen && (
           <form className="announcement-form" onSubmit={handleAnnouncement}>
-            <label htmlFor="announcement-text">Floor announcement</label>
-            <input id="announcement-text" autoFocus maxLength={240} value={announcementDraft} onChange={(event) => setAnnouncementDraft(event.target.value)} placeholder="Share an update with everyone in this room" required />
-            <button type="submit" className="primary-button" disabled={!chatConnected || !announcementDraft.trim()}>Send</button>
-            <button type="button" className="secondary-button" onClick={() => setAnnouncementOpen(false)}>Cancel</button>
+            <label htmlFor="announcement-text">Quick floor announcement</label>
+            <input
+              id="announcement-text"
+              autoFocus
+              maxLength={240}
+              value={announcementDraft}
+              onChange={(event) => setAnnouncementDraft(event.target.value)}
+              placeholder="Share an update with everyone (e.g. 'All-hands meeting starting in 5 mins!')"
+              required
+            />
+            <button type="submit" className="primary-button" disabled={!chatConnected || !announcementDraft.trim()}>
+              Send
+            </button>
+            <button type="button" className="secondary-button" onClick={() => setAnnouncementOpen(false)}>
+              Cancel
+            </button>
             {announcementError && <p role="alert" className="meeting-form-error">{announcementError}</p>}
           </form>
         )}
@@ -1369,6 +1451,168 @@ function App() {
                       )}
                     </div>
                   )}
+                  {activeTab === "Announcements" && (
+                    <div className="workspace-card announcements-card">
+                      <div className="card-header-row">
+                        <div className="card-header-title">
+                          <span className="card-header-icon megaphone-icon-badge">
+                            <Icon name="megaphone" size={20} />
+                          </span>
+                          <div>
+                            <h2>Office Announcements</h2>
+                            <small>Broadcast real-time messages and updates to all teammates</small>
+                          </div>
+                        </div>
+                        <div className="announcements-header-actions">
+                          <span className={`announcement-status-pill ${chatConnected ? "online" : "offline"}`}>
+                            <span className="status-dot" /> {chatConnected ? "Live broadcast ready" : "Offline"}
+                          </span>
+                          {announcementsList.length > 0 && (
+                            <button
+                              type="button"
+                              className="clear-announcements-btn"
+                              onClick={() => {
+                                setAnnouncementsList([]);
+                                try { localStorage.removeItem("proxispeak_announcements"); } catch {}
+                              }}
+                              title="Clear history from this browser"
+                            >
+                              Clear history
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Announcement Composer */}
+                      <form className="announcement-composer-box" onSubmit={handleAnnouncement}>
+                        <div className="composer-header">
+                          <span className="composer-label">Create new announcement</span>
+                          <span className={`char-counter ${announcementDraft.length >= 220 ? "near-limit" : ""}`}>
+                            {announcementDraft.length}/240
+                          </span>
+                        </div>
+
+                        <textarea
+                          className="announcement-textarea"
+                          rows={3}
+                          maxLength={240}
+                          value={announcementDraft}
+                          onChange={(e) => setAnnouncementDraft(e.target.value)}
+                          placeholder="What would you like to announce to the office? (e.g. 'All-hands meeting starting in Meeting Room in 5 mins!')"
+                          required
+                        />
+
+                        <div className="composer-controls">
+                          <div className="category-selector" role="group" aria-label="Announcement Category">
+                            <span className="selector-title">Category:</span>
+                            {[
+                              { id: "General", label: "📢 General" },
+                              { id: "Urgent", label: "🚨 Urgent" },
+                              { id: "Meeting", label: "📅 Meeting" },
+                              { id: "Shoutout", label: "🎉 Shoutout" },
+                            ].map((cat) => (
+                              <button
+                                type="button"
+                                key={cat.id}
+                                className={`category-pill ${announcementCategory === cat.id ? "selected" : ""}`}
+                                onClick={() => setAnnouncementCategory(cat.id)}
+                              >
+                                {cat.label}
+                              </button>
+                            ))}
+                          </div>
+
+                          <div className="scope-selector" role="group" aria-label="Broadcast Scope">
+                            <span className="selector-title">Send to:</span>
+                            {[
+                              { id: "all", label: "Entire Office" },
+                              { id: "room", label: "Current Room" },
+                            ].map((sc) => (
+                              <button
+                                type="button"
+                                key={sc.id}
+                                className={`scope-pill ${announcementScope === sc.id ? "selected" : ""}`}
+                                onClick={() => setAnnouncementScope(sc.id)}
+                              >
+                                {sc.label}
+                              </button>
+                            ))}
+                          </div>
+
+                          <button
+                            type="submit"
+                            className="primary-button broadcast-submit-btn"
+                            disabled={!chatConnected || !announcementDraft.trim()}
+                          >
+                            <Icon name="megaphone" size={16} /> Broadcast Now
+                          </button>
+                        </div>
+
+                        {announcementError && (
+                          <p role="alert" className="meeting-form-error">{announcementError}</p>
+                        )}
+                      </form>
+
+                      {/* Announcement Feed / History */}
+                      <div className="announcements-feed-container">
+                        <div className="feed-header-row">
+                          <h3>Broadcast History</h3>
+                          <span className="feed-count">{announcementsList.length} total</span>
+                        </div>
+
+                        {announcementsList.length === 0 ? (
+                          <div className="announcements-empty-state">
+                            <div className="empty-icon-wrap">
+                              <Icon name="megaphone" size={32} />
+                            </div>
+                            <strong>No announcements broadcasted yet</strong>
+                            <p>Send an update above to alert everyone on the floor in real-time!</p>
+                          </div>
+                        ) : (
+                          <div className="announcements-feed-list">
+                            {announcementsList.map((item) => {
+                              const isSelf = item.username === username;
+                              const timeString = item.time
+                                ? new Date(item.time).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
+                                : "Just now";
+                              const dateString = item.time
+                                ? new Date(item.time).toLocaleDateString([], { month: "short", day: "numeric" })
+                                : "Today";
+                              return (
+                                <article className={`announcement-feed-item category-${(item.category || "General").toLowerCase()}`} key={item.id}>
+                                  <div className="announcement-item-top">
+                                    <div className="announcement-author-info">
+                                      <div className={`presence-avatar avatar-${isSelf ? "purple" : "teal"}`}>
+                                        {(item.username || "T").slice(0, 2).toUpperCase()}
+                                      </div>
+                                      <div>
+                                        <strong>{isSelf ? `${item.username} (You)` : item.username}</strong>
+                                        <small>{dateString} · {timeString}</small>
+                                      </div>
+                                    </div>
+                                    <div className="announcement-item-tags">
+                                      <span className={`category-tag tag-${(item.category || "General").toLowerCase()}`}>
+                                        {item.category === "Urgent" && "🚨 "}
+                                        {item.category === "Meeting" && "📅 "}
+                                        {item.category === "Shoutout" && "🎉 "}
+                                        {item.category || "General"}
+                                      </span>
+                                      {item.scope && (
+                                        <span className="scope-tag">
+                                          {item.scope === "all" ? "Office" : "Room"}
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+                                  <p className="announcement-body-text">{item.text}</p>
+                                </article>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
                   {activeTab === "Settings" && (
                     <div className="workspace-card">
                       <div className="card-header-row"><h2>Settings</h2><span>Preferences</span></div>
@@ -1523,7 +1767,23 @@ function App() {
                 )}
               </div>
 
-              <button type="button" className="voice-btn settings-btn" title="Audio settings" aria-label="Open settings" onClick={() => setActiveTab("Settings")}>
+              {/* Announcement button right beside Settings nav button */}
+              <button
+                type="button"
+                className={`voice-btn announcement-btn ${activeTab === "Announcements" ? "active" : ""}`}
+                title="Office Announcements"
+                aria-label="Open announcements"
+                onClick={() => setActiveTab((current) => current === "Announcements" ? "Office" : "Announcements")}
+              >
+                <Icon name="megaphone" size={18} />
+                {unreadAnnouncementsCount > 0 && (
+                  <span className="voice-btn-badge" aria-label={`${unreadAnnouncementsCount} unread announcements`}>
+                    {unreadAnnouncementsCount}
+                  </span>
+                )}
+              </button>
+
+              <button type="button" className={`voice-btn settings-btn ${activeTab === "Settings" ? "active" : ""}`} title="Audio settings" aria-label="Open settings" onClick={() => setActiveTab("Settings")}>
                 <Icon name="settings" size={18} />
               </button>
 

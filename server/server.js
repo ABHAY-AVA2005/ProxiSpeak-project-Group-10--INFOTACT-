@@ -135,6 +135,27 @@ function handleConnection(socket) {
         io.emit("chat:message", payload);
     });
 
+    // ── Global office announcement broadcast ──────────────────────────────────
+    socket.on("office:announcement", (payload = {}, acknowledge) => {
+        const text = typeof payload?.text === "string" ? payload.text.trim() : "";
+        if (!text || text.length > 240) {
+            if (typeof acknowledge === "function") acknowledge({ ok: false, error: "Announcement cannot be empty or exceed 240 characters." });
+            return;
+        }
+        const now = Date.now();
+        const username = (players[socket.id] && players[socket.id].username) || "Teammate";
+        const message = {
+            id: `${socket.id}:${now}`,
+            socketId: socket.id,
+            username,
+            text,
+            category: payload.category || "General",
+            time: new Date(now).toISOString(),
+        };
+        io.emit("office:announcement", message);
+        if (typeof acknowledge === "function") acknowledge({ ok: true, id: message.id });
+    });
+
     // When a player moves (listens to 'move' only)
     socket.on("move", (position) => {
         // Defensive check: ensure player exists, is connected, and coordinates are valid finite numbers within canvas bounds

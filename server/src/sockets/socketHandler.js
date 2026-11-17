@@ -341,24 +341,31 @@ export function setupSocketHandlers(io) {
 
     socket.on("office:announcement", (payload = {}, acknowledge) => {
       const text = typeof payload?.text === "string" ? payload.text.trim() : "";
-      if (!socket.data.roomName || !socket.data.username || !text || text.length > 240) {
-        acknowledge?.({ ok: false, error: "invalid-announcement" });
+      if (!text || text.length > 240) {
+        acknowledge?.({ ok: false, error: "Announcement text cannot be empty or exceed 240 characters." });
         return;
       }
       const now = Date.now();
-      if (now - (socket.data.lastAnnouncementAt || 0) < 10_000) {
-        acknowledge?.({ ok: false, error: "Please wait before sending another announcement." });
+      if (now - (socket.data.lastAnnouncementAt || 0) < 5_000) {
+        acknowledge?.({ ok: false, error: "Please wait 5 seconds before sending another announcement." });
         return;
       }
       socket.data.lastAnnouncementAt = now;
+      const username = socket.data.username || getUser(socket.id)?.username || "Teammate";
       const message = {
         id: `${socket.id}:${Date.now()}`,
         socketId: socket.id,
-        username: socket.data.username,
+        username,
         text,
+        category: payload.category || "General",
+        scope: payload.scope || "room",
         time: new Date(now).toISOString()
       };
-      io.to(socket.data.roomName).emit("office:announcement", message);
+      if (payload.scope === "all" || !socket.data.roomName) {
+        io.emit("office:announcement", message);
+      } else {
+        io.to(socket.data.roomName).emit("office:announcement", message);
+      }
       acknowledge?.({ ok: true, id: message.id });
     });
 
