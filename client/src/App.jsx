@@ -290,6 +290,35 @@ function App() {
   }, [activeTab]);
 
   useEffect(() => {
+    if (!searchOpen && !notificationOpen && !profileOpen && !proximityOpen && !announcementOpen) return undefined;
+
+    const closePopovers = (event) => {
+      if (!(event.target instanceof Element)) return;
+      if (event.target.closest("[data-popover-trigger], [data-popover-panel], .proximity-wrapper")) return;
+      setSearchOpen(false);
+      setNotificationOpen(false);
+      setProfileOpen(false);
+      setProximityOpen(false);
+      setAnnouncementOpen(false);
+    };
+    const closePopoversOnEscape = (event) => {
+      if (event.key !== "Escape") return;
+      setSearchOpen(false);
+      setNotificationOpen(false);
+      setProfileOpen(false);
+      setProximityOpen(false);
+      setAnnouncementOpen(false);
+    };
+
+    document.addEventListener("click", closePopovers, true);
+    document.addEventListener("keydown", closePopoversOnEscape);
+    return () => {
+      document.removeEventListener("click", closePopovers, true);
+      document.removeEventListener("keydown", closePopoversOnEscape);
+    };
+  }, [searchOpen, notificationOpen, profileOpen, proximityOpen, announcementOpen]);
+
+  useEffect(() => {
     if (!isScheduleFormOpen) return undefined;
     const closeOnEscape = (event) => {
       if (event.key === "Escape") setIsScheduleFormOpen(false);
@@ -1079,21 +1108,50 @@ function App() {
             <button
               className={`hdr-icon-btn ${searchOpen ? "active" : ""}`}
               aria-label="Search"
-              onClick={() => setSearchOpen(o => !o)}
+              aria-expanded={searchOpen}
+              data-popover-trigger
+              onClick={() => {
+                setSearchOpen((open) => !open);
+                setNotificationOpen(false);
+                setProfileOpen(false);
+                setProximityOpen(false);
+              }}
               title="Search teammates"
             >
               <Icon name="search" />
             </button>
-            <button className="hdr-icon-btn notif-btn" aria-label="Notifications" aria-expanded={notificationOpen} onClick={() => { setNotificationOpen(o => !o); setProfileOpen(false); }}>
+            <button
+              className="hdr-icon-btn notif-btn"
+              aria-label="Notifications"
+              aria-expanded={notificationOpen}
+              data-popover-trigger
+              onClick={() => {
+                setNotificationOpen((open) => !open);
+                setSearchOpen(false);
+                setProfileOpen(false);
+                setProximityOpen(false);
+              }}
+            >
               <Icon name="bell" />
               {notifications.length > 0 && <span className="notif-badge">{notifications.length}</span>}
             </button>
-            <button className="hdr-profile-btn" aria-label="Profile" onClick={() => { setProfileOpen(o => !o); setNotificationOpen(false); }}>
+            <button
+              className="hdr-profile-btn"
+              aria-label="Profile"
+              aria-expanded={profileOpen}
+              data-popover-trigger
+              onClick={() => {
+                setProfileOpen((open) => !open);
+                setSearchOpen(false);
+                setNotificationOpen(false);
+                setProximityOpen(false);
+              }}
+            >
               <span className="hdr-avatar">{(username[0] || "U").toUpperCase()}</span>
             </button>
           </div>
           {notificationOpen && (
-            <div className="hdr-popover">
+            <div className="hdr-popover" data-popover-panel>
               <strong>Notifications</strong>
               {notifications.length > 0 ? notifications.map(n => (
                 <div key={n.id} className="popover-row"><strong>{n.title}</strong><small>{n.detail}</small></div>
@@ -1101,7 +1159,7 @@ function App() {
             </div>
           )}
           {profileOpen && (
-            <div className="hdr-popover profile-panel">
+            <div className="hdr-popover profile-panel" data-popover-panel>
               <strong>Profile</strong>
               <div className="profile-summary">
                 <span className="profile-avatar large">{(username[0] || "U").toUpperCase()}</span>
@@ -1163,7 +1221,7 @@ function App() {
           </div>
         )}
         {announcementOpen && (
-          <form className="announcement-form" onSubmit={handleAnnouncement}>
+          <form className="announcement-form" data-popover-panel onSubmit={handleAnnouncement}>
             <label htmlFor="announcement-text">Quick floor announcement</label>
             <input
               id="announcement-text"
@@ -1947,7 +2005,12 @@ function App() {
               <div className="proximity-wrapper">
                 <button
                   className="proximity-selector-btn"
-                  onClick={() => setProximityOpen(o => !o)}
+                  onClick={() => {
+                    setProximityOpen((open) => !open);
+                    setSearchOpen(false);
+                    setNotificationOpen(false);
+                    setProfileOpen(false);
+                  }}
                   aria-expanded={proximityOpen}
                   aria-haspopup="menu"
                 >
@@ -2017,7 +2080,14 @@ function App() {
               <button
                 type="button"
                 className={`presence-search-toggle ${searchOpen ? "active" : ""}`}
-                onClick={() => setSearchOpen(o => !o)}
+                aria-expanded={searchOpen}
+                data-popover-trigger
+                onClick={() => {
+                  setSearchOpen((open) => !open);
+                  setNotificationOpen(false);
+                  setProfileOpen(false);
+                  setProximityOpen(false);
+                }}
                 title={searchOpen ? "Close search" : "Search teammates"}
                 style={{
                   background: searchOpen ? "rgba(99,102,241,0.25)" : "transparent",
@@ -2045,7 +2115,7 @@ function App() {
             </div>
 
             {searchOpen && (
-              <div className="presence-search">
+              <div className="presence-search" data-popover-panel>
                 <span><Icon name="search" size={15} /></span>
                 <input
                   type="text"
