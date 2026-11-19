@@ -45,7 +45,10 @@ const REACTION_DURATION_MS = 3000;
 const SCHEDULED_MEETINGS_KEY = "proxispeak_scheduled_meetings";
 const MEETING_OWNER_KEY = "proxispeak_meeting_owner";
 const THEME_MODE_KEY = "proxispeak_theme_mode";
-const API_URL = import.meta.env.VITE_SERVER_URL || "http://localhost:5000";
+const apiServerPort = new URLSearchParams(window.location.search).get("server");
+const API_URL = apiServerPort === "5001"
+  ? "http://localhost:5001"
+  : import.meta.env.VITE_SERVER_URL || "http://localhost:5000";
 const DEFAULT_SETTINGS = {
   autoJoinAudio: true, focusMode: false, quietHours: false,
   desktopAlerts: false, screenShare: false, doNotDisturb: false, pushToTalk: false,
