@@ -783,8 +783,9 @@ function App() {
   };
 
   const updateMeetingAction = useCallback((socketId, action, value, actor) => {
-    const expiresAt = action === "reaction" ? Date.now() + 2500 : null;
-    setMeetingActions((current) => ({ ...current, [socketId]: { action, value, username: actor, expiresAt } }));
+    const startedAt = action === "reaction" ? Date.now() : null;
+    const expiresAt = startedAt ? startedAt + 3000 : null;
+    setMeetingActions((current) => ({ ...current, [socketId]: { action, value, username: actor, startedAt, expiresAt } }));
     if (expiresAt) {
       window.setTimeout(() => {
         setMeetingActions((current) => {
@@ -793,7 +794,7 @@ function App() {
           delete next[socketId];
           return next;
         });
-      }, 2500);
+      }, 3000);
     }
     return expiresAt;
   }, []);

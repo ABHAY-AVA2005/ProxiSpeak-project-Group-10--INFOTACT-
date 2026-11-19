@@ -1637,8 +1637,47 @@ function VirtualOffice({
           rawCtx.font = "16px sans-serif";
           rawCtx.fillText("✋", avatarX, avatarDrawY - R - 12);
         } else if (action?.action === "reaction") {
-          rawCtx.font = "18px sans-serif";
-          rawCtx.fillText(action.value, avatarX, avatarDrawY - R - 12);
+          let startedAt = action.startedAt;
+          if (!Number.isFinite(startedAt)) {
+            startedAt = Number.isFinite(action.expiresAt) ? action.expiresAt - 2500 : Date.now();
+          }
+          const duration = Number.isFinite(action.expiresAt) && action.expiresAt > startedAt
+            ? action.expiresAt - startedAt
+            : 2500;
+          const progress = Math.max(0, Math.min(1, (Date.now() - startedAt) / duration));
+          const easedProgress = 1 - Math.pow(1 - progress, 3);
+          const fadeStart = 0.72;
+          const opacity = progress < fadeStart ? 1 : (1 - progress) / (1 - fadeStart);
+          const popProgress = Math.min(1, progress / 0.16);
+          const scale = 0.72 + 0.38 * (1 - Math.pow(1 - popProgress, 3));
+          const reactionX = avatarX + Math.sin(progress * Math.PI) * 6;
+          const reactionY = avatarDrawY - R - 18 - easedProgress * 64;
+          const rotation = Math.sin(progress * Math.PI * 2) * 0.07;
+
+          rawCtx.save();
+          rawCtx.globalAlpha = opacity;
+          rawCtx.translate(reactionX, reactionY);
+          rawCtx.rotate(rotation);
+          rawCtx.scale(scale, scale);
+          rawCtx.shadowColor = "rgba(35, 29, 68, 0.24)";
+          rawCtx.shadowBlur = 12;
+          rawCtx.shadowOffsetY = 3;
+          rawCtx.beginPath();
+          rawCtx.arc(0, 0, 22, 0, Math.PI * 2);
+          rawCtx.fillStyle = "rgba(255, 255, 255, 0.96)";
+          rawCtx.fill();
+          rawCtx.shadowColor = "transparent";
+          rawCtx.shadowBlur = 0;
+          rawCtx.shadowOffsetY = 0;
+          rawCtx.strokeStyle = "rgba(99, 80, 255, 0.18)";
+          rawCtx.lineWidth = 1;
+          rawCtx.stroke();
+          rawCtx.fillStyle = "#28243d";
+          rawCtx.font = "28px sans-serif";
+          rawCtx.textAlign = "center";
+          rawCtx.textBaseline = "middle";
+          rawCtx.fillText(action.value, 0, 1);
+          rawCtx.restore();
         }
         rawCtx.restore();
       };
