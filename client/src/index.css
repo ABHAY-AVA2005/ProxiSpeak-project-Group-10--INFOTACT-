@@ -1626,7 +1626,22 @@ input { outline: none; border: none; }
 .voice-controls-bar .voice-btn svg { width: 22px; height: 22px; }
 .camera-btn, .hand-btn, .reaction-button { color: #4d5772; background: #eef0f6; }
 .camera-btn.active, .hand-btn.active { color: #fff; background: #4b54df; }
-.reaction-picker { display: flex; gap: 4px; padding: 0 5px; border-left: 1px solid #e6e9f0; border-right: 1px solid #e6e9f0; }
+.reaction-picker { position: relative; display: flex; gap: 4px; padding: 0 5px; border-left: 1px solid #e6e9f0; border-right: 1px solid #e6e9f0; }
+.meeting-action-error {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  z-index: 20;
+  width: max-content;
+  max-width: min(250px, 85vw);
+  padding: 6px 8px;
+  border: 1px solid #f0c4c8;
+  border-radius: 8px;
+  background: #fff3f4;
+  color: #a5313e;
+  font-size: 0.68rem;
+  line-height: 1.35;
+}
 .push-to-talk-toggle { display: flex; align-items: center; gap: 6px; color: #64708a; font-size: 0.68rem; }
 .push-to-talk-toggle input { accent-color: #5146d8; }
 .proximity-selector-btn { color: #42506c; }
@@ -2226,6 +2241,7 @@ html.join-page-active #root {
 .theme-dark .camera-btn.active,
 .theme-dark .hand-btn.active { background: #4b54df; color: #fff; }
 .theme-dark .reaction-picker { border-color: #3a4151; }
+.theme-dark .meeting-action-error { border-color: #633b43; background: #38252c; color: #ffabb4; }
 .theme-dark .push-to-talk-toggle,
 .theme-dark .proximity-selector-btn { color: #b6bfd0; }
 .theme-dark .proximity-selector-btn { border-color: #3a4151; background: #292f3e; }

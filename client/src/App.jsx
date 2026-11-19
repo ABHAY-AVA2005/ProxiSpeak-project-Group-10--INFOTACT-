@@ -196,6 +196,7 @@ function App() {
   const [officePosition, setOfficePosition] = useState({ x: 0, y: 0 });
   const [raisedHand, setRaisedHand] = useState(false);
   const [meetingActions, setMeetingActions] = useState({});
+  const [meetingActionError, setMeetingActionError] = useState("");
   const [announcement, setAnnouncement] = useState(null);
   const [announcementDraft, setAnnouncementDraft] = useState("");
   const [announcementOpen, setAnnouncementOpen] = useState(false);
@@ -781,6 +782,22 @@ function App() {
     socket.emit("meeting:action", { action, value });
   };
 
+  const updateMeetingAction = useCallback((socketId, action, value, actor) => {
+    const expiresAt = action === "reaction" ? Date.now() + 2500 : null;
+    setMeetingActions((current) => ({ ...current, [socketId]: { action, value, username: actor, expiresAt } }));
+    if (expiresAt) {
+      window.setTimeout(() => {
+        setMeetingActions((current) => {
+          if (current[socketId]?.expiresAt !== expiresAt) return current;
+          const next = { ...current };
+          delete next[socketId];
+          return next;
+        });
+      }, 2500);
+    }
+    return expiresAt;
+  }, []);
+
   const handleRaiseHand = () => {
     const next = !raisedHand;
     setRaisedHand(next);
@@ -788,7 +805,24 @@ function App() {
   };
 
   const handleReaction = (emoji) => {
-    sendMeetingAction("reaction", emoji);
+    const socket = socketRef.current;
+    if (!socket?.connected) {
+      setMeetingActionError("Reconnect to the office before sending a reaction.");
+      return;
+    }
+
+    const expiresAt = updateMeetingAction(socket.id, "reaction", emoji, username);
+    setMeetingActionError("");
+    socket.timeout(3000).emit("meeting:action", { action: "reaction", value: emoji }, (error, response) => {
+      if (!error && response?.ok) return;
+      setMeetingActions((current) => {
+        if (current[socket.id]?.expiresAt !== expiresAt) return current;
+        const next = { ...current };
+        delete next[socket.id];
+        return next;
+      });
+      setMeetingActionError(response?.error || "Reaction could not be sent. Check your connection.");
+    });
   };
 
   const handleAnnouncement = (event) => {
@@ -842,17 +876,7 @@ function App() {
     if (!socket) return undefined;
     const onMeetingAction = ({ socketId, action, value, username: actor } = {}) => {
       if (!socketId) return;
-      setMeetingActions((current) => ({ ...current, [socketId]: { action, value, username: actor } }));
-      if (action === "reaction") {
-        window.setTimeout(() => {
-          setMeetingActions((current) => {
-            if (current[socketId]?.value !== value) return current;
-            const next = { ...current };
-            delete next[socketId];
-            return next;
-          });
-        }, 2500);
-      }
+      updateMeetingAction(socketId, action, value, actor);
     };
     const onAnnouncement = (message) => {
       if (!message || !message.text) return;
@@ -881,7 +905,7 @@ function App() {
       socket.off("meeting:action", onMeetingAction);
       socket.off("office:announcement", onAnnouncement);
     };
-  }, [chatConnected]);
+  }, [chatConnected, updateMeetingAction]);
 
   useEffect(() => {
     if (!settings.pushToTalk || !permissionGranted) return undefined;
@@ -1988,6 +2012,7 @@ function App() {
                 {["👏", "❤️", "👍"].map((emoji) => (
                   <button type="button" key={emoji} className="voice-btn reaction-button" onClick={() => handleReaction(emoji)} aria-label={`React ${emoji}`}>{emoji}</button>
                 ))}
+                {meetingActionError && <span className="meeting-action-error" role="status">{meetingActionError}</span>}
               </div>
               <label className="push-to-talk-toggle">
                 <input type="checkbox" checked={settings.pushToTalk} onChange={() => handleToggleSetting("pushToTalk")} />

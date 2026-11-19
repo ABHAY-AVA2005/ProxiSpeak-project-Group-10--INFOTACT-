@@ -314,29 +314,36 @@ export function setupSocketHandlers(io) {
       io.to(socket.data.roomName).emit("presence:status", { socketId: socket.id, status });
     });
 
-    socket.on("meeting:action", (payload = {}) => {
+    socket.on("meeting:action", (payload = {}, acknowledge) => {
       const { action, value } = payload && typeof payload === "object" ? payload : {};
-      if (!socket.data.roomName || !socket.data.username) return;
-      const now = Date.now();
-      if (now - (socket.data.lastMeetingActionAt || 0) < 250) return;
-      socket.data.lastMeetingActionAt = now;
-      if (action === "hand" && typeof value === "boolean") {
-        io.to(socket.data.roomName).emit("meeting:action", {
-          socketId: socket.id,
-          username: socket.data.username,
-          action,
-          value
-        });
+      const acknowledgeResult = (result) => {
+        if (typeof acknowledge === "function") acknowledge(result);
+      };
+      if (!socket.data.roomName || !socket.data.username) {
+        acknowledgeResult({ ok: false, error: "Join an office before sending an action." });
         return;
       }
-      if (action === "reaction" && ["👏", "❤️", "👍"].includes(value)) {
-        io.to(socket.data.roomName).emit("meeting:action", {
-          socketId: socket.id,
-          username: socket.data.username,
-          action,
-          value
-        });
+
+      const validHandAction = action === "hand" && typeof value === "boolean";
+      const validReaction = action === "reaction" && ["👏", "❤️", "👍"].includes(value);
+      if (!validHandAction && !validReaction) {
+        acknowledgeResult({ ok: false, error: "This meeting action is not supported." });
+        return;
       }
+
+      const now = Date.now();
+      if (now - (socket.data.lastMeetingActionAt || 0) < 100) {
+        acknowledgeResult({ ok: false, error: "Please wait a moment before reacting again." });
+        return;
+      }
+      socket.data.lastMeetingActionAt = now;
+      io.to(socket.data.roomName).emit("meeting:action", {
+        socketId: socket.id,
+        username: socket.data.username,
+        action,
+        value
+      });
+      acknowledgeResult({ ok: true });
     });
 
     socket.on("office:announcement", (payload = {}, acknowledge) => {

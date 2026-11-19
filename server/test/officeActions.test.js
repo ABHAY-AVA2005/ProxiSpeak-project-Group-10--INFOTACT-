@@ -44,6 +44,22 @@ test("Office actions - hand raises and announcements reach only the joined room"
     assert.equal(forBob.username, "Alice");
     assert.equal(forBob.value, true);
 
+    await new Promise((resolve) => setTimeout(resolve, 110));
+    const aliceReaction = once(alice, "meeting:action");
+    const bobReaction = once(bob, "meeting:action");
+    const reactionSent = new Promise((resolve) => {
+      alice.emit("meeting:action", { action: "reaction", value: "❤️" }, resolve);
+    });
+    const [forAliceReaction, forBobReaction, reactionResponse] = await Promise.all([
+      aliceReaction,
+      bobReaction,
+      reactionSent
+    ]);
+    assert.deepEqual(forAliceReaction, forBobReaction);
+    assert.equal(forBobReaction.username, "Alice");
+    assert.equal(forBobReaction.value, "❤️");
+    assert.equal(reactionResponse.ok, true);
+
     const outsiderReceived = new Promise((resolve) => {
       const timer = setTimeout(() => resolve(false), 100);
       outsider.once("office:announcement", () => { clearTimeout(timer); resolve(true); });
