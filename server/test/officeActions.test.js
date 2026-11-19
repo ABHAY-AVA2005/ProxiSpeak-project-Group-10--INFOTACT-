@@ -15,7 +15,7 @@ function once(socket, event, timeout = 3000) {
   });
 }
 
-test("Office actions - hand raises and announcements reach only the joined room", async () => {
+test("Office actions - reactions respect the room host and room scope", async () => {
   const httpServer = createServer();
   const io = new Server(httpServer);
   setupSocketHandlers(io);
@@ -30,11 +30,34 @@ test("Office actions - hand raises and announcements reach only the joined room"
     const join = (socket, username, roomName) => new Promise((resolve) => {
       socket.emit("join", { username, roomName, x: 100, y: 100 }, resolve);
     });
-    await Promise.all([
-      join(alice, "Alice", "actions-room"),
-      join(bob, "Bob", "actions-room"),
-      join(outsider, "Eve", "other-room")
-    ]);
+    const aliceJoin = await join(alice, "Alice", "actions-room");
+    const bobJoin = await join(bob, "Bob", "actions-room");
+    await join(outsider, "Eve", "other-room");
+    assert.equal(aliceJoin.roomControls.hostSocketId, alice.id);
+    assert.equal(bobJoin.roomControls.hostSocketId, alice.id);
+
+    const unauthorizedToggle = await new Promise((resolve) => {
+      bob.emit("room:reactions:set", { enabled: false }, resolve);
+    });
+    assert.equal(unauthorizedToggle.ok, false);
+
+    const roomControlsUpdate = once(bob, "room:controls");
+    const disableReactions = await new Promise((resolve) => {
+      alice.emit("room:reactions:set", { enabled: false }, resolve);
+    });
+    assert.equal(disableReactions.ok, true);
+    assert.equal((await roomControlsUpdate).reactionsEnabled, false);
+
+    const blockedReaction = await new Promise((resolve) => {
+      bob.emit("meeting:action", { action: "reaction", value: "👏" }, resolve);
+    });
+    assert.equal(blockedReaction.ok, false);
+    assert.match(blockedReaction.error, /disabled by the room host/i);
+
+    const enableReactions = await new Promise((resolve) => {
+      alice.emit("room:reactions:set", { enabled: true }, resolve);
+    });
+    assert.equal(enableReactions.ok, true);
 
     const aliceAction = once(alice, "meeting:action");
     const bobAction = once(bob, "meeting:action");
@@ -48,7 +71,7 @@ test("Office actions - hand raises and announcements reach only the joined room"
     const aliceReaction = once(alice, "meeting:action");
     const bobReaction = once(bob, "meeting:action");
     const reactionSent = new Promise((resolve) => {
-      alice.emit("meeting:action", { action: "reaction", value: "❤️" }, resolve);
+      alice.emit("meeting:action", { action: "reaction", value: "💡" }, resolve);
     });
     const [forAliceReaction, forBobReaction, reactionResponse] = await Promise.all([
       aliceReaction,
@@ -57,7 +80,8 @@ test("Office actions - hand raises and announcements reach only the joined room"
     ]);
     assert.deepEqual(forAliceReaction, forBobReaction);
     assert.equal(forBobReaction.username, "Alice");
-    assert.equal(forBobReaction.value, "❤️");
+    assert.equal(forBobReaction.value, "💡");
+    assert.ok(forBobReaction.reactionId);
     assert.equal(reactionResponse.ok, true);
 
     const outsiderReceived = new Promise((resolve) => {
@@ -87,6 +111,15 @@ test("Office actions - hand raises and announcements reach only the joined room"
     assert.equal(officeAnnouncementResult.ok, true);
     assert.equal(aliceOfficeMessage.text, "Office-wide update");
     assert.equal(outsiderOfficeMessage.text, "Office-wide update");
+
+    const hostTransfer = once(bob, "room:controls");
+    alice.disconnect();
+    const nextHostControls = await hostTransfer;
+    assert.equal(nextHostControls.hostSocketId, bob.id);
+    const nextHostToggle = await new Promise((resolve) => {
+      bob.emit("room:reactions:set", { enabled: false }, resolve);
+    });
+    assert.equal(nextHostToggle.ok, true);
   } finally {
     alice.disconnect();
     bob.disconnect();

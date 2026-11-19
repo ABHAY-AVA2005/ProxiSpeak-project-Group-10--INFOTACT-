@@ -34,6 +34,14 @@ const baseRooms = [
 ];
 
 const PROXIMITY_OPTIONS = [50, 75, 100, 150, 200];
+const QUICK_REACTIONS = ["👏", "❤️", "👍"];
+const REACTION_EMOJIS = [
+  ...QUICK_REACTIONS,
+  "😂", "🎉", "🔥", "😍", "😮", "😢", "🙏", "💯", "🙌", "🤔", "🥳",
+  "👀", "✅", "🤝", "💡", "💖", "🚀", "🎯", "☕", "😅", "✨", "👎",
+  "🎊", "💪", "🤗", "😎", "🫡", "🤩",
+];
+const REACTION_DURATION_MS = 3000;
 const SCHEDULED_MEETINGS_KEY = "proxispeak_scheduled_meetings";
 const MEETING_OWNER_KEY = "proxispeak_meeting_owner";
 const THEME_MODE_KEY = "proxispeak_theme_mode";
@@ -196,7 +204,12 @@ function App() {
   const [officePosition, setOfficePosition] = useState({ x: 0, y: 0 });
   const [raisedHand, setRaisedHand] = useState(false);
   const [meetingActions, setMeetingActions] = useState({});
+  const [meetingReactions, setMeetingReactions] = useState([]);
+  const [reactionsEnabled, setReactionsEnabled] = useState(true);
+  const [isRoomHost, setIsRoomHost] = useState(false);
+  const [reactionPickerOpen, setReactionPickerOpen] = useState(false);
   const [meetingActionError, setMeetingActionError] = useState("");
+  const [reactionControlError, setReactionControlError] = useState("");
   const [announcement, setAnnouncement] = useState(null);
   const [announcementDraft, setAnnouncementDraft] = useState("");
   const [announcementOpen, setAnnouncementOpen] = useState(false);
@@ -245,6 +258,8 @@ function App() {
   const [screenShareStream, setScreenShareStream] = useState(null);
   const [remoteScreenShare, setRemoteScreenShare] = useState(null);
   const socketRef = useRef(null);
+  const reactionIdsRef = useRef(new Set());
+  const reactionSequenceRef = useRef(0);
   const chatScopeRef = useRef("room");
   const directChatRef = useRef(null);
   const chatListRef = useRef(null);
@@ -291,16 +306,21 @@ function App() {
   }, [activeTab]);
 
   useEffect(() => {
-    if (!searchOpen && !notificationOpen && !profileOpen && !proximityOpen && !announcementOpen) return undefined;
+    if (!searchOpen && !notificationOpen && !profileOpen && !proximityOpen && !announcementOpen && !reactionPickerOpen) return undefined;
 
     const closePopovers = (event) => {
       if (!(event.target instanceof Element)) return;
-      if (event.target.closest("[data-popover-trigger], [data-popover-panel], .proximity-wrapper")) return;
+      const popoverTarget = event.target.closest("[data-popover-trigger], [data-popover-panel], .proximity-wrapper");
+      if (popoverTarget) {
+        if (!popoverTarget.closest(".reaction-picker")) setReactionPickerOpen(false);
+        return;
+      }
       setSearchOpen(false);
       setNotificationOpen(false);
       setProfileOpen(false);
       setProximityOpen(false);
       setAnnouncementOpen(false);
+      setReactionPickerOpen(false);
     };
     const closePopoversOnEscape = (event) => {
       if (event.key !== "Escape") return;
@@ -309,6 +329,7 @@ function App() {
       setProfileOpen(false);
       setProximityOpen(false);
       setAnnouncementOpen(false);
+      setReactionPickerOpen(false);
     };
 
     document.addEventListener("click", closePopovers, true);
@@ -317,7 +338,7 @@ function App() {
       document.removeEventListener("click", closePopovers, true);
       document.removeEventListener("keydown", closePopoversOnEscape);
     };
-  }, [searchOpen, notificationOpen, profileOpen, proximityOpen, announcementOpen]);
+  }, [searchOpen, notificationOpen, profileOpen, proximityOpen, announcementOpen, reactionPickerOpen]);
 
   useEffect(() => {
     if (!isScheduleFormOpen) return undefined;
@@ -405,6 +426,12 @@ function App() {
       isSpeaking: speakingUserIds.includes(user.socketId),
     }));
   }, [onlineUsers, selfStatus, speakingUserIds, username]);
+
+  const latestReactionBySocket = useMemo(() => {
+    const latest = new Map();
+    meetingReactions.forEach((reaction) => latest.set(reaction.socketId, reaction));
+    return latest;
+  }, [meetingReactions]);
 
   const filteredUsers = useMemo(() => {
     const query = presenceSearch.trim().toLowerCase();
@@ -783,21 +810,33 @@ function App() {
   };
 
   const updateMeetingAction = useCallback((socketId, action, value, actor) => {
-    const startedAt = action === "reaction" ? Date.now() : null;
-    const expiresAt = startedAt ? startedAt + 3000 : null;
-    setMeetingActions((current) => ({ ...current, [socketId]: { action, value, username: actor, startedAt, expiresAt } }));
-    if (expiresAt) {
-      window.setTimeout(() => {
-        setMeetingActions((current) => {
-          if (current[socketId]?.expiresAt !== expiresAt) return current;
-          const next = { ...current };
-          delete next[socketId];
-          return next;
-        });
-      }, 3000);
-    }
-    return expiresAt;
+    if (action !== "hand") return;
+    setMeetingActions((current) => ({ ...current, [socketId]: { action, value, username: actor } }));
   }, []);
+
+  const addMeetingReaction = useCallback((reaction) => {
+    const reactionId = typeof reaction?.reactionId === "string" ? reaction.reactionId : "";
+    if (!reactionId || reactionIdsRef.current.has(reactionId)) return;
+    reactionIdsRef.current.add(reactionId);
+
+    const startedAt = Date.now();
+    setMeetingReactions((current) => [...current, {
+      ...reaction,
+      startedAt,
+      expiresAt: startedAt + REACTION_DURATION_MS,
+      driftX: Math.round((Math.random() - 0.5) * 180),
+      riseY: -140 - Math.round(Math.random() * 130),
+    }]);
+    window.setTimeout(() => {
+      reactionIdsRef.current.delete(reactionId);
+      setMeetingReactions((current) => current.filter((item) => item.reactionId !== reactionId));
+    }, REACTION_DURATION_MS);
+  }, []);
+
+  const removeMeetingReaction = (reactionId) => {
+    reactionIdsRef.current.delete(reactionId);
+    setMeetingReactions((current) => current.filter((reaction) => reaction.reactionId !== reactionId));
+  };
 
   const handleRaiseHand = () => {
     const next = !raisedHand;
@@ -807,22 +846,40 @@ function App() {
 
   const handleReaction = (emoji) => {
     const socket = socketRef.current;
+    setReactionPickerOpen(false);
+    if (!reactionsEnabled) {
+      setMeetingActionError("Reactions are disabled by the room host.");
+      return;
+    }
     if (!socket?.connected) {
       setMeetingActionError("Reconnect to the office before sending a reaction.");
       return;
     }
 
-    const expiresAt = updateMeetingAction(socket.id, "reaction", emoji, username);
+    const reactionId = `${socket.id}:${++reactionSequenceRef.current}`;
+    addMeetingReaction({ reactionId, socketId: socket.id, username, value: emoji });
     setMeetingActionError("");
-    socket.timeout(3000).emit("meeting:action", { action: "reaction", value: emoji }, (error, response) => {
-      if (!error && response?.ok) return;
-      setMeetingActions((current) => {
-        if (current[socket.id]?.expiresAt !== expiresAt) return current;
-        const next = { ...current };
-        delete next[socket.id];
-        return next;
-      });
-      setMeetingActionError(response?.error || "Reaction could not be sent. Check your connection.");
+    socket.timeout(3000).emit("meeting:action", { action: "reaction", value: emoji, reactionId }, (error, response) => {
+      if (error || !response?.ok) {
+        removeMeetingReaction(reactionId);
+        setMeetingActionError(response?.error || "Reaction could not be sent. Check your connection.");
+      }
+    });
+  };
+
+  const handleToggleReactionAvailability = () => {
+    const socket = socketRef.current;
+    if (!isRoomHost || !socket?.connected) {
+      setReactionControlError("Reconnect as the room host to change reaction availability.");
+      return;
+    }
+    socket.timeout(3000).emit("room:reactions:set", { enabled: !reactionsEnabled }, (error, response) => {
+      if (error || !response?.ok) {
+        setReactionControlError(response?.error || "Reaction availability could not be updated.");
+        return;
+      }
+      setReactionControlError("");
+      setReactionsEnabled(response.reactionsEnabled);
     });
   };
 
@@ -875,9 +932,19 @@ function App() {
   useEffect(() => {
     const socket = socketRef.current;
     if (!socket) return undefined;
-    const onMeetingAction = ({ socketId, action, value, username: actor } = {}) => {
+    const onMeetingAction = ({ socketId, action, value, username: actor, reactionId } = {}) => {
       if (!socketId) return;
+      if (action === "reaction") {
+        addMeetingReaction({ socketId, value, username: actor, reactionId });
+        return;
+      }
       updateMeetingAction(socketId, action, value, actor);
+    };
+    const onRoomControls = (controls) => {
+      if (!controls) return;
+      setIsRoomHost(controls.hostSocketId === socket.id);
+      setReactionsEnabled(controls.reactionsEnabled !== false);
+      setReactionControlError("");
     };
     const onAnnouncement = (message) => {
       if (!message || !message.text) return;
@@ -901,12 +968,14 @@ function App() {
       window.setTimeout(() => setAnnouncement((current) => (current?.id === message.id ? null : current)), 15_000);
     };
     socket.on("meeting:action", onMeetingAction);
+    socket.on("room:controls", onRoomControls);
     socket.on("office:announcement", onAnnouncement);
     return () => {
       socket.off("meeting:action", onMeetingAction);
+      socket.off("room:controls", onRoomControls);
       socket.off("office:announcement", onAnnouncement);
     };
-  }, [chatConnected, updateMeetingAction]);
+  }, [chatConnected, updateMeetingAction, addMeetingReaction]);
 
   useEffect(() => {
     if (!settings.pushToTalk || !permissionGranted) return undefined;
@@ -1281,11 +1350,19 @@ function App() {
                   onUsersChange={handleUsersChange}
                   onSpeakingUsersChange={setSpeakingUserIds}
                   onChatMessage={handleChatMessage}
-                  onSocketReady={(sock, history = [], roomReady = false, serverOutdated = false, meetingHistory = []) => {
+                  onSocketReady={(sock, history = [], roomReady = false, serverOutdated = false, meetingHistory = [], roomControls) => {
                     socketRef.current = sock;
                     setChatConnected(Boolean(sock?.connected));
                     setChatRoomReady(roomReady);
                     setChatServerOutdated(serverOutdated);
+                    if (!sock) {
+                      setIsRoomHost(false);
+                      setReactionsEnabled(true);
+                    }
+                    if (roomControls) {
+                      setIsRoomHost(Boolean(sock?.id && roomControls.hostSocketId === sock.id));
+                      setReactionsEnabled(roomControls.reactionsEnabled !== false);
+                    }
                     if (sock && roomReady) {
                       const messages = chatScopeRef.current === "all" ? meetingHistory : history;
                       setChatMessages(messages.map((message) => ({
@@ -1305,6 +1382,7 @@ function App() {
                   onRemoteScreenShareChange={handleRemoteScreenShareChange}
                   onPositionChange={(position) => setOfficePosition(position)}
                   meetingActions={meetingActions}
+                  meetingReactions={meetingReactions}
                   peerVolumes={peerVolumes}
                   speakerEnabled={speakerEnabled}
                   speakerVolume={speakerVolume}
@@ -1404,8 +1482,10 @@ function App() {
                               {meetingActions[user.socketId]?.action === "hand" && meetingActions[user.socketId]?.value && (
                                 <span className="meeting-action-pill" aria-label="Hand raised">✋</span>
                               )}
-                              {meetingActions[user.socketId]?.action === "reaction" && (
-                                <span className="meeting-action-pill" aria-label={`Reaction ${meetingActions[user.socketId].value}`}>{meetingActions[user.socketId].value}</span>
+                              {latestReactionBySocket.get(user.socketId) && (
+                                <span className="meeting-action-pill" aria-label={`Reaction ${latestReactionBySocket.get(user.socketId).value}`}>
+                                  {latestReactionBySocket.get(user.socketId).value}
+                                </span>
                               )}
                               {!user.isSelf && (
                                 <div className="team-row-actions">
@@ -2010,9 +2090,73 @@ function App() {
                 <Icon name="hand" size={18} />
               </button>
               <div className="reaction-picker" role="group" aria-label="Send a reaction">
-                {["👏", "❤️", "👍"].map((emoji) => (
-                  <button type="button" key={emoji} className="voice-btn reaction-button" onClick={() => handleReaction(emoji)} aria-label={`React ${emoji}`}>{emoji}</button>
+                {QUICK_REACTIONS.map((emoji) => (
+                  <button
+                    type="button"
+                    key={emoji}
+                    className="voice-btn reaction-button"
+                    onClick={() => handleReaction(emoji)}
+                    aria-label={`React ${emoji}`}
+                    title={reactionsEnabled ? `React ${emoji}` : "Reactions are disabled by the room host"}
+                    disabled={!reactionsEnabled}
+                  >
+                    {emoji}
+                  </button>
                 ))}
+                <button
+                  type="button"
+                  className="voice-btn reaction-button reaction-more-button"
+                  onClick={() => setReactionPickerOpen((open) => !open)}
+                  aria-label="More emoji reactions"
+                  aria-expanded={reactionPickerOpen}
+                  aria-controls="reaction-emoji-picker"
+                  data-popover-trigger
+                >
+                  +
+                </button>
+                {!reactionsEnabled && (
+                  <span className="reaction-disabled-badge" role="status">
+                    Disabled
+                  </span>
+                )}
+                {reactionPickerOpen && (
+                  <div
+                    id="reaction-emoji-picker"
+                    className="reaction-picker-popover"
+                    role="dialog"
+                    aria-label="More emoji reactions"
+                    data-popover-panel
+                  >
+                    <div className="reaction-emoji-grid">
+                      {REACTION_EMOJIS.map((emoji) => (
+                        <button
+                          type="button"
+                          key={emoji}
+                          onClick={() => handleReaction(emoji)}
+                          aria-label={`React ${emoji}`}
+                          title={`React ${emoji}`}
+                          disabled={!reactionsEnabled}
+                        >
+                          {emoji}
+                        </button>
+                      ))}
+                    </div>
+                    {!reactionsEnabled && (
+                      <p className="reaction-availability-message" role="status">
+                        Reactions are unavailable because the room host disabled them.
+                      </p>
+                    )}
+                    {isRoomHost && (
+                      <div className="reaction-host-controls">
+                        <span>You are the room host</span>
+                        <button type="button" onClick={handleToggleReactionAvailability}>
+                          {reactionsEnabled ? "Disable reactions for everyone" : "Enable reactions for everyone"}
+                        </button>
+                      </div>
+                    )}
+                    {reactionControlError && <p className="reaction-control-error" role="alert">{reactionControlError}</p>}
+                  </div>
+                )}
                 {meetingActionError && <span className="meeting-action-error" role="status">{meetingActionError}</span>}
               </div>
               <label className="push-to-talk-toggle">
@@ -2208,7 +2352,11 @@ function App() {
                       )}
                     </div>
                     {meetingActions[user.socketId]?.action === "hand" && meetingActions[user.socketId]?.value && <span className="meeting-action-pill" aria-label="Hand raised">✋</span>}
-                    {meetingActions[user.socketId]?.action === "reaction" && <span className="meeting-action-pill" aria-label={`Reaction ${meetingActions[user.socketId].value}`}>{meetingActions[user.socketId].value}</span>}
+                    {latestReactionBySocket.get(user.socketId) && (
+                      <span className="meeting-action-pill" aria-label={`Reaction ${latestReactionBySocket.get(user.socketId).value}`}>
+                        {latestReactionBySocket.get(user.socketId).value}
+                      </span>
+                    )}
                     {user.isSpeaking && <SpeakingIndicator />}
                   </div>
                 );

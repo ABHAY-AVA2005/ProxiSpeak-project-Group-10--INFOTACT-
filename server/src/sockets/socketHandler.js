@@ -31,6 +31,7 @@ import {
   publishProximityEnter,
   publishProximityLeave
 } from "../services/redisSync.js";
+import { getRedisPublisher, isRedisConnected, REDIS_CONFIG } from "../config/redis.js";
 
 // Per-socket state for serialized proximity processing and query coalescing
 export const proximityQueues = new Map(); // socketId -> Promise
@@ -41,6 +42,11 @@ const meetingChatHistory = [];
 const directChatHistory = new Map();
 const MAX_ROOM_CHAT_MESSAGES = 500;
 const MEETING_CHAT_ROOM = "office:all";
+const ALLOWED_MEETING_REACTIONS = new Set([
+  "👏", "❤️", "👍", "😂", "🎉", "🔥", "😍", "😮", "😢", "🙏", "💯", "🙌",
+  "🤔", "🥳", "👀", "✅", "🤝", "💡", "💖", "🚀", "🎯", "☕", "😅", "✨",
+  "👎", "🎊", "💪", "🤗", "😎", "🫡", "🤩"
+]);
 
 function getDirectConversationKey(firstSocketId, secondSocketId) {
   return [firstSocketId, secondSocketId].sort().join(":");
@@ -60,6 +66,81 @@ export function resetProximityQueues() {
  * @param {import("socket.io").Server} io - Socket.io server instance
  */
 export function setupSocketHandlers(io) {
+  const localRoomControls = new Map();
+  const sharedRoomControlsEnabled = REDIS_CONFIG.ENABLED && Boolean(REDIS_CONFIG.URL);
+  const getRoomControlsKey = (roomName) => `proxispeak:room-controls:${encodeURIComponent(roomName)}`;
+  const getRoomControlsRedis = () => {
+    if (!sharedRoomControlsEnabled) return null;
+    const redis = getRedisPublisher();
+    return redis && isRedisConnected() ? redis : null;
+  };
+  const parseRoomControls = (serialized) => {
+    const parsed = JSON.parse(serialized);
+    if (!parsed || typeof parsed !== "object"
+      || (parsed.hostSocketId !== null && typeof parsed.hostSocketId !== "string")
+      || typeof parsed.reactionsEnabled !== "boolean") {
+      throw new TypeError("Invalid room controls stored in Redis.");
+    }
+    return { hostSocketId: parsed.hostSocketId, reactionsEnabled: parsed.reactionsEnabled };
+  };
+  const getRoomControls = async (roomName) => {
+    const redis = getRoomControlsRedis();
+    if (!redis) return localRoomControls.get(roomName) || null;
+    const serialized = await redis.get(getRoomControlsKey(roomName));
+    return serialized ? parseRoomControls(serialized) : null;
+  };
+  const claimRoomControls = async (roomName, hostSocketId) => {
+    const controls = { hostSocketId, reactionsEnabled: true };
+    const redis = getRoomControlsRedis();
+    if (!redis) {
+      const current = localRoomControls.get(roomName);
+      if (current) return current;
+      localRoomControls.set(roomName, controls);
+      return controls;
+    }
+
+    const claimed = await redis.set(getRoomControlsKey(roomName), JSON.stringify(controls), "NX");
+    if (claimed === "OK") {
+      localRoomControls.set(roomName, controls);
+      return controls;
+    }
+    return getRoomControls(roomName);
+  };
+  const replaceRoomControls = async (roomName, current, next) => {
+    const redis = getRoomControlsRedis();
+    if (!redis) {
+      if (localRoomControls.get(roomName) !== current) return localRoomControls.get(roomName) || current;
+      localRoomControls.set(roomName, next);
+      return next;
+    }
+
+    const replaced = await redis.eval(
+      "local current = redis.call('GET', KEYS[1]); if current == ARGV[1] then redis.call('SET', KEYS[1], ARGV[2]); return 1 end; return 0",
+      1,
+      getRoomControlsKey(roomName),
+      JSON.stringify(current),
+      JSON.stringify(next)
+    );
+    if (replaced === 1) {
+      localRoomControls.set(roomName, next);
+      return next;
+    }
+    return getRoomControls(roomName);
+  };
+  const deleteRoomControls = async (roomName, current) => {
+    const redis = getRoomControlsRedis();
+    if (!redis) {
+      if (localRoomControls.get(roomName) === current) localRoomControls.delete(roomName);
+      return;
+    }
+    await redis.eval(
+      "local current = redis.call('GET', KEYS[1]); if current == ARGV[1] then return redis.call('DEL', KEYS[1]) end; return 0",
+      1,
+      getRoomControlsKey(roomName),
+      JSON.stringify(current)
+    );
+    localRoomControls.delete(roomName);
+  };
 
   /**
    * Helper: checks if two users are within earshot distance (default 100px)
@@ -281,6 +362,39 @@ export function setupSocketHandlers(io) {
         return;
       }
 
+      let roomControls;
+      try {
+        const roomSockets = await io.in(roomName).fetchSockets();
+        const roomSocketIds = new Set(roomSockets.map((roomSocket) => roomSocket.id));
+        const existingMemberIds = roomSockets
+          .map((roomSocket) => roomSocket.id)
+          .filter((socketId) => socketId !== socket.id);
+        roomControls = await getRoomControls(roomName);
+        if (!roomControls) {
+          roomControls = await claimRoomControls(roomName, existingMemberIds[0] || socket.id);
+        } else if (!roomSocketIds.has(roomControls.hostSocketId)) {
+          roomControls = await replaceRoomControls(roomName, roomControls, {
+            hostSocketId: existingMemberIds[0] || socket.id,
+            reactionsEnabled: roomControls.reactionsEnabled
+          });
+        }
+        if (!roomControls?.hostSocketId) throw new Error("Unable to assign a room host.");
+      } catch (error) {
+        console.error(`[Socket] Could not load room controls for '${roomName}':`, error);
+        socket.leave(roomName);
+        socket.leave(MEETING_CHAT_ROOM);
+        removeUser(socket.id);
+        if (typeof acknowledge === "function") {
+          acknowledge({ ok: false, error: "Room controls are unavailable. Please reconnect." });
+        }
+        return;
+      }
+
+      const hostSocket = io.sockets.sockets.get(roomControls.hostSocketId);
+      if (hostSocket) hostSocket.data.isRoomHost = true;
+      socket.data.isRoomHost = roomControls.hostSocketId === socket.id;
+      io.to(roomName).emit("room:controls", roomControls);
+
       console.log(`[User Joined] ${newUser.username} (${newUser.socketId}) at [${newUser.x}, ${newUser.y}]`);
 
       // 1. Send the current user snapshot to the joining user
@@ -300,7 +414,8 @@ export function setupSocketHandlers(io) {
           ok: true,
           roomName,
           chatMessages: roomChatHistory.get(roomName) || [],
-          meetingChatMessages: meetingChatHistory
+          meetingChatMessages: meetingChatHistory,
+          roomControls
         });
       }
 
@@ -314,7 +429,37 @@ export function setupSocketHandlers(io) {
       io.to(socket.data.roomName).emit("presence:status", { socketId: socket.id, status });
     });
 
-    socket.on("meeting:action", (payload = {}, acknowledge) => {
+    socket.on("room:reactions:set", async (payload = {}, acknowledge) => {
+      const roomName = socket.data.roomName;
+      const enabled = payload && typeof payload === "object" ? payload.enabled : undefined;
+      if (!roomName || typeof enabled !== "boolean") {
+        acknowledge?.({ ok: false, error: "Choose whether reactions should be enabled for this room." });
+        return;
+      }
+
+      try {
+        const current = await getRoomControls(roomName);
+        if (!current || current.hostSocketId !== socket.id) {
+          acknowledge?.({ ok: false, error: "Only the room host can change reaction availability." });
+          return;
+        }
+        const roomControls = await replaceRoomControls(roomName, current, {
+          ...current,
+          reactionsEnabled: enabled
+        });
+        if (roomControls?.hostSocketId !== socket.id) {
+          acknowledge?.({ ok: false, error: "The room host changed before this setting was saved." });
+          return;
+        }
+        io.to(roomName).emit("room:controls", roomControls);
+        acknowledge?.({ ok: true, ...roomControls });
+      } catch (error) {
+        console.error(`[Socket] Could not update room reaction controls for '${roomName}':`, error);
+        acknowledge?.({ ok: false, error: "Reaction availability could not be updated." });
+      }
+    });
+
+    socket.on("meeting:action", async (payload = {}, acknowledge) => {
       const { action, value } = payload && typeof payload === "object" ? payload : {};
       const acknowledgeResult = (result) => {
         if (typeof acknowledge === "function") acknowledge(result);
@@ -325,10 +470,23 @@ export function setupSocketHandlers(io) {
       }
 
       const validHandAction = action === "hand" && typeof value === "boolean";
-      const validReaction = action === "reaction" && ["👏", "❤️", "👍"].includes(value);
+      const validReaction = action === "reaction" && ALLOWED_MEETING_REACTIONS.has(value);
       if (!validHandAction && !validReaction) {
         acknowledgeResult({ ok: false, error: "This meeting action is not supported." });
         return;
+      }
+      if (validReaction) {
+        try {
+          const roomControls = await getRoomControls(socket.data.roomName);
+          if (!roomControls?.reactionsEnabled) {
+            acknowledgeResult({ ok: false, error: "Reactions are disabled by the room host." });
+            return;
+          }
+        } catch (error) {
+          console.error(`[Socket] Could not read room reaction controls for '${socket.data.roomName}':`, error);
+          acknowledgeResult({ ok: false, error: "Reaction availability could not be checked." });
+          return;
+        }
       }
 
       const now = Date.now();
@@ -337,13 +495,22 @@ export function setupSocketHandlers(io) {
         return;
       }
       socket.data.lastMeetingActionAt = now;
-      io.to(socket.data.roomName).emit("meeting:action", {
+      const meetingAction = {
         socketId: socket.id,
         username: socket.data.username,
         action,
         value
-      });
-      acknowledgeResult({ ok: true });
+      };
+      if (validReaction) {
+        const requestId = payload.reactionId;
+        meetingAction.reactionId = typeof requestId === "string"
+          && requestId.length <= 128
+          && /^[\w:-]+$/.test(requestId)
+          ? requestId
+          : `${socket.id}:${now}:${Math.random().toString(36).slice(2, 8)}`;
+      }
+      io.to(socket.data.roomName).emit("meeting:action", meetingAction);
+      acknowledgeResult({ ok: true, reactionId: meetingAction.reactionId });
     });
 
     socket.on("office:announcement", (payload = {}, acknowledge) => {
@@ -631,6 +798,29 @@ export function setupSocketHandlers(io) {
         meetingChatHistory.length = 0;
       }
       console.log(`[Socket Disconnected] ID: ${socket.id} (Reason: ${reason})`);
+
+      if (roomName) {
+        try {
+          const currentControls = await getRoomControls(roomName);
+          if (currentControls?.hostSocketId === socket.id) {
+            const remainingSockets = await io.in(roomName).fetchSockets();
+            const nextHostId = remainingSockets
+              .map((roomSocket) => roomSocket.id)
+              .find((socketId) => socketId !== socket.id);
+            if (nextHostId) {
+              const nextControls = await replaceRoomControls(roomName, currentControls, {
+                ...currentControls,
+                hostSocketId: nextHostId
+              });
+              io.to(roomName).emit("room:controls", nextControls);
+            } else {
+              await deleteRoomControls(roomName, currentControls);
+            }
+          }
+        } catch (error) {
+          console.error(`[Socket] Could not transfer room host for '${roomName}':`, error);
+        }
+      }
 
       if (removedUser) {
         // Broadcast user departure so all clients remove the avatar immediately

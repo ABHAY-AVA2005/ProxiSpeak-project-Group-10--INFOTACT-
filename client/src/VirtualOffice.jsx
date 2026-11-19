@@ -328,6 +328,7 @@ function VirtualOffice({
   onRemoteScreenShareChange = () => {},
   onPositionChange = () => {},
   meetingActions = {},
+  meetingReactions = [],
   peerVolumes = {},
   speakerEnabled = true,
   speakerVolume = 100,
@@ -337,6 +338,7 @@ function VirtualOffice({
   themeMode = "light",
 }) {
   const canvasRef = useRef(null);
+  const reactionCanvasRef = useRef(null);
   const viewportRef = useRef(null);
   const renderLayoutRef = useRef(createRenderLayout(WORLD_W, WORLD_H, 1));
   const [positionDisplay, setPositionDisplay] = useState({ x: 160, y: 44 });
@@ -347,6 +349,7 @@ function VirtualOffice({
   const gridVisibleRef = useRef(false);
   const peerVolumesRef = useRef(peerVolumes);
   const meetingActionsRef = useRef(meetingActions);
+  const meetingReactionsRef = useRef(meetingReactions);
   const avatarColorRef = useRef(avatarColor);
   const themeModeRef = useRef(themeMode);
   const speakerSettingsRef = useRef({ enabled: speakerEnabled, volume: speakerVolume });
@@ -394,6 +397,7 @@ function VirtualOffice({
   useEffect(() => { gridVisibleRef.current = gridVisible; }, [gridVisible]);
   useEffect(() => { peerVolumesRef.current = peerVolumes; }, [peerVolumes]);
   useEffect(() => { meetingActionsRef.current = meetingActions; }, [meetingActions]);
+  useEffect(() => { meetingReactionsRef.current = meetingReactions; }, [meetingReactions]);
   useEffect(() => { avatarColorRef.current = avatarColor; }, [avatarColor]);
   useEffect(() => { themeModeRef.current = themeMode; }, [themeMode]);
   useEffect(() => {
@@ -514,6 +518,8 @@ function VirtualOffice({
     let isRunning = true;
     const canvas = canvasRef.current;
     const rawCtx = canvas.getContext("2d");
+    const reactionCtx = reactionCanvasRef.current?.getContext("2d");
+    const reduceReactionMotion = Boolean(window.matchMedia?.("(prefers-reduced-motion: reduce)").matches);
     const ctx = createMappedContext(rawCtx, renderLayoutRef);
     const resizeCanvas = () => {
       const viewport = viewportRef.current;
@@ -526,6 +532,11 @@ function VirtualOffice({
       const pixelHeight = Math.max(1, Math.round(height * dpr));
       if (canvas.width !== pixelWidth) canvas.width = pixelWidth;
       if (canvas.height !== pixelHeight) canvas.height = pixelHeight;
+      const reactionCanvas = reactionCanvasRef.current;
+      if (reactionCanvas) {
+        if (reactionCanvas.width !== pixelWidth) reactionCanvas.width = pixelWidth;
+        if (reactionCanvas.height !== pixelHeight) reactionCanvas.height = pixelHeight;
+      }
       renderLayoutRef.current = layout;
     };
     const resizeObserver = new ResizeObserver(resizeCanvas);
@@ -598,11 +609,13 @@ function VirtualOffice({
           return;
         }
         notifyPresence();
-        onSocketReadyRef.current(socket, result.chatMessages || [], true, false, result.meetingChatMessages || []);
+        onSocketReadyRef.current(socket, result.chatMessages || [], true, false, result.meetingChatMessages || [], result.roomControls);
         }
       );
     });
-    socket.on("disconnect", () => onSocketReadyRef.current(null));
+    socket.on("disconnect", () => {
+      onSocketReadyRef.current(null);
+    });
 
     socket.on("chat:message", (msg) => {
       onChatMessageRef.current(msg);
@@ -1636,48 +1649,6 @@ function VirtualOffice({
         if (action?.action === "hand" && action.value) {
           rawCtx.font = "16px sans-serif";
           rawCtx.fillText("✋", avatarX, avatarDrawY - R - 12);
-        } else if (action?.action === "reaction") {
-          let startedAt = action.startedAt;
-          if (!Number.isFinite(startedAt)) {
-            startedAt = Number.isFinite(action.expiresAt) ? action.expiresAt - 2500 : Date.now();
-          }
-          const duration = Number.isFinite(action.expiresAt) && action.expiresAt > startedAt
-            ? action.expiresAt - startedAt
-            : 2500;
-          const progress = Math.max(0, Math.min(1, (Date.now() - startedAt) / duration));
-          const easedProgress = 1 - Math.pow(1 - progress, 3);
-          const fadeStart = 0.72;
-          const opacity = progress < fadeStart ? 1 : (1 - progress) / (1 - fadeStart);
-          const popProgress = Math.min(1, progress / 0.16);
-          const scale = 0.72 + 0.38 * (1 - Math.pow(1 - popProgress, 3));
-          const reactionX = avatarX + Math.sin(progress * Math.PI) * 6;
-          const reactionY = avatarDrawY - R - 18 - easedProgress * 64;
-          const rotation = Math.sin(progress * Math.PI * 2) * 0.07;
-
-          rawCtx.save();
-          rawCtx.globalAlpha = opacity;
-          rawCtx.translate(reactionX, reactionY);
-          rawCtx.rotate(rotation);
-          rawCtx.scale(scale, scale);
-          rawCtx.shadowColor = "rgba(35, 29, 68, 0.24)";
-          rawCtx.shadowBlur = 12;
-          rawCtx.shadowOffsetY = 3;
-          rawCtx.beginPath();
-          rawCtx.arc(0, 0, 22, 0, Math.PI * 2);
-          rawCtx.fillStyle = "rgba(255, 255, 255, 0.96)";
-          rawCtx.fill();
-          rawCtx.shadowColor = "transparent";
-          rawCtx.shadowBlur = 0;
-          rawCtx.shadowOffsetY = 0;
-          rawCtx.strokeStyle = "rgba(99, 80, 255, 0.18)";
-          rawCtx.lineWidth = 1;
-          rawCtx.stroke();
-          rawCtx.fillStyle = "#28243d";
-          rawCtx.font = "28px sans-serif";
-          rawCtx.textAlign = "center";
-          rawCtx.textBaseline = "middle";
-          rawCtx.fillText(action.value, 0, 1);
-          rawCtx.restore();
         }
         rawCtx.restore();
       };
@@ -1708,6 +1679,63 @@ function VirtualOffice({
         speakingUserIdsRef.current.has(socket.id),
         meetingActionsRef.current[socket.id]
       );
+
+      if (reactionCtx) {
+        reactionCtx.setTransform(layout.scale * layout.dpr, 0, 0, layout.scale * layout.dpr, 0, 0);
+        reactionCtx.clearRect(0, 0, layout.width, layout.height);
+        reactionCtx.save();
+        reactionCtx.translate(layout.width / 2, layout.height / 2);
+        reactionCtx.scale(zoomRef.current, zoomRef.current);
+        reactionCtx.translate(-layout.width / 2, -layout.height / 2);
+
+        const now = Date.now();
+        meetingReactionsRef.current.forEach((reaction) => {
+          const avatar = reaction.socketId === socket.id
+            ? player.current
+            : remotePlayers.current[reaction.socketId];
+          if (!avatar) return;
+
+          const duration = Number.isFinite(reaction.expiresAt) && reaction.expiresAt > reaction.startedAt
+            ? reaction.expiresAt - reaction.startedAt
+            : 3000;
+          const progress = Math.max(0, Math.min(1, (now - reaction.startedAt) / duration));
+          const easedProgress = reduceReactionMotion ? 0 : 1 - Math.pow(1 - progress, 3);
+          const fadeStart = 0.72;
+          const opacity = progress < fadeStart ? 1 : (1 - progress) / (1 - fadeStart);
+          const popProgress = reduceReactionMotion ? 1 : Math.min(1, progress / 0.16);
+          const scale = 0.72 + 0.38 * (1 - Math.pow(1 - popProgress, 3));
+          const reactionX = mapX(avatar.x) + reaction.driftX * easedProgress;
+          const reactionY = mapY(avatar.y) + reaction.riseY * easedProgress;
+          const rotation = reduceReactionMotion ? 0 : Math.sin(progress * Math.PI * 2) * 0.07;
+
+          reactionCtx.save();
+          reactionCtx.globalAlpha = opacity;
+          reactionCtx.translate(reactionX, reactionY);
+          reactionCtx.rotate(rotation);
+          reactionCtx.scale(scale, scale);
+          reactionCtx.shadowColor = "rgba(35, 29, 68, 0.24)";
+          reactionCtx.shadowBlur = 12;
+          reactionCtx.shadowOffsetY = 3;
+          reactionCtx.beginPath();
+          reactionCtx.arc(0, 0, 22, 0, Math.PI * 2);
+          reactionCtx.fillStyle = "rgba(255, 255, 255, 0.96)";
+          reactionCtx.fill();
+          reactionCtx.shadowColor = "transparent";
+          reactionCtx.shadowBlur = 0;
+          reactionCtx.shadowOffsetY = 0;
+          reactionCtx.strokeStyle = "rgba(99, 80, 255, 0.18)";
+          reactionCtx.lineWidth = 1;
+          reactionCtx.stroke();
+          reactionCtx.fillStyle = "#28243d";
+          reactionCtx.font = "28px sans-serif";
+          reactionCtx.textAlign = "center";
+          reactionCtx.textBaseline = "middle";
+          reactionCtx.fillText(reaction.value, 0, 1);
+          reactionCtx.restore();
+        });
+
+        reactionCtx.restore();
+      }
 
       ctx.restore();
       rawCtx.restore();
@@ -1766,6 +1794,7 @@ function VirtualOffice({
           maxWidth: "100%",
         }}
       />
+      <canvas ref={reactionCanvasRef} className="meeting-reaction-canvas" aria-hidden="true" />
       <div className="map-controls" role="group" aria-label="Map controls">
         <button type="button" onClick={() => setZoom((current) => Math.min(1.6, Math.round((current + 0.1) * 10) / 10))} aria-label="Zoom in"><Icon name="zoomIn" size={17} /></button>
         <span aria-live="polite">{Math.round(zoom * 100)}%</span>
