@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import brandIcon from "./assets/favicon.png";
 import { JoinScreen } from "./components/JoinScreen";
 import Icon from "./components/Icon";
@@ -125,6 +125,17 @@ function SpeakingIndicator() {
   );
 }
 
+function playMedia(video) {
+  const playPromise = video.play();
+  if (playPromise) {
+    playPromise.catch((playError) => {
+      if (playError.name !== "AbortError") {
+        console.warn("Media playback was blocked:", playError);
+      }
+    });
+  }
+}
+
 function App() {
   const [meetingOwnerId] = useState(() => {
     try {
@@ -210,6 +221,10 @@ function App() {
   });
   const [cameraStream, setCameraStream] = useState(null);
   const [cameraError, setCameraError] = useState("");
+  const [chatView, setChatView] = useState("chat");
+  const [mediaPreviewMinimized, setMediaPreviewMinimized] = useState(false);
+  const [mediaPreviewPosition, setMediaPreviewPosition] = useState({ x: 16, y: 16 });
+  const [mediaFullscreen, setMediaFullscreen] = useState(false);
   const [recentSessions, setRecentSessions] = useState(() => {
     try {
       const saved = JSON.parse(localStorage.getItem("proxispeak_recent_sessions") || "[]");
@@ -224,6 +239,8 @@ function App() {
   const [notifications, setNotifications] = useState([]);
   const [presenceClock, setPresenceClock] = useState(0);
   const screenShareVideoRef = useRef(null);
+  const mediaStageRef = useRef(null);
+  const mediaPreviewDragRef = useRef(null);
   const [screenShareStream, setScreenShareStream] = useState(null);
   const [remoteScreenShare, setRemoteScreenShare] = useState(null);
   const socketRef = useRef(null);
@@ -243,9 +260,16 @@ function App() {
     const video = screenShareVideoRef.current;
     if (!video) return;
     const stream = screenShareStream || cameraStream || remoteScreenShare?.stream;
-    if (stream) { video.srcObject = stream; video.play().catch((err) => console.warn("Screen share playback was blocked:", err)); }
-    else { video.srcObject = null; }
+    if (video.srcObject === stream) return;
+    video.srcObject = stream || null;
+    if (stream) playMedia(video);
   }, [screenShareStream, cameraStream, remoteScreenShare]);
+
+  useEffect(() => {
+    const updateFullscreenState = () => setMediaFullscreen(document.fullscreenElement === mediaStageRef.current);
+    document.addEventListener("fullscreenchange", updateFullscreenState);
+    return () => document.removeEventListener("fullscreenchange", updateFullscreenState);
+  }, []);
 
   useEffect(() => {
     const initialTimer = window.setTimeout(() => setPresenceClock(Date.now()), 0);
@@ -397,6 +421,7 @@ function App() {
     setRoomName(baseRooms[0].name.toLowerCase());
     setActiveRoom("Meeting Room");
     setActiveTab("Office");
+    setChatView("chat");
   };
 
   const handleCreateMeeting = async (event) => {
@@ -865,6 +890,87 @@ function App() {
     });
   };
 
+  const activeMediaStream = screenShareStream || cameraStream || remoteScreenShare?.stream;
+  const activeMediaTitle = screenShareStream
+    ? "Your shared screen"
+    : cameraStream
+      ? "Your camera"
+      : `${remoteScreenShare?.username || "Teammate"}'s live presentation`;
+
+  useEffect(() => {
+    if (activeTab !== "Office" || !activeMediaStream || mediaPreviewMinimized) return undefined;
+    const preview = mediaStageRef.current;
+    const frame = preview?.parentElement;
+    if (!preview || !frame) return undefined;
+
+    const keepPreviewInBounds = () => {
+      const maxX = Math.max(8, frame.clientWidth - preview.offsetWidth - 8);
+      const maxY = Math.max(8, frame.clientHeight - preview.offsetHeight - 8);
+      setMediaPreviewPosition((current) => {
+        const next = { x: Math.min(current.x, maxX), y: Math.min(current.y, maxY) };
+        return next.x === current.x && next.y === current.y ? current : next;
+      });
+    };
+    const observer = new ResizeObserver(keepPreviewInBounds);
+    observer.observe(frame);
+    observer.observe(preview);
+    return () => observer.disconnect();
+  }, [activeTab, activeMediaStream, mediaPreviewMinimized]);
+
+  const attachMediaVideo = useCallback((video) => {
+    screenShareVideoRef.current = video;
+    if (!video) return;
+    video.muted = true;
+    video.playsInline = true;
+    if (video.srcObject !== activeMediaStream) video.srcObject = activeMediaStream || null;
+    if (activeMediaStream) playMedia(video);
+  }, [activeMediaStream]);
+
+  const toggleMediaFullscreen = async () => {
+    try {
+      if (document.fullscreenElement === mediaStageRef.current) {
+        await document.exitFullscreen();
+      } else {
+        await mediaStageRef.current?.requestFullscreen();
+      }
+    } catch (fullscreenError) {
+      console.error("Could not change presentation fullscreen state:", fullscreenError);
+    }
+  };
+
+  const handleMediaPreviewPointerDown = (event) => {
+    if (event.target.closest("button")) return;
+    const preview = event.currentTarget.closest(".office-video-preview");
+    const frame = event.currentTarget.closest(".office-map-frame");
+    if (!preview || !frame) return;
+    const bounds = frame.getBoundingClientRect();
+    mediaPreviewDragRef.current = {
+      pointerId: event.pointerId,
+      offsetX: event.clientX - bounds.left - mediaPreviewPosition.x,
+      offsetY: event.clientY - bounds.top - mediaPreviewPosition.y,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+
+  const handleMediaPreviewPointerMove = (event) => {
+    const drag = mediaPreviewDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const frame = event.currentTarget.closest(".office-map-frame");
+    const preview = event.currentTarget.closest(".office-video-preview");
+    if (!frame || !preview) return;
+    const bounds = frame.getBoundingClientRect();
+    setMediaPreviewPosition({
+      x: Math.max(8, Math.min(bounds.width - preview.offsetWidth - 8, event.clientX - bounds.left - drag.offsetX)),
+      y: Math.max(8, Math.min(bounds.height - preview.offsetHeight - 8, event.clientY - bounds.top - drag.offsetY)),
+    });
+  };
+
+  const handleMediaPreviewPointerUp = (event) => {
+    if (mediaPreviewDragRef.current?.pointerId === event.pointerId) {
+      mediaPreviewDragRef.current = null;
+    }
+  };
+
   const handleToggleSetting = async (key) => {
     if (key === "desktopAlerts" && !settings.desktopAlerts) {
       if (typeof Notification === "undefined") {
@@ -939,6 +1045,9 @@ function App() {
             >
               <span className="nav-icon"><Icon name={item.icon} size={17} /></span>
               {item.label}
+              {item.id === "Chat" && activeMediaStream && (
+                <span className="nav-live-indicator" aria-label="Live presentation available">LIVE</span>
+              )}
               {item.id === "Announcements" && unreadAnnouncementsCount > 0 && (
                 <span className="nav-badge" aria-label={`${unreadAnnouncementsCount} unread announcements`}>
                   {unreadAnnouncementsCount}
@@ -1078,7 +1187,7 @@ function App() {
         {/* ── WORKSPACE GRID ── */}
         <div className="workspace-grid">
           {/* ── OFFICE STAGE + VOICE CONTROLS ── */}
-          <section className="office-stage">
+          <section className={`office-stage ${activeTab === "Chat" ? "office-stage--chat" : ""}`}>
             <div className="office-map-frame">
               {/* Keep VirtualOffice continuously mounted so socket and WebRTC audio NEVER disconnect when checking tabs */}
               <div style={{ display: activeTab === "Office" ? "block" : "none", width: "100%", height: "100%" }}>
@@ -1124,24 +1233,74 @@ function App() {
                 />
               </div>
 
-              {(screenShareStream || cameraStream || remoteScreenShare?.stream) && (
-                <div className="office-video-preview">
-                  <strong>{screenShareStream ? "Your screen" : cameraStream ? "Your camera" : `${remoteScreenShare?.username || "Teammate"}'s video`}</strong>
-                  <video
-                    ref={(video) => {
-                      screenShareVideoRef.current = video;
-                      const stream = screenShareStream || cameraStream || remoteScreenShare?.stream;
-                      if (video && stream && video.srcObject !== stream) {
-                        video.srcObject = stream;
-                        video.play().catch((err) => console.warn("Video playback was blocked:", err));
-                      }
-                    }}
-                    autoPlay
-                    playsInline
-                    muted
-                    className="screen-share-video"
-                  />
-                </div>
+              {activeMediaStream && activeTab === "Office" && (
+                mediaPreviewMinimized ? (
+                  <button
+                    type="button"
+                    className="media-preview-restore"
+                    style={{ left: mediaPreviewPosition.x, top: mediaPreviewPosition.y }}
+                    onClick={() => setMediaPreviewMinimized(false)}
+                  >
+                    Live media · Show preview
+                  </button>
+                ) : (
+                  <section
+                    className="office-video-preview"
+                    ref={mediaStageRef}
+                    style={{ left: mediaPreviewPosition.x, top: mediaPreviewPosition.y }}
+                    aria-label="Live media preview"
+                  >
+                    <div
+                      className="media-preview-header"
+                      onPointerDown={handleMediaPreviewPointerDown}
+                      onPointerMove={handleMediaPreviewPointerMove}
+                      onPointerUp={handleMediaPreviewPointerUp}
+                      onPointerCancel={handleMediaPreviewPointerUp}
+                    >
+                      <div className="media-preview-title">
+                        <strong>{activeMediaTitle}</strong>
+                        <span><i /> LIVE</span>
+                      </div>
+                      <div className="media-preview-actions">
+                        <button
+                          type="button"
+                          aria-label="Watch presentation with chat"
+                          title="Open presentation and chat"
+                          onClick={() => {
+                            setChatView("presentation");
+                            setActiveTab("Chat");
+                          }}
+                        >
+                          Watch
+                        </button>
+                        <button
+                          type="button"
+                          aria-label={mediaFullscreen ? "Exit fullscreen" : "Fullscreen"}
+                          title={mediaFullscreen ? "Exit fullscreen" : "Fullscreen"}
+                          onClick={toggleMediaFullscreen}
+                        >
+                          {mediaFullscreen ? "Exit" : "Expand"}
+                        </button>
+                        <button
+                          type="button"
+                          aria-label="Minimize media preview"
+                          title="Minimize preview"
+                          onClick={() => setMediaPreviewMinimized(true)}
+                        >
+                          −
+                        </button>
+                      </div>
+                    </div>
+                    <video
+                      ref={attachMediaVideo}
+                      autoPlay
+                      playsInline
+                      muted
+                      aria-label={activeMediaTitle}
+                      className="screen-share-video"
+                    />
+                  </section>
+                )
               )}
 
               {activeTab !== "Office" && (
@@ -1228,6 +1387,26 @@ function App() {
                                   ? "Live"
                                   : "Joining room..."}
                           </span>
+                          {activeMediaStream && (
+                            <div className="chat-view-tabs" role="group" aria-label="Chat or presentation">
+                              <button
+                                type="button"
+                                className={chatView === "chat" ? "selected" : ""}
+                                aria-pressed={chatView === "chat"}
+                                onClick={() => setChatView("chat")}
+                              >
+                                Chat
+                              </button>
+                              <button
+                                type="button"
+                                className={chatView === "presentation" ? "selected" : ""}
+                                aria-pressed={chatView === "presentation"}
+                                onClick={() => setChatView("presentation")}
+                              >
+                                Presentation <span className="live-tab-dot" aria-label="Live" />
+                              </button>
+                            </div>
+                          )}
                           {directChat ? (
                             <button type="button" className="secondary-button" onClick={handleReturnToGroupChat}>
                               Back to group chat
@@ -1259,26 +1438,64 @@ function App() {
                           )}
                         </div>
                       </div>
-                      <div className="chat-list" ref={chatListRef}>
-                        {chatMessages.length === 0 ? (
-                          <div className="chat-empty-state">
-                            <span className="chat-empty-icon" aria-hidden="true">✦</span>
-                            <strong>No messages yet</strong>
-                            <span>Start the conversation with your office.</span>
+                      {chatView === "presentation" ? (
+                        <div className="presentation-stage" ref={mediaStageRef}>
+                          <div className="presentation-toolbar">
+                            <div>
+                              <strong>{activeMediaTitle}</strong>
+                              <span>{activeMediaStream ? "Live presentation" : "The presentation has ended"}</span>
+                            </div>
+                            {activeMediaStream && (
+                              <button type="button" className="secondary-button" onClick={toggleMediaFullscreen}>
+                                {mediaFullscreen ? "Exit fullscreen" : "Fullscreen"}
+                              </button>
+                            )}
                           </div>
-                        ) : chatMessages.map(m => (
-                          <div key={m.id} className={`chat-item ${m.isSelf ? "self" : ""}`}>
-                            <div className="chat-bubble"><strong>{m.sender}</strong><p>{m.text}</p><small>{m.time}</small></div>
+                          {activeMediaStream ? (
+                            <div className="presentation-video-frame">
+                              <video
+                                ref={attachMediaVideo}
+                                autoPlay
+                                playsInline
+                                muted
+                                aria-label={activeMediaTitle}
+                                className="presentation-video"
+                              />
+                            </div>
+                          ) : (
+                            <div className="presentation-ended">
+                              <strong>No live presentation</strong>
+                              <span>Return to chat or wait for someone to start sharing.</span>
+                              <button type="button" className="secondary-button" onClick={() => setChatView("chat")}>
+                                Back to chat
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <>
+                          <div className="chat-list" ref={chatListRef}>
+                            {chatMessages.length === 0 ? (
+                              <div className="chat-empty-state">
+                                <span className="chat-empty-icon" aria-hidden="true">✦</span>
+                                <strong>No messages yet</strong>
+                                <span>Start the conversation with your office.</span>
+                              </div>
+                            ) : chatMessages.map(m => (
+                              <div key={m.id} className={`chat-item ${m.isSelf ? "self" : ""}`}>
+                                <div className="chat-bubble"><strong>{m.sender}</strong><p>{m.text}</p><small>{m.time}</small></div>
+                              </div>
+                            ))}
                           </div>
-                        ))}
-                      </div>
-                      <form onSubmit={handleSendMessage} className="chat-form">
-                        <input type="text" value={draftMessage} onChange={e => { setDraftMessage(e.target.value); setChatError(""); }} placeholder="Write a message..." maxLength={2000} />
-                        <button type="submit" disabled={!chatConnected || chatSending || !draftMessage.trim()}>
-                          {chatSending ? "Sending..." : "Send"}
-                        </button>
-                      </form>
-                      {chatError && <p role="status" className="chat-error">{chatError}</p>}
+                          <form onSubmit={handleSendMessage} className="chat-form">
+                            <input type="text" value={draftMessage} onChange={e => { setDraftMessage(e.target.value); setChatError(""); }} placeholder="Write a message..." maxLength={2000} />
+                            <button type="submit" disabled={!chatConnected || chatSending || !draftMessage.trim()}>
+                              {chatSending ? "Sending..." : "Send"}
+                            </button>
+                          </form>
+                          {chatError && <p role="status" className="chat-error">{chatError}</p>}
+                        </>
+                      )}
                     </div>
                   )}
                   {activeTab === "Meetings" && (
