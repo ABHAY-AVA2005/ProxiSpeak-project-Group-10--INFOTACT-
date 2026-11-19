@@ -2063,7 +2063,7 @@ function App() {
           </section>
 
           {/* ── LEFT PRESENCE PANEL ── */}
-          <aside className={`presence-panel ${presenceCollapsed ? "is-collapsed" : ""}`}>
+          <aside className={`presence-panel ${presenceCollapsed && !searchOpen ? "is-collapsed" : ""} ${searchOpen ? "mobile-search-open" : ""}`}>
             <div className="presence-status-badges" role="group" aria-label="Workspace status">
               <div className="team-selector-btn">
                 <span className="team-dot" /><span>ProxiSpeak HQ</span><span className="caret-icon">· Floor 2</span>
@@ -2081,6 +2081,7 @@ function App() {
                 type="button"
                 className={`presence-search-toggle ${searchOpen ? "active" : ""}`}
                 aria-expanded={searchOpen}
+                aria-label={searchOpen ? "Close search" : "Search teammates"}
                 data-popover-trigger
                 onClick={() => {
                   setSearchOpen((open) => !open);
@@ -2120,6 +2121,7 @@ function App() {
                 <input
                   type="text"
                   autoFocus
+                  aria-label="Search teammates"
                   value={presenceSearch}
                   onChange={e => setPresenceSearch(e.target.value)}
                   placeholder="Search teammates..."
@@ -2144,7 +2146,12 @@ function App() {
               </div>
             )}
 
-            <div className="presence-list">
+            <div className="presence-list" data-popover-panel={searchOpen ? "" : undefined}>
+              {filteredUsers.length === 0 && (
+                <div className="presence-search-empty" role="status">
+                  No teammates match “{presenceSearch.trim()}”.
+                </div>
+              )}
               {filteredUsers.map((user, index) => {
                 const name = user.username || `Guest ${index + 1}`;
                 const accent = user.isSelf ? "purple" : palette[index % palette.length];

@@ -626,6 +626,12 @@ input { outline: none; border: none; }
   display: flex; flex-direction: column; gap: 2px;
   overflow-y: auto;
 }
+.presence-search-empty {
+  padding: 18px 8px;
+  color: #79839a;
+  font-size: 0.8rem;
+  text-align: center;
+}
 .presence-list::-webkit-scrollbar { width: 3px; }
 .presence-list::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
 
@@ -1670,6 +1676,17 @@ input { outline: none; border: none; }
   .app-navigation .nav-item .nav-icon { display: none; }
   .navigation-presence { display: none; }
   .presence-panel { display: none; }
+  .presence-panel.mobile-search-open {
+    display: flex;
+    position: fixed;
+    top: 82px;
+    right: 12px;
+    z-index: 45;
+    width: min(340px, calc(100vw - 24px));
+    min-width: 0;
+    height: min(62dvh, 480px);
+    max-height: calc(100dvh - 94px);
+  }
   .office-stage { min-height: 0; }
   .app-navigation .nav-item .nav-live-indicator { display: inline-flex; }
 }
@@ -1684,6 +1701,17 @@ input { outline: none; border: none; }
   .app-navigation .sidebar-nav { order: 3; flex-basis: 100%; justify-content: space-between; overflow-x: auto; }
   .app-navigation .nav-item { min-height: 34px; font-size: 0.68rem; }
   .nav-quick-mic { margin-left: auto; min-height: 32px; padding: 0 10px; font-size: 0.68rem; }
+  .presence-panel.mobile-search-open {
+    top: 104px;
+    right: 12px;
+    left: 12px;
+    width: calc(100vw - 24px);
+    max-width: 420px;
+    height: min(62dvh, 480px);
+    max-height: calc(100dvh - 116px);
+  }
+  .presence-panel.mobile-search-open .presence-status-badges,
+  .presence-panel.mobile-search-open .nearby-voices-widget { display: none; }
   .main-content { overflow: visible; }
   .office-summary-bar { padding: 8px 12px; gap: 10px; }
   .office-summary-position { padding-left: 10px; font-size: 0.68rem; }
@@ -2095,6 +2123,7 @@ html.join-page-active #root {
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
 }
 .theme-dark .presence-head { border-color: #303645; }
+.theme-dark .presence-search-empty { color: #a0a9bb; }
 .theme-dark .presence-search { border-color: #363d4d; background: #242936; }
 .theme-dark .presence-search input { color: #e8ebf4; }
 .theme-dark .presence-search input::placeholder,

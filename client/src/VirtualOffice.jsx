@@ -16,6 +16,7 @@ const WORLD_H = 600;
 const GRID_SIZE = 20;
 const PATH_GRID_SIZE = 10;
 const AVATAR_RADIUS = 18;
+const AVATAR_SPEED = 6;
 const PATH_SAMPLE_SPACING = 3;
 const OPEN_WORKSPACE_BASE = { x: 312, y: 195, width: 376, height: 190 };
 const OPEN_WORKSPACE_INSET = OPEN_WORKSPACE_BASE.width * 0.15;
@@ -1080,9 +1081,7 @@ function VirtualOffice({
     let lastEmitTime = 0;
     let lastSentX = player.current.x;
     let lastSentY = player.current.y;
-    const SPEED = 3;
     const LERP = 0.2;
-    const CLICK_SPEED = 3;
     let speakingPollInProgress = false;
 
     const pollSpeakingActivity = async () => {
@@ -1162,10 +1161,10 @@ function VirtualOffice({
       let dy = 0;
 
       const k = keys.current;
-      if (k["arrowup"] || k["w"]) dy -= SPEED;
-      if (k["arrowdown"] || k["s"]) dy += SPEED;
-      if (k["arrowleft"] || k["a"]) dx -= SPEED;
-      if (k["arrowright"] || k["d"]) dx += SPEED;
+      if (k["arrowup"] || k["w"]) dy -= AVATAR_SPEED;
+      if (k["arrowdown"] || k["s"]) dy += AVATAR_SPEED;
+      if (k["arrowleft"] || k["a"]) dx -= AVATAR_SPEED;
+      if (k["arrowright"] || k["d"]) dx += AVATAR_SPEED;
 
       // If the player presses any keyboard key, cancel the click-to-move route immediately
       // so the avatar doesn't snap back to the previously clicked position on key release.
@@ -1184,7 +1183,7 @@ function VirtualOffice({
         const tdy = nextPoint.y - player.current.y;
         const dist = Math.hypot(tdx, tdy);
 
-        if (dist <= CLICK_SPEED) {
+        if (dist <= AVATAR_SPEED) {
           if (checkCollision(nextPoint.x, nextPoint.y, AVATAR_RADIUS, layout)) {
             routeRef.current = [];
             clickTarget.current = null;
@@ -1199,8 +1198,8 @@ function VirtualOffice({
             }
           }
         } else {
-          dx = (tdx / dist) * CLICK_SPEED;
-          dy = (tdy / dist) * CLICK_SPEED;
+          dx = (tdx / dist) * AVATAR_SPEED;
+          dy = (tdy / dist) * AVATAR_SPEED;
         }
       }
 
@@ -1545,52 +1544,15 @@ function VirtualOffice({
       ctx.beginPath(); ctx.moveTo(697, 395); ctx.lineTo(982, 395); ctx.stroke();
       ctx.restore();
 
-      // ── 10. DESTINATION MARKER & PATH PREVIEW (A* pathfinding feedback) ───
-      if (clickTarget.current || routeRef.current.length > 0) {
-        const route = routeRef.current.length > 1 ? routeRef.current : [];
-        if (route.length > 1) {
-          ctx.beginPath();
-          route.forEach((point, index) => {
-            if (index === 0) ctx.moveTo(point.x, point.y);
-            else ctx.lineTo(point.x, point.y);
-          });
-          ctx.strokeStyle = "rgba(99,102,241,0.65)";
-          ctx.lineWidth = 2.5;
-          ctx.setLineDash([5, 4]);
-          ctx.stroke();
-          ctx.setLineDash([]);
-        }
-
-        // Animated destination marker with pulsing rings
-        const target = clickTarget.current || (route.length > 0 ? route[route.length - 1] : null);
-        if (target) {
-          const pulse = (performance.now() % 1000) / 1000;
-          ctx.save();
-          // Expanding outer pulse ring
-          ctx.beginPath();
-          ctx.arc(target.x, target.y, 8 + pulse * 14, 0, Math.PI * 2);
-          ctx.strokeStyle = `rgba(99,102,241,${0.8 * (1 - pulse)})`;
-          ctx.lineWidth = 2;
-          ctx.stroke();
-
-          // Target pin center
-          ctx.beginPath();
-          ctx.arc(target.x, target.y, 6, 0, Math.PI * 2);
-          ctx.fillStyle = "#6350ff";
-          ctx.fill();
-          ctx.strokeStyle = "#fff";
-          ctx.lineWidth = 2;
-          ctx.stroke();
-
-          // Crosshairs
-          ctx.strokeStyle = "#6350ff";
-          ctx.lineWidth = 1.5;
-          ctx.beginPath();
-          ctx.moveTo(target.x - 10, target.y); ctx.lineTo(target.x + 10, target.y);
-          ctx.moveTo(target.x, target.y - 10); ctx.lineTo(target.x, target.y + 10);
-          ctx.stroke();
-          ctx.restore();
-        }
+      // ── 10. DESTINATION MARKER ─────────────────────────────────────
+      if (clickTarget.current) {
+        ctx.beginPath();
+        ctx.arc(clickTarget.current.x, clickTarget.current.y, 6, 0, Math.PI * 2);
+        ctx.fillStyle = "#6350ff";
+        ctx.fill();
+        ctx.strokeStyle = "#fff";
+        ctx.lineWidth = 2;
+        ctx.stroke();
       }
 
       // ── 11. EARSHOT CIRCLE ──────────────────────────────────────────
