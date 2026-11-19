@@ -148,6 +148,8 @@ Set-Location server
 npm test
 ```
 
+The default test suite does not require Redis. To run the live Redis integration tests, start Redis first and run `npm run test:integration`.
+
 Useful backend verification commands:
 
 ```powershell

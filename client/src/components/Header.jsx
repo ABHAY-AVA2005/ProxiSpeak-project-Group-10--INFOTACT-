@@ -1,5 +1,4 @@
-import React from 'react';
-import { Menu, Users, Settings, LogOut, Search, Bell, Mic, Volume2, SlidersHorizontal, X } from 'lucide-react';
+import { Search, Bell } from 'lucide-react';
 import './Header.css';
 
 /** Header component with team selector, online count, search, notifications, profile dropdown */

@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
-    "test": "node --test test/**/*.test.js",
+    "test": "node --test test/chat.test.js test/debounce-index.test.js test/meetingService.test.js test/multiInstance.test.js test/officeActions.test.js test/peerLimiting.test.js test/persistence.test.js test/queryTimer.test.js test/redis.test.js test/redisSync.test.js test/roomService.test.js",
     "test:unit": "node --test test/debounce-index.test.js test/persistence.test.js test/queryTimer.test.js test/peerLimiting.test.js test/redisSync.test.js",
     "test:integration": "node --test test/redisIntegration.test.js",
     "test:load": "node scripts/load-test-50.js",

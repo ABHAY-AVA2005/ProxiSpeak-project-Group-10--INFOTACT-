@@ -94,6 +94,7 @@ test("Actual Server Handler - Connection initializes memory, emits events, and c
     try {
         // Trigger the actual connection handler in server.js
         handleConnection(socket);
+        socket.emit("join", { username: "Test User" });
 
         // Verify in-memory state in server.js
         assert.ok(players[socket.id], "Player must be added to server.js players map");

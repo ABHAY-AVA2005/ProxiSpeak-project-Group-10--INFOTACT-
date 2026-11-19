@@ -141,6 +141,7 @@ function App() {
       || baseRooms[0].name.toLowerCase();
   });
   const [activeTab, setActiveTab] = useState("Office");
+  const activeTabRef = useRef(activeTab);
   const [activeRoom, setActiveRoom] = useState("Meeting Room");
   const [officeRooms] = useState(baseRooms);
   const [scheduledMeetings, setScheduledMeetings] = useState(loadScheduledMeetings);
@@ -261,9 +262,7 @@ function App() {
   }, [chatMessages]);
 
   useEffect(() => {
-    if (activeTab === "Announcements") {
-      setUnreadAnnouncementsCount(0);
-    }
+    activeTabRef.current = activeTab;
   }, [activeTab]);
 
   useEffect(() => {
@@ -813,7 +812,7 @@ function App() {
         }
         return updated;
       });
-      if (activeTab !== "Announcements") {
+      if (activeTabRef.current !== "Announcements") {
         setUnreadAnnouncementsCount((count) => count + 1);
       }
       addNotification(
@@ -911,6 +910,11 @@ function App() {
 
   if (!username) return <JoinScreen onJoin={handleJoin} rooms={officeRooms} themeMode={themeMode} />;
 
+  const navigateToTab = (tab) => {
+    setActiveTab(tab);
+    if (tab === "Announcements") setUnreadAnnouncementsCount(0);
+  };
+
   return (
     <div className={`proxi-app-shell theme-${themeMode} ${activeTab === "Office" ? "office-layout" : ""}`}>
       <header className="app-navigation">
@@ -929,9 +933,9 @@ function App() {
               type="button"
               className={`nav-item ${activeTab === item.id ? "active" : ""}`}
               aria-current={activeTab === item.id ? "page" : undefined}
-              onClick={() => setActiveTab((currentTab) => (
-                currentTab === item.id && item.id !== "Office" ? "Office" : item.id
-              ))}
+              onClick={() => navigateToTab(
+                activeTab === item.id && item.id !== "Office" ? "Office" : item.id
+              )}
             >
               <span className="nav-icon"><Icon name={item.icon} size={17} /></span>
               {item.label}
@@ -1017,7 +1021,7 @@ function App() {
           <button
             type="button"
             className="secondary-button announce-nav-shortcut"
-            onClick={() => setActiveTab("Announcements")}
+            onClick={() => navigateToTab("Announcements")}
             title="Open Announcements Hub"
           >
             <Icon name="megaphone" size={15} /> Announce to floor
@@ -1036,7 +1040,7 @@ function App() {
             <button
               type="button"
               className="announcement-banner-view"
-              onClick={() => setActiveTab("Announcements")}
+              onClick={() => navigateToTab("Announcements")}
             >
               View all
             </button>
@@ -1472,7 +1476,11 @@ function App() {
                               className="clear-announcements-btn"
                               onClick={() => {
                                 setAnnouncementsList([]);
-                                try { localStorage.removeItem("proxispeak_announcements"); } catch {}
+                                try {
+                                  localStorage.removeItem("proxispeak_announcements");
+                                } catch (storageError) {
+                                  console.error("Could not clear saved announcements:", storageError);
+                                }
                               }}
                               title="Clear history from this browser"
                             >
@@ -1750,7 +1758,7 @@ function App() {
                 className={`voice-btn announcement-btn ${activeTab === "Announcements" ? "active" : ""}`}
                 title="Office Announcements"
                 aria-label="Open announcements"
-                onClick={() => setActiveTab((current) => current === "Announcements" ? "Office" : "Announcements")}
+                onClick={() => navigateToTab(activeTab === "Announcements" ? "Office" : "Announcements")}
               >
                 <Icon name="megaphone" size={18} />
                 {unreadAnnouncementsCount > 0 && (

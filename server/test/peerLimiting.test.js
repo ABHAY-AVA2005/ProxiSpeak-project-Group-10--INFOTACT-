@@ -18,6 +18,8 @@ function createMockSocket(id) {
   const socket = new EventEmitter();
   socket.id = id;
   socket.connected = true;
+  socket.data = {};
+  socket.join = async () => {};
   socket.broadcast = new EventEmitter();
   socket.disconnect = () => {
     socket.connected = false;

@@ -57,6 +57,20 @@ test("Office actions - hand raises and announcements reach only the joined room"
     assert.equal(message.text, "Team update");
     assert.equal(message.username, "Alice");
     assert.equal(await outsiderReceived, false);
+
+    const aliceOfficeAnnouncement = once(alice, "office:announcement");
+    const outsiderOfficeAnnouncement = once(outsider, "office:announcement");
+    const officeAnnouncementSent = new Promise((resolve) => {
+      bob.emit("office:announcement", { text: "Office-wide update", scope: "all" }, resolve);
+    });
+    const [aliceOfficeMessage, outsiderOfficeMessage, officeAnnouncementResult] = await Promise.all([
+      aliceOfficeAnnouncement,
+      outsiderOfficeAnnouncement,
+      officeAnnouncementSent
+    ]);
+    assert.equal(officeAnnouncementResult.ok, true);
+    assert.equal(aliceOfficeMessage.text, "Office-wide update");
+    assert.equal(outsiderOfficeMessage.text, "Office-wide update");
   } finally {
     alice.disconnect();
     bob.disconnect();

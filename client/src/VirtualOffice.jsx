@@ -355,6 +355,10 @@ function VirtualOffice({
   const roomNameRef = useRef(roomName);
   const onRemoteScreenShareChangeRef = useRef(onRemoteScreenShareChange);
   const onSpeakingUsersChangeRef = useRef(onSpeakingUsersChange);
+  const onUsersChangeRef = useRef(onUsersChange);
+  const onChatMessageRef = useRef(onChatMessage);
+  const onSocketReadyRef = useRef(onSocketReady);
+  const onPositionChangeRef = useRef(onPositionChange);
   const speakingUserIdsRef = useRef(new Set());
   const speakingLastHeardRef = useRef(new Map());
   const peerConnectionsRef = useRef({});
@@ -375,6 +379,12 @@ function VirtualOffice({
   useEffect(() => {
     onSpeakingUsersChangeRef.current = onSpeakingUsersChange;
   }, [onSpeakingUsersChange]);
+  useEffect(() => {
+    onUsersChangeRef.current = onUsersChange;
+    onChatMessageRef.current = onChatMessage;
+    onSocketReadyRef.current = onSocketReady;
+    onPositionChangeRef.current = onPositionChange;
+  }, [onUsersChange, onChatMessage, onSocketReady, onPositionChange]);
   useEffect(() => {
     screenShareStreamRef.current = screenShareStream || cameraStream;
     renegotiatePeersRef.current?.();
@@ -568,7 +578,7 @@ function VirtualOffice({
         status: user.status || "Available",
       }));
 
-      onUsersChange([
+      onUsersChangeRef.current([
         { socketId: socket.id || "local-user", username, joinedAt: Date.now(), x: player.current.x, y: player.current.y, status: "In office", isSelf: true },
         ...entries,
       ]);
@@ -576,28 +586,28 @@ function VirtualOffice({
 
     socket.on("connect", () => {
       console.log("[ProxiSpeak] Connected:", socket.id);
-      onSocketReady(socket, [], false, false);
+      onSocketReadyRef.current(socket, [], false, false);
       socket.timeout(5000).emit(
         "join",
         { username, roomName: roomNameRef.current, x: player.current.x, y: player.current.y },
         (error, result) => {
         if (error || !result?.ok) {
           console.error("[ProxiSpeak] Server could not join the selected room.");
-          onSocketReady(socket, [], false, true);
+          onSocketReadyRef.current(socket, [], false, true);
           return;
         }
         notifyPresence();
-        onSocketReady(socket, result.chatMessages || [], true, false, result.meetingChatMessages || []);
+        onSocketReadyRef.current(socket, result.chatMessages || [], true, false, result.meetingChatMessages || []);
         }
       );
     });
-    socket.on("disconnect", () => onSocketReady(null));
+    socket.on("disconnect", () => onSocketReadyRef.current(null));
 
     socket.on("chat:message", (msg) => {
-      onChatMessage(msg);
+      onChatMessageRef.current(msg);
     });
     socket.on("chat:direct:message", (msg) => {
-      onChatMessage(msg);
+      onChatMessageRef.current(msg);
     });
 
     socket.on("users:list", (list) => {
@@ -1140,7 +1150,7 @@ function VirtualOffice({
       setPositionDisplay((current) =>
         current.x === position.x && current.y === position.y ? current : position
       );
-      onPositionChange(position);
+      onPositionChangeRef.current(position);
     }, 250);
 
     function gameLoop() {
@@ -1737,7 +1747,7 @@ function VirtualOffice({
         } catch (err) { console.debug("[WebRTC] Audio cleanup note:", err); }
       });
 
-      onSocketReady(null);
+      onSocketReadyRef.current(null);
       renegotiatePeersRef.current = null;
       socket.disconnect();
     };

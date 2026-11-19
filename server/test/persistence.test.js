@@ -468,6 +468,8 @@ function createMockSocket(id) {
   const socket = new EventEmitter();
   socket.id = id;
   socket.connected = true;
+  socket.data = {};
+  socket.join = async () => {};
   socket.emitted = [];
   socket.broadcastEmitted = [];
   socket.emit = (event, ...args) => {
@@ -486,6 +488,7 @@ function createMockSocket(id) {
 function createMockIO() {
   const io = new EventEmitter();
   const rooms = new Map();
+  io.sockets = { adapter: { rooms }, sockets: new Map() };
   io.to = (targetId) => ({
     emit: (event, data) => {
       let list = rooms.get(targetId);

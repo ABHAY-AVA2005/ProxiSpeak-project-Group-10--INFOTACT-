@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 const COLORS = ["#0f172a", "#ffffff", "#7c3aed", "#0ea5e9", "#10b981", "#f59e0b", "#ef4444", "#f472b6"];
 const HISTORY_LIMIT = 20;
@@ -18,6 +18,7 @@ export function CollaborativeWhiteboard() {
   const boardRef = useRef(null);
   const strokesRef = useRef(INITIAL_STROKES);
   const notesRef = useRef(INITIAL_NOTES);
+  const nextIdRef = useRef(3);
   const activeStrokeRef = useRef(null);
   const [tool, setTool] = useState("pen");
   const [color, setColor] = useState("#0f172a");
@@ -26,8 +27,10 @@ export function CollaborativeWhiteboard() {
   const [history, setHistory] = useState([]);
   const [redoStack, setRedoStack] = useState([]);
 
-  strokesRef.current = strokes;
-  notesRef.current = notes;
+  useEffect(() => {
+    strokesRef.current = strokes;
+    notesRef.current = notes;
+  }, [strokes, notes]);
 
   const commitSnapshot = () => {
     setHistory((current) => [...current.slice(-(HISTORY_LIMIT - 1)), { strokes: [...strokesRef.current], notes: [...notesRef.current] }]);
@@ -54,7 +57,7 @@ export function CollaborativeWhiteboard() {
 
     const isShapeTool = tool === "rect" || tool === "circle" || tool === "line";
     const nextStroke = {
-      id: Date.now(),
+      id: nextIdRef.current++,
       kind: isShapeTool ? tool : "freehand",
       tool,
       color: tool === "eraser" ? "#ffffff" : color,
@@ -100,7 +103,7 @@ export function CollaborativeWhiteboard() {
   const addNote = () => {
     commitSnapshot();
     const nextLabel = `Idea ${notesRef.current.length + 1}`;
-    setNotes((current) => [...current, { id: Date.now(), text: nextLabel, tone: ["#fde68a", "#bfdbfe", "#bbf7d0", "#fbcfe8"][current.length % 4] }]);
+    setNotes((current) => [...current, { id: nextIdRef.current++, text: nextLabel, tone: ["#fde68a", "#bfdbfe", "#bbf7d0", "#fbcfe8"][current.length % 4] }]);
   };
 
   const deleteNote = (noteId) => {
