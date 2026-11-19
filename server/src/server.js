@@ -13,6 +13,8 @@ import { createMeeting, deleteMeeting, listMeetings, sendMeetingInvitations } fr
 
 const PORT = Number(process.env.PORT) || 5000;
 const CLIENT_URL = process.env.CLIENT_URL || "http://localhost:5173";
+const LOCAL_CLIENT_URLS = ["http://localhost:5173", "http://127.0.0.1:5173"];
+const CLIENT_URLS = LOCAL_CLIENT_URLS.includes(CLIENT_URL) ? LOCAL_CLIENT_URLS : [CLIENT_URL];
 
 // Initialize MongoDB connection (await connection attempt before starting server)
 try {
@@ -30,7 +32,7 @@ app.disable("x-powered-by");
 // CORS configuration - limit origins and methods
 app.use(
   cors({
-    origin: CLIENT_URL,
+    origin: CLIENT_URLS,
     methods: ["GET", "POST", "DELETE"],
     credentials: true
   })
@@ -120,7 +122,7 @@ app.delete("/api/meetings/:id", async (req, res) => {
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: CLIENT_URL,
+    origin: CLIENT_URLS,
     methods: ["GET", "POST"]
   },
   // Set ping intervals and maximum payload sizes for security & connection stability
