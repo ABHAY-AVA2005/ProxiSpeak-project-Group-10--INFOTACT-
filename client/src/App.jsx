@@ -2202,22 +2202,6 @@ function App() {
                 )}
               </div>
 
-              {/* Announcement button right beside Settings nav button */}
-              <button
-                type="button"
-                className={`voice-btn announcement-btn ${activeTab === "Announcements" ? "active" : ""}`}
-                title="Office Announcements"
-                aria-label="Open announcements"
-                onClick={() => navigateToTab(activeTab === "Announcements" ? "Office" : "Announcements")}
-              >
-                <Icon name="megaphone" size={18} />
-                {unreadAnnouncementsCount > 0 && (
-                  <span className="voice-btn-badge" aria-label={`${unreadAnnouncementsCount} unread announcements`}>
-                    {unreadAnnouncementsCount}
-                  </span>
-                )}
-              </button>
-
               <button type="button" className={`voice-btn settings-btn ${activeTab === "Settings" ? "active" : ""}`} title="Audio settings" aria-label="Open settings" onClick={() => setActiveTab("Settings")}>
                 <Icon name="settings" size={18} />
               </button>
