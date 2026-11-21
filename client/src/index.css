@@ -313,13 +313,13 @@ input { outline: none; border: none; }
   min-height: 580px;
 }
 .office-stage--chat {
-  flex: 0 0 auto;
+  flex: 1;
   min-height: 0;
 }
 .office-stage--chat .office-map-frame {
-  flex: 0 0 auto;
-  height: clamp(520px, calc(100vh - 180px), 820px);
-  min-height: 520px;
+  flex: 1;
+  height: auto;
+  min-height: 0;
 }
 
 .office-map-frame {
@@ -395,7 +395,7 @@ input { outline: none; border: none; }
 .tab-content-wrapper {
   width: 100%; height: 100%;
   min-width: 0; min-height: 0;
-  display: flex; align-items: stretch; justify-content: stretch;
+  display: flex; flex-direction: column; align-items: stretch;
   padding: 20px;
   overflow: hidden;
 }
@@ -1630,7 +1630,7 @@ input { outline: none; border: none; }
 .announcement-form label { color: #33415f; font-size: 0.75rem; font-weight: 700; }
 .announcement-form input { flex: 1; min-width: 80px; padding: 9px 10px; border: 1px solid #dfe3ec; border-radius: 8px; }
 .announcement-form .meeting-form-error { flex-basis: 100%; }
-.workspace-grid { gap: 16px; padding: 0 22px 8px; min-height: 0; overflow: hidden; }
+.workspace-grid { gap: 16px; padding: 0 22px 8px; min-height: 0; overflow: hidden; flex: 1 1 0; }
 .presence-panel {
   order: -1;
   width: 270px;
@@ -1710,9 +1710,10 @@ input { outline: none; border: none; }
 .nearby-empty { color: #7e899d; }
 .office-stage { min-height: 0; gap: 12px; }
 .office-map-frame { min-height: 0; border-radius: 18px; background: #e7e9f2; box-shadow: 0 8px 26px rgba(34, 48, 80, 0.1); }
+.office-stage--chat .office-map-frame { min-height: 0; height: 100%; }
 .office-map-frame canvas { border: 0 !important; border-radius: 18px; }
-.tab-content-wrapper > .workspace-card { flex: 1 1 0; min-width: 0; min-height: 0; }
-.tab-content-wrapper > .workspace-card:not(.chat-card) { overflow-y: auto; }
+.tab-content-wrapper > .workspace-card { flex: 1 1 0; min-width: 0; min-height: 0; height: 100%; }
+.tab-content-wrapper > .workspace-card:not(.chat-card) { overflow-y: auto; height: auto; }
 .tab-content-wrapper > .meetings-page { width: 100%; min-width: 0; min-height: 0; flex: 1 1 auto; overflow: hidden; }
 .meetings-page > .workspace-card { flex: 1 1 0; min-height: 0; overflow-y: auto; }
 .chat-card { min-height: 0; overflow: hidden; }
