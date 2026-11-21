@@ -273,6 +273,13 @@ function App() {
   const meetingOwnerIdRef = useRef(meetingOwnerId);
   const settingsRef = useRef(settings);
 
+  const activeMediaStream = screenShareStream || cameraStream || remoteScreenShare?.stream;
+  const activeMediaTitle = screenShareStream
+    ? "Your shared screen"
+    : cameraStream
+      ? "Your camera"
+      : `${remoteScreenShare?.username || "Teammate"}'s live presentation`;
+
   const {
     localStream, isMuted, permissionGranted, error,
     startAudio, toggleMute, speakerEnabled, speakerVolume,
@@ -1059,13 +1066,6 @@ function App() {
       return share;
     });
   };
-
-  const activeMediaStream = screenShareStream || cameraStream || remoteScreenShare?.stream;
-  const activeMediaTitle = screenShareStream
-    ? "Your shared screen"
-    : cameraStream
-      ? "Your camera"
-      : `${remoteScreenShare?.username || "Teammate"}'s live presentation`;
 
   useEffect(() => {
     if (activeTab !== "Office" || !activeMediaStream || mediaPreviewMinimized) return undefined;
