@@ -569,8 +569,32 @@ function App() {
       setMeetingFormError("");
       setIsScheduleFormOpen(false);
     } catch (error) {
-      console.error("[ProxiSpeak] Could not create scheduled meeting:", error);
-      setMeetingFormError(error.message || "Meeting could not be saved. Check the server connection and retry.");
+      console.warn("[ProxiSpeak] Server meeting save failed, storing locally as offline fallback:", error);
+      const fallbackMeeting = {
+        ...meeting,
+        id: `local-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        createdAt: new Date().toISOString(),
+        localOnly: true,
+        canDelete: true,
+      };
+      try {
+        const existingLocal = loadScheduledMeetings();
+        localStorage.setItem(SCHEDULED_MEETINGS_KEY, JSON.stringify([...existingLocal, fallbackMeeting]));
+        setScheduledMeetings((current) => [...current, fallbackMeeting].sort((a, b) => new Date(a.startsAt) - new Date(b.startsAt)));
+        setMeetingForm({
+          title: "",
+          description: "",
+          ...getDefaultMeetingTime(),
+          duration: "60",
+          participants: "",
+        });
+        setMeetingFormError("");
+        setMeetingEmailNotice("Meeting saved in your browser (server was unreachable).");
+        setIsScheduleFormOpen(false);
+      } catch (localSaveError) {
+        console.error("[ProxiSpeak] Local meeting save failed:", localSaveError);
+        setMeetingFormError("Could not save meeting. Check your connection or browser storage.");
+      }
     } finally {
       setMeetingSaving(false);
     }
