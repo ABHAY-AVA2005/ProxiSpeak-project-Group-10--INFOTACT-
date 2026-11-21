@@ -548,7 +548,18 @@ function VirtualOffice({
     const socket = io(SERVER_URL, { transports: ["websocket"], reconnectionAttempts: 5 });
 
     const negotiatePeer = async (peerId, pc) => {
-      if (pc.signalingState !== "stable" || pc.connectionState === "closed") return;
+      if (pc.connectionState === "closed") return;
+      if (pc.signalingState !== "stable") {
+        console.log(`[WebRTC] PC for ${peerId} in signalingState '${pc.signalingState}', waiting for stable...`);
+        const onStable = async () => {
+          if (pc.signalingState === "stable") {
+            pc.removeEventListener("signalingstatechange", onStable);
+            await negotiatePeer(peerId, pc);
+          }
+        };
+        pc.addEventListener("signalingstatechange", onStable);
+        return;
+      }
       try {
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
@@ -562,16 +573,21 @@ function VirtualOffice({
       const stream = screenShareStreamRef.current;
       const videoTrack = stream?.getVideoTracks()[0] || null;
       await Promise.all(Object.entries(peerConnectionsRef.current).map(async ([peerId, pc]) => {
-        const videoTransceiver = pc.getTransceivers().find((transceiver) =>
-          transceiver.receiver.track?.kind === "video"
-        );
-        const videoSender = videoTransceiver?.sender;
+        const videoSender = pc.getSenders ? pc.getSenders().find((s) => s.track && s.track.kind === "video") : null;
+        const videoTransceiver = pc.getTransceivers ? pc.getTransceivers().find((t) =>
+          (t.sender?.track?.kind === "video") || (t.receiver?.track?.kind === "video")
+        ) : null;
+        const effectiveSender = videoSender || videoTransceiver?.sender;
+
         try {
           if (videoTrack) {
-            if (videoSender) await videoSender.replaceTrack(videoTrack);
-            else pc.addTrack(videoTrack, stream);
-          } else if (videoSender) {
-            await videoSender.replaceTrack(null);
+            if (effectiveSender) {
+              await effectiveSender.replaceTrack(videoTrack);
+            } else {
+              pc.addTrack(videoTrack, stream);
+            }
+          } else if (effectiveSender) {
+            await effectiveSender.replaceTrack(null);
           }
           await negotiatePeer(peerId, pc);
         } catch (err) {
@@ -823,6 +839,9 @@ function VirtualOffice({
 
       pc.oniceconnectionstatechange = () => {
         console.log(`[WebRTC] ICE connection state with ${peerId}: ${pc.iceConnectionState}`);
+        if (pc.iceConnectionState === "connected" && screenShareStreamRef.current) {
+          renegotiatePeersRef.current?.();
+        }
       };
 
       pc.onicegatheringstatechange = () => {
@@ -832,12 +851,18 @@ function VirtualOffice({
       pc.ontrack = (event) => {
         if (event.track.kind === "video") {
           const stream = event.streams?.[0] || new MediaStream([event.track]);
-          onRemoteScreenShareChangeRef.current({
-            stream,
-            socketId: peerId,
-            username: remotePlayers.current[peerId]?.username || "Teammate"
-          });
-          event.track.onended = () => onRemoteScreenShareChangeRef.current({ socketId: peerId });
+          const updateRemoteVideo = () => {
+            onRemoteScreenShareChangeRef.current({
+              stream,
+              socketId: peerId,
+              username: remotePlayers.current[peerId]?.username || "Teammate"
+            });
+          };
+          updateRemoteVideo();
+          event.track.onunmute = updateRemoteVideo;
+          event.track.onended = () => {
+            onRemoteScreenShareChangeRef.current({ socketId: peerId });
+          };
           return;
         }
         const stream = (event.streams && event.streams[0]) ? event.streams[0] : null;
@@ -920,6 +945,10 @@ function VirtualOffice({
       console.log("[WebRTC] Received offer from:", senderId);
       const pc = getOrCreatePC(senderId, false);
       try {
+        if (pc.signalingState === "have-local-offer") {
+          console.log(`[WebRTC] Glare detected with ${senderId}: rolling back local offer`);
+          await pc.setLocalDescription({ type: "rollback" });
+        }
         await pc.setRemoteDescription(new RTCSessionDescription(offer));
         await drainPendingCandidates(senderId, pc);
 
@@ -943,10 +972,22 @@ function VirtualOffice({
         socket.emit("webrtc:answer", { targetId: senderId, answer });
         console.log(`[WebRTC] Sent answer to ${senderId}`);
 
-        // Ensure remote audio playback is attached for the answerer
+        // Ensure remote audio and video playback are attached for the answerer
         pc.getReceivers().forEach((receiver) => {
           if (receiver.track && receiver.track.kind === "audio") {
             setupRemoteAudio(senderId, receiver.track);
+          } else if (receiver.track && receiver.track.kind === "video") {
+            if (receiver.track.readyState === "live" && !receiver.track.muted) {
+              const stream = new MediaStream([receiver.track]);
+              onRemoteScreenShareChangeRef.current({
+                stream,
+                socketId: senderId,
+                username: remotePlayers.current[senderId]?.username || "Teammate"
+              });
+              receiver.track.onended = () => {
+                onRemoteScreenShareChangeRef.current({ socketId: senderId });
+              };
+            }
           }
         });
       } catch (err) {
@@ -963,10 +1004,22 @@ function VirtualOffice({
           await drainPendingCandidates(senderId, pc);
           console.log(`[WebRTC] Remote description set for answer from ${senderId}`);
 
-          // Ensure remote audio playback is attached for the offerer
+          // Ensure remote audio and video playback are attached for the offerer
           pc.getReceivers().forEach((receiver) => {
             if (receiver.track && receiver.track.kind === "audio") {
               setupRemoteAudio(senderId, receiver.track);
+            } else if (receiver.track && receiver.track.kind === "video") {
+              if (receiver.track.readyState === "live" && !receiver.track.muted) {
+                const stream = new MediaStream([receiver.track]);
+                onRemoteScreenShareChangeRef.current({
+                  stream,
+                  socketId: senderId,
+                  username: remotePlayers.current[senderId]?.username || "Teammate"
+                });
+                receiver.track.onended = () => {
+                  onRemoteScreenShareChangeRef.current({ socketId: senderId });
+                };
+              }
             }
           });
         } catch (err) {

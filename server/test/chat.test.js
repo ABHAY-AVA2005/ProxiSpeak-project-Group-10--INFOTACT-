@@ -27,35 +27,29 @@ test("Chat - broadcasts messages only to users in the joined room", async () => 
 
   try {
     await Promise.all([once(alice, "connect"), once(bob, "connect"), once(outsider, "connect")]);
-    const aliceJoined = new Promise((resolve) => {
+    const aliceJoined = await new Promise((resolve) => {
       alice.emit("join", { username: "Alice", roomName: "Team A", x: 100, y: 100 }, resolve);
     });
-    assert.deepEqual(await aliceJoined, {
-      ok: true,
-      roomName: "team a",
-      chatMessages: [],
-      meetingChatMessages: []
-    });
+    assert.equal(aliceJoined.ok, true);
+    assert.equal(aliceJoined.roomName, "team a");
+    assert.deepEqual(aliceJoined.chatMessages, []);
+    assert.deepEqual(aliceJoined.meetingChatMessages, []);
 
-    const bobJoined = new Promise((resolve) => {
+    const bobJoined = await new Promise((resolve) => {
       bob.emit("join", { username: "Bob", roomName: "Team A", x: 200, y: 200 }, resolve);
     });
-    assert.deepEqual(await bobJoined, {
-      ok: true,
-      roomName: "team a",
-      chatMessages: [],
-      meetingChatMessages: []
-    });
+    assert.equal(bobJoined.ok, true);
+    assert.equal(bobJoined.roomName, "team a");
+    assert.deepEqual(bobJoined.chatMessages, []);
+    assert.deepEqual(bobJoined.meetingChatMessages, []);
 
-    const outsiderJoined = new Promise((resolve) => {
+    const outsiderJoined = await new Promise((resolve) => {
       outsider.emit("join", { username: "Eve", roomName: "Team B", x: 300, y: 300 }, resolve);
     });
-    assert.deepEqual(await outsiderJoined, {
-      ok: true,
-      roomName: "team b",
-      chatMessages: [],
-      meetingChatMessages: []
-    });
+    assert.equal(outsiderJoined.ok, true);
+    assert.equal(outsiderJoined.roomName, "team b");
+    assert.deepEqual(outsiderJoined.chatMessages, []);
+    assert.deepEqual(outsiderJoined.meetingChatMessages, []);
 
     const aliceMessage = once(alice, "chat:message");
     const bobMessage = once(bob, "chat:message");

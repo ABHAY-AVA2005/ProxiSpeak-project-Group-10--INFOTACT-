@@ -137,6 +137,9 @@ function SpeakingIndicator() {
 }
 
 function playMedia(video) {
+  if (!video) return;
+  video.muted = true;
+  video.playsInline = true;
   const playPromise = video.play();
   if (playPromise) {
     playPromise.catch((playError) => {
@@ -226,6 +229,7 @@ function App() {
     }
   });
   const [unreadAnnouncementsCount, setUnreadAnnouncementsCount] = useState(0);
+  const [unreadChatCount, setUnreadChatCount] = useState(0);
   const [announcementCategory, setAnnouncementCategory] = useState("General");
   const [peerVolumes, setPeerVolumes] = useState(() => {
     try {
@@ -303,6 +307,12 @@ function App() {
     const list = chatListRef.current;
     if (list) list.scrollTop = list.scrollHeight;
   }, [chatMessages]);
+
+  useEffect(() => {
+    if (!activeMediaStream && (chatView === "presentation" || chatView === "split")) {
+      setChatView("chat");
+    }
+  }, [activeMediaStream, chatView]);
 
   useEffect(() => {
     activeTabRef.current = activeTab;
@@ -621,16 +631,36 @@ function App() {
 
   const handleChatMessage = (msg) => {
     if (!msg || !msg.text) return;
-    const isSelf = msg.senderId
-      ? msg.senderId === socketRef.current?.id
-      : msg.sender === username;
+    const isSelf = (msg.senderId && msg.senderId === socketRef.current?.id)
+      || (msg.sender && msg.sender === username);
+
     if (msg.scope === "direct") {
       const activeTarget = directChatRef.current?.socketId;
       const otherParticipant = isSelf ? msg.recipientId : msg.senderId;
-      if (!activeTarget || activeTarget !== otherParticipant) return;
+      if (!activeTarget || activeTarget !== otherParticipant) {
+        if (!isSelf) {
+          addNotification("Direct Message", `${msg.sender}: ${msg.text.slice(0, 35)}`);
+          if (activeTabRef.current !== "Chat") setUnreadChatCount((count) => count + 1);
+        }
+        return;
+      }
     } else if (directChatRef.current) {
+      if (!isSelf) {
+        addNotification("New Chat Message", `${msg.sender}: ${msg.text.slice(0, 35)}`);
+        if (activeTabRef.current !== "Chat") setUnreadChatCount((count) => count + 1);
+      }
+      return;
+    } else if (msg.scope && msg.scope !== chatScopeRef.current) {
+      if (!isSelf) {
+        addNotification(
+          msg.scope === "all" ? "Office Announcement" : "Room Chat",
+          `${msg.sender}: ${msg.text.slice(0, 35)}`
+        );
+        if (activeTabRef.current !== "Chat") setUnreadChatCount((count) => count + 1);
+      }
       return;
     }
+
     setChatMessages((current) => {
       if (msg.id && current.some((message) => message.id === msg.id)) return current;
       return [...current, {
@@ -644,7 +674,9 @@ function App() {
           : "Now",
       }];
     });
-    if (!isSelf && activeTab !== "Chat") {
+
+    if (!isSelf && activeTabRef.current !== "Chat") {
+      setUnreadChatCount((count) => count + 1);
       addNotification("New Chat Message", `${msg.sender}: ${msg.text.slice(0, 35)}`);
     }
   };
@@ -656,6 +688,7 @@ function App() {
     chatScopeRef.current = nextScope;
     setChatScope(nextScope);
     setChatError("");
+    setChatMessages([]);
     const socket = socketRef.current;
     if (!socket?.connected) return;
 
@@ -666,15 +699,19 @@ function App() {
       }
       if (nextScope !== chatScopeRef.current) return;
       setChatMessages((current) => {
-        const history = response.messages.map((message) => ({
-          id: message.id,
-          isSelf: message.senderId === socket.id,
-          sender: message.senderId === socket.id ? "You" : message.sender,
-          text: message.text,
-          time: message.time
-            ? new Date(message.time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-            : "Now",
-        }));
+        const history = response.messages.map((message) => {
+          const self = (message.senderId && message.senderId === socket.id) || message.sender === username;
+          return {
+            id: message.id,
+            isSelf: self,
+            scope: nextScope,
+            sender: self ? "You" : message.sender,
+            text: message.text,
+            time: message.time
+              ? new Date(message.time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+              : "Now",
+          };
+        });
         const messageIds = new Set(history.map((message) => message.id));
         const arrivedWhileLoading = current.filter((message) =>
           message.scope === nextScope && !messageIds.has(message.id)
@@ -691,6 +728,7 @@ function App() {
     setDirectChat(conversation);
     setChatError("");
     setChatMessages([]);
+    setUnreadChatCount(0);
     setActiveTab("Chat");
 
     const socket = socketRef.current;
@@ -709,16 +747,19 @@ function App() {
           return;
         }
         if (directChatRef.current?.socketId !== conversation.socketId) return;
-        setChatMessages(response.messages.map((message) => ({
-          id: message.id,
-          isSelf: message.senderId === socket.id,
-          scope: "direct",
-          sender: message.senderId === socket.id ? "You" : message.sender,
-          text: message.text,
-          time: message.time
-            ? new Date(message.time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-            : "Now",
-        })));
+        setChatMessages(response.messages.map((message) => {
+          const self = (message.senderId && message.senderId === socket.id) || message.sender === username;
+          return {
+            id: message.id,
+            isSelf: self,
+            scope: "direct",
+            sender: self ? "You" : message.sender,
+            text: message.text,
+            time: message.time
+              ? new Date(message.time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+              : "Now",
+          };
+        }));
       }
     );
   };
@@ -734,16 +775,19 @@ function App() {
         setChatError("Could not load this chat history. Please try again.");
         return;
       }
-      setChatMessages(response.messages.map((message) => ({
-        id: message.id,
-        isSelf: message.senderId === socket.id,
-        scope: chatScopeRef.current,
-        sender: message.senderId === socket.id ? "You" : message.sender,
-        text: message.text,
-        time: message.time
-          ? new Date(message.time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-          : "Now",
-      })));
+      setChatMessages(response.messages.map((message) => {
+        const self = (message.senderId && message.senderId === socket.id) || message.sender === username;
+        return {
+          id: message.id,
+          isSelf: self,
+          scope: chatScopeRef.current,
+          sender: self ? "You" : message.sender,
+          text: message.text,
+          time: message.time
+            ? new Date(message.time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+            : "Now",
+        };
+      }));
     });
   };
 
@@ -1144,6 +1188,7 @@ function App() {
 
   const navigateToTab = (tab) => {
     setActiveTab(tab);
+    if (tab === "Chat") setUnreadChatCount(0);
     if (tab === "Announcements") setUnreadAnnouncementsCount(0);
   };
 
@@ -1173,6 +1218,11 @@ function App() {
               {item.label}
               {item.id === "Chat" && activeMediaStream && (
                 <span className="nav-live-indicator" aria-label="Live presentation available">LIVE</span>
+              )}
+              {item.id === "Chat" && unreadChatCount > 0 && activeTab !== "Chat" && (
+                <span className="nav-badge" aria-label={`${unreadChatCount} unread messages`}>
+                  {unreadChatCount}
+                </span>
               )}
               {item.id === "Announcements" && unreadAnnouncementsCount > 0 && (
                 <span className="nav-badge" aria-label={`${unreadAnnouncementsCount} unread announcements`}>
@@ -1431,7 +1481,8 @@ function App() {
                           aria-label="Watch presentation with chat"
                           title="Open presentation and chat"
                           onClick={() => {
-                            setChatView("presentation");
+                            setChatView("split");
+                            setUnreadChatCount(0);
                             setActiveTab("Chat");
                           }}
                         >
@@ -1535,47 +1586,60 @@ function App() {
                   {activeTab === "Chat" && (
                     <div className="workspace-card chat-card">
                       <div className="card-header-row">
-                        <div>
-                          <h2>{directChat ? `Chat with ${directChat.username}` : "Workspace chat"}</h2>
+                        <div className="chat-header-title-block">
+                          <div className="chat-title-line">
+                            <h2>{directChat ? `Chat with ${directChat.username}` : "Workspace chat"}</h2>
+                            <span className={`chat-status-pill ${chatConnected ? "is-live" : "is-offline"}`}>
+                              {!chatConnected
+                                ? "Offline"
+                                : chatServerOutdated
+                                  ? "Update needed"
+                                  : chatRoomReady
+                                    ? "Live"
+                                    : "Connecting..."}
+                            </span>
+                          </div>
                           <small>
                             {directChat
                               ? "Direct message"
-                              : chatScope === "all" ? "Everyone in the meeting" : `Room: ${roomName}`}
+                              : chatScope === "all" ? "Everyone in the workspace" : `Room: ${roomName}`}
                           </small>
                         </div>
                         <div className="chat-header-actions">
-                          <span>
-                            {!chatConnected
-                              ? "Offline"
-                              : chatServerOutdated
-                                ? "Server update needed"
-                                : chatRoomReady
-                                  ? "Live"
-                                  : "Joining room..."}
-                          </span>
                           {activeMediaStream && (
-                            <div className="chat-view-tabs" role="group" aria-label="Chat or presentation">
+                            <div className="chat-view-tabs" role="group" aria-label="Layout view options">
                               <button
                                 type="button"
                                 className={chatView === "chat" ? "selected" : ""}
                                 aria-pressed={chatView === "chat"}
                                 onClick={() => setChatView("chat")}
+                                title="Show chat conversation only"
                               >
-                                Chat
+                                Chat only
+                              </button>
+                              <button
+                                type="button"
+                                className={chatView === "split" ? "selected" : ""}
+                                aria-pressed={chatView === "split"}
+                                onClick={() => setChatView("split")}
+                                title="Watch presentation and chat side-by-side"
+                              >
+                                Presentation & Chat <span className="live-tab-dot" aria-label="Live presentation active" />
                               </button>
                               <button
                                 type="button"
                                 className={chatView === "presentation" ? "selected" : ""}
                                 aria-pressed={chatView === "presentation"}
                                 onClick={() => setChatView("presentation")}
+                                title="Expand presentation full size"
                               >
-                                Presentation <span className="live-tab-dot" aria-label="Live" />
+                                Presentation full
                               </button>
                             </div>
                           )}
                           {directChat ? (
                             <button type="button" className="secondary-button" onClick={handleReturnToGroupChat}>
-                              Back to group chat
+                              ← Back to group chat
                             </button>
                           ) : (
                             <>
@@ -1604,20 +1668,37 @@ function App() {
                           )}
                         </div>
                       </div>
-                      {chatView === "presentation" ? (
-                        <div className="presentation-stage" ref={mediaStageRef}>
-                          <div className="presentation-toolbar">
-                            <div>
-                              <strong>{activeMediaTitle}</strong>
-                              <span>{activeMediaStream ? "Live presentation" : "The presentation has ended"}</span>
+
+                      <div className={`chat-card-body ${activeMediaStream ? `view-${chatView}` : "view-chat"}`}>
+                        {activeMediaStream && (chatView === "presentation" || chatView === "split") && (
+                          <div
+                            className={`presentation-stage ${chatView === "split" ? "presentation-stage--split" : ""}`}
+                            ref={mediaStageRef}
+                          >
+                            <div className="presentation-toolbar">
+                              <div>
+                                <strong>{activeMediaTitle}</strong>
+                                <span><span className="live-tab-dot" /> Live presentation</span>
+                              </div>
+                              <div className="presentation-toolbar-actions">
+                                {chatView === "presentation" && (
+                                  <button
+                                    type="button"
+                                    className="secondary-button"
+                                    onClick={() => setChatView("split")}
+                                  >
+                                    Show chat
+                                  </button>
+                                )}
+                                <button
+                                  type="button"
+                                  className="secondary-button"
+                                  onClick={toggleMediaFullscreen}
+                                >
+                                  {mediaFullscreen ? "Exit fullscreen" : "Fullscreen"}
+                                </button>
+                              </div>
                             </div>
-                            {activeMediaStream && (
-                              <button type="button" className="secondary-button" onClick={toggleMediaFullscreen}>
-                                {mediaFullscreen ? "Exit fullscreen" : "Fullscreen"}
-                              </button>
-                            )}
-                          </div>
-                          {activeMediaStream ? (
                             <div className="presentation-video-frame">
                               <video
                                 ref={attachMediaVideo}
@@ -1628,40 +1709,84 @@ function App() {
                                 className="presentation-video"
                               />
                             </div>
-                          ) : (
-                            <div className="presentation-ended">
-                              <strong>No live presentation</strong>
-                              <span>Return to chat or wait for someone to start sharing.</span>
-                              <button type="button" className="secondary-button" onClick={() => setChatView("chat")}>
-                                Back to chat
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      ) : (
-                        <>
-                          <div className="chat-list" ref={chatListRef}>
-                            {chatMessages.length === 0 ? (
-                              <div className="chat-empty-state">
-                                <span className="chat-empty-icon" aria-hidden="true">✦</span>
-                                <strong>No messages yet</strong>
-                                <span>Start the conversation with your office.</span>
-                              </div>
-                            ) : chatMessages.map(m => (
-                              <div key={m.id} className={`chat-item ${m.isSelf ? "self" : ""}`}>
-                                <div className="chat-bubble"><strong>{m.sender}</strong><p>{m.text}</p><small>{m.time}</small></div>
-                              </div>
-                            ))}
                           </div>
-                          <form onSubmit={handleSendMessage} className="chat-form">
-                            <input type="text" value={draftMessage} onChange={e => { setDraftMessage(e.target.value); setChatError(""); }} placeholder="Write a message..." maxLength={2000} />
-                            <button type="submit" disabled={!chatConnected || chatSending || !draftMessage.trim()}>
-                              {chatSending ? "Sending..." : "Send"}
-                            </button>
-                          </form>
-                          {chatError && <p role="status" className="chat-error">{chatError}</p>}
-                        </>
-                      )}
+                        )}
+
+                        {(chatView === "chat" || chatView === "split" || !activeMediaStream) && (
+                          <div className={`chat-pane ${chatView === "split" && activeMediaStream ? "chat-pane--split" : ""}`}>
+                            {activeMediaStream && chatView === "chat" && (
+                              <div className="chat-live-banner">
+                                <div className="chat-live-banner-info">
+                                  <span className="live-tab-dot" />
+                                  <span><strong>{activeMediaTitle}</strong> is sharing a live presentation</span>
+                                </div>
+                                <button
+                                  type="button"
+                                  className="secondary-button"
+                                  onClick={() => setChatView("split")}
+                                >
+                                  Watch alongside chat
+                                </button>
+                              </div>
+                            )}
+                            <div className="chat-list" ref={chatListRef}>
+                              {chatMessages.length === 0 ? (
+                                <div className="chat-empty-state">
+                                  <span className="chat-empty-icon" aria-hidden="true">✦</span>
+                                  <strong>No messages yet</strong>
+                                  <span>
+                                    {directChat
+                                      ? `Send a message to ${directChat.username}.`
+                                      : chatScope === "all"
+                                        ? "Broadcast a message to everyone in the workspace."
+                                        : `Start the conversation with teammates in ${roomName}.`}
+                                  </span>
+                                </div>
+                              ) : (
+                                chatMessages.map((m) => (
+                                  <div key={m.id} className={`chat-item ${m.isSelf ? "self" : ""}`}>
+                                    {!m.isSelf && (
+                                      <div className="chat-sender-avatar" aria-hidden="true">
+                                        {(m.sender || "U").slice(0, 2).toUpperCase()}
+                                      </div>
+                                    )}
+                                    <div className="chat-bubble">
+                                      <div className="chat-bubble-meta">
+                                        <strong>{m.sender}</strong>
+                                        <small>{m.time}</small>
+                                      </div>
+                                      <p>{m.text}</p>
+                                    </div>
+                                  </div>
+                                ))
+                              )}
+                            </div>
+                            <form onSubmit={handleSendMessage} className="chat-form">
+                              <input
+                                type="text"
+                                value={draftMessage}
+                                onChange={(e) => {
+                                  setDraftMessage(e.target.value);
+                                  setChatError("");
+                                }}
+                                placeholder={
+                                  directChat
+                                    ? `Message ${directChat.username}...`
+                                    : `Message ${chatScope === "all" ? "everyone in workspace" : roomName}...`
+                                }
+                                maxLength={2000}
+                              />
+                              <button
+                                type="submit"
+                                disabled={!chatConnected || chatSending || !draftMessage.trim()}
+                              >
+                                {chatSending ? "Sending..." : "Send"}
+                              </button>
+                            </form>
+                            {chatError && <p role="status" className="chat-error">{chatError}</p>}
+                          </div>
+                        )}
+                      </div>
                     </div>
                   )}
                   {activeTab === "Meetings" && (
