@@ -1065,6 +1065,9 @@ function App() {
       if (!share?.stream) return current?.socketId === share?.socketId ? null : current;
       return share;
     });
+    if (share?.stream) {
+      setChatView((current) => (current === "chat" ? "split" : current));
+    }
   };
 
   useEffect(() => {

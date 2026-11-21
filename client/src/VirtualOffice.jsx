@@ -581,13 +581,21 @@ function VirtualOffice({
 
         try {
           if (videoTrack) {
+            if (videoTransceiver && videoTransceiver.direction !== "sendrecv") {
+              videoTransceiver.direction = "sendrecv";
+            }
             if (effectiveSender) {
               await effectiveSender.replaceTrack(videoTrack);
             } else {
               pc.addTrack(videoTrack, stream);
             }
-          } else if (effectiveSender) {
-            await effectiveSender.replaceTrack(null);
+          } else {
+            if (videoTransceiver) {
+              videoTransceiver.direction = "recvonly";
+            }
+            if (effectiveSender) {
+              await effectiveSender.replaceTrack(null);
+            }
           }
           await negotiatePeer(peerId, pc);
         } catch (err) {
@@ -827,6 +835,14 @@ function VirtualOffice({
         pc.addTransceiver("audio", { direction: "sendrecv" });
       }
 
+      // Always prepare video transceiver so incoming video tracks can be received anytime
+      const shareTrack = screenShareStreamRef.current?.getVideoTracks()[0];
+      if (shareTrack) {
+        pc.addTrack(shareTrack, screenShareStreamRef.current);
+      } else {
+        pc.addTransceiver("video", { direction: "recvonly" });
+      }
+
       pc.onicecandidate = (event) => {
         if (event.candidate) {
           socket.emit("webrtc:ice-candidate", { targetId: peerId, candidate: event.candidate });
@@ -868,11 +884,6 @@ function VirtualOffice({
         const stream = (event.streams && event.streams[0]) ? event.streams[0] : null;
         setupRemoteAudio(peerId, event.track, stream);
       };
-
-      const shareTrack = screenShareStreamRef.current?.getVideoTracks()[0];
-      if (shareTrack) {
-        pc.addTrack(shareTrack, screenShareStreamRef.current);
-      }
 
       peerConnections[peerId] = pc;
       return pc;
@@ -977,17 +988,21 @@ function VirtualOffice({
           if (receiver.track && receiver.track.kind === "audio") {
             setupRemoteAudio(senderId, receiver.track);
           } else if (receiver.track && receiver.track.kind === "video") {
-            if (receiver.track.readyState === "live" && !receiver.track.muted) {
-              const stream = new MediaStream([receiver.track]);
-              onRemoteScreenShareChangeRef.current({
-                stream,
-                socketId: senderId,
-                username: remotePlayers.current[senderId]?.username || "Teammate"
-              });
-              receiver.track.onended = () => {
-                onRemoteScreenShareChangeRef.current({ socketId: senderId });
-              };
-            }
+            const attachVideoTrack = () => {
+              if (receiver.track.readyState === "live" && !receiver.track.muted) {
+                const stream = new MediaStream([receiver.track]);
+                onRemoteScreenShareChangeRef.current({
+                  stream,
+                  socketId: senderId,
+                  username: remotePlayers.current[senderId]?.username || "Teammate"
+                });
+              }
+            };
+            attachVideoTrack();
+            receiver.track.onunmute = attachVideoTrack;
+            receiver.track.onended = () => {
+              onRemoteScreenShareChangeRef.current({ socketId: senderId });
+            };
           }
         });
       } catch (err) {
@@ -1009,17 +1024,21 @@ function VirtualOffice({
             if (receiver.track && receiver.track.kind === "audio") {
               setupRemoteAudio(senderId, receiver.track);
             } else if (receiver.track && receiver.track.kind === "video") {
-              if (receiver.track.readyState === "live" && !receiver.track.muted) {
-                const stream = new MediaStream([receiver.track]);
-                onRemoteScreenShareChangeRef.current({
-                  stream,
-                  socketId: senderId,
-                  username: remotePlayers.current[senderId]?.username || "Teammate"
-                });
-                receiver.track.onended = () => {
-                  onRemoteScreenShareChangeRef.current({ socketId: senderId });
-                };
-              }
+              const attachVideoTrack = () => {
+                if (receiver.track.readyState === "live" && !receiver.track.muted) {
+                  const stream = new MediaStream([receiver.track]);
+                  onRemoteScreenShareChangeRef.current({
+                    stream,
+                    socketId: senderId,
+                    username: remotePlayers.current[senderId]?.username || "Teammate"
+                  });
+                }
+              };
+              attachVideoTrack();
+              receiver.track.onunmute = attachVideoTrack;
+              receiver.track.onended = () => {
+                onRemoteScreenShareChangeRef.current({ socketId: senderId });
+              };
             }
           });
         } catch (err) {
