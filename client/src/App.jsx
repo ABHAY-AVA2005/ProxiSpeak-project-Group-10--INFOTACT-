@@ -488,6 +488,9 @@ function App() {
     }
     screenShareStream?.getTracks().forEach((track) => track.stop());
     cameraStream?.getTracks().forEach((track) => track.stop());
+    if (screenShareStream) {
+      sendMeetingAction("screenshare", false);
+    }
     setCameraStream(null);
     setScreenShareStream(null);
     setRemoteScreenShare(null);
@@ -831,6 +834,7 @@ function App() {
     if (screenShareStream) {
       screenShareStream.getTracks().forEach((track) => track.stop());
       setScreenShareStream(null);
+      sendMeetingAction("screenshare", false);
       return;
     }
 
@@ -847,9 +851,11 @@ function App() {
         throw new Error("No screen video track was provided.");
       }
       track.addEventListener("ended", () => {
-        setScreenShareStream((current) => current === stream ? null : current);
+        setScreenShareStream((current) => (current === stream ? null : current));
+        sendMeetingAction("screenshare", false);
       }, { once: true });
       setScreenShareStream(stream);
+      sendMeetingAction("screenshare", true);
     } catch (error) {
       if (error.name !== "NotAllowedError") {
         console.error("Unable to start screen sharing:", error);
@@ -990,6 +996,10 @@ function App() {
       if (!socketId) return;
       if (action === "reaction") {
         addMeetingReaction({ socketId, value, username: actor, reactionId });
+        return;
+      }
+      if (action === "screenshare" && value === false) {
+        setRemoteScreenShare((current) => (current?.socketId === socketId ? null : current));
         return;
       }
       updateMeetingAction(socketId, action, value, actor);

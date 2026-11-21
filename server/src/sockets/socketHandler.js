@@ -470,8 +470,9 @@ export function setupSocketHandlers(io) {
       }
 
       const validHandAction = action === "hand" && typeof value === "boolean";
+      const validScreenShareAction = action === "screenshare" && typeof value === "boolean";
       const validReaction = action === "reaction" && ALLOWED_MEETING_REACTIONS.has(value);
-      if (!validHandAction && !validReaction) {
+      if (!validHandAction && !validReaction && !validScreenShareAction) {
         acknowledgeResult({ ok: false, error: "This meeting action is not supported." });
         return;
       }
