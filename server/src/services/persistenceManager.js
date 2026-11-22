@@ -1,6 +1,6 @@
 import { Player } from "../models/Player.js";
 import { isDbConnected } from "../config/db.js";
-import { getAllUsers } from "./userManager.js";
+import { getAllUsers, getAllActiveUsers } from "./userManager.js";
 import {
   measureQuery,
   logQueryTiming,
@@ -21,6 +21,41 @@ export {
 
 // Debounce timer duration: 1000ms after last movement
 export const DB_DEBOUNCE_MS = 1000;
+
+// Nearest-N peer limiting configuration (default 8, allowed range 6-8)
+export const DEFAULT_MAX_PEERS = 8;
+export const MIN_MAX_PEERS = 6;
+
+/**
+ * Reads and bounds MAX_PEERS from environment (clamped between 6 and 8, default 8)
+ * @returns {number}
+ */
+export function getConfiguredMaxPeers() {
+  const envVal = Number(process.env.MAX_PEERS);
+  if (Number.isFinite(envVal)) {
+    return Math.max(MIN_MAX_PEERS, Math.min(DEFAULT_MAX_PEERS, Math.round(envVal)));
+  }
+  return DEFAULT_MAX_PEERS;
+}
+
+/**
+ * Limits candidate peers to the nearest N peers (closest first)
+ * Prevents O(N^2) WebRTC mesh connection overload on client browsers.
+ *
+ * @param {Array<object>} candidates - Array of candidate peers sorted nearest-first
+ * @param {number|boolean|null} [maxPeers=DEFAULT_MAX_PEERS] - Peer cap threshold
+ * @returns {Array<object>} Limited candidate array
+ */
+export function applyNearestPeerLimit(candidates, maxPeers = DEFAULT_MAX_PEERS) {
+  if (!Array.isArray(candidates) || candidates.length === 0) return [];
+  if (maxPeers === false || maxPeers === null || maxPeers === Infinity) {
+    return candidates;
+  }
+  const cap = typeof maxPeers === "number" && Number.isFinite(maxPeers) && maxPeers > 0
+    ? Math.max(MIN_MAX_PEERS, Math.min(DEFAULT_MAX_PEERS, Math.round(maxPeers)))
+    : DEFAULT_MAX_PEERS;
+  return candidates.slice(0, cap);
+}
 
 // Tracking structures for debouncing and race-condition prevention
 export const moveDebounceTimers = new Map();
@@ -296,8 +331,10 @@ export async function getNearbyUsersInMemory(origin, options = {}) {
     validMaxDistance = maxDistance;
   }
 
-  // 3. Candidate source (defaults to active in-memory users)
-  const candidateUsers = Array.isArray(users) ? users : getAllUsers();
+  // 3. Candidate source (defaults to active in-memory users, including remote instances)
+  const candidateUsers = Array.isArray(users)
+    ? users
+    : (typeof getAllActiveUsers === "function" ? getAllActiveUsers() : getAllUsers());
   if (candidateUsers.length === 0) {
     return [];
   }
@@ -346,7 +383,7 @@ export async function getNearbyUsersInMemory(origin, options = {}) {
     // Sort by ascending distance (closest first, matching MongoDB $near behavior)
     candidates.sort((a, b) => a.distance - b.distance);
 
-    return candidates.map((item) => {
+    const sortedUsers = candidates.map((item) => {
       const u = item.user;
       const sid = u.socketId || u.playerId || u.id;
       return {
@@ -358,6 +395,11 @@ export async function getNearbyUsersInMemory(origin, options = {}) {
         y: item.y
       };
     });
+
+    if (options.maxPeers !== undefined && options.maxPeers !== null) {
+      return applyNearestPeerLimit(sortedUsers, options.maxPeers);
+    }
+    return sortedUsers;
   }, { ...queryContext, source: "in-memory" });
 }
 
@@ -463,16 +505,26 @@ export const userNearbyMap = new Map();
 
 /**
  * Updates proximity tracking for a user and calculates enter/leave diffs.
+ * Enforces nearest-N peer limiting (default 8, 6-8 peers) to cap WebRTC mesh connections.
  * Updates peer sets symmetrically so proximity is mutual.
  *
  * @param {string} socketId - The active user's socket ID
  * @param {object} user - The active user object ({ socketId, username, x, y })
  * @param {Array<object>} currentNearby - Users currently within proximity radius
+ * @param {object} [options]
+ * @param {number|boolean|null} [options.maxPeers] - Override for nearest-N peer cap
  * @returns {{ entered: Array<object>, left: Array<string> }}
  */
-export function updateProximity(socketId, user, currentNearby = []) {
+export function updateProximity(socketId, user, currentNearby = [], options = {}) {
+  const maxPeers = options.maxPeers;
+  const effectiveNearby = (maxPeers !== undefined && maxPeers !== null)
+    ? applyNearestPeerLimit(currentNearby, maxPeers)
+    : (Array.isArray(currentNearby) && currentNearby.length > DEFAULT_MAX_PEERS
+        ? applyNearestPeerLimit(currentNearby, getConfiguredMaxPeers())
+        : currentNearby);
+
   const currentNearbyIds = new Set(
-    currentNearby.map((u) => u.socketId || u.playerId || u.id).filter(Boolean)
+    effectiveNearby.map((u) => u.socketId || u.playerId || u.id).filter(Boolean)
   );
 
   const prevNearbyIds = userNearbyMap.get(socketId) || new Set();
@@ -481,7 +533,7 @@ export function updateProximity(socketId, user, currentNearby = []) {
   const left = [];
 
   // 1. Identify newly entered peers
-  for (const peer of currentNearby) {
+  for (const peer of effectiveNearby) {
     const peerId = peer.socketId || peer.playerId || peer.id;
     if (peerId && !prevNearbyIds.has(peerId)) {
       entered.push(peer);
@@ -495,7 +547,7 @@ export function updateProximity(socketId, user, currentNearby = []) {
     }
   }
 
-  // 2. Identify peers who left proximity
+  // 2. Identify peers who left proximity (moved out of range or displaced by closer peers)
   for (const peerId of prevNearbyIds) {
     if (!currentNearbyIds.has(peerId)) {
       left.push(peerId);

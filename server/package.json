@@ -7,6 +7,9 @@
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
     "test": "node --test test/**/*.test.js",
+    "test:unit": "node --test test/debounce-index.test.js test/persistence.test.js test/queryTimer.test.js test/peerLimiting.test.js test/redisSync.test.js",
+    "test:integration": "node --test test/redisIntegration.test.js",
+    "test:load": "node scripts/load-test-50.js",
     "test:clients": "node scripts/fake-clients.js",
     "test:multi-instance": "node scripts/test-multi-instance.js",
     "migrate:indexes": "node scripts/migrate-indexes.js",
@@ -25,6 +28,7 @@
     "cors": "^2.8.6",
     "dotenv": "^18.0.5",
     "express": "^5.2.1",
+    "ioredis": "^6.0.0",
     "mongoose": "^9.10.4",
     "redis": "^6.3.0",
     "socket.io": "^4.8.4"

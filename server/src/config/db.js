@@ -16,8 +16,12 @@ export async function connectDB() {
     return true;
   }
 
+  const timeoutMs = Number(process.env.MONGO_CONNECT_TIMEOUT_MS) || 2000;
+
   try {
-    await mongoose.connect(uri);
+    await mongoose.connect(uri, {
+      serverSelectionTimeoutMS: timeoutMs
+    });
     isConnected = true;
     console.log("Connected to MongoDB successfully");
     return true;
@@ -30,4 +34,16 @@ export async function connectDB() {
 export function isDbConnected() {
   // readyState 1 is connected, readyState 2 is connecting (Mongoose buffers operations until ready)
   return mongoose.connection.readyState === 1 || mongoose.connection.readyState === 2;
+}
+
+/**
+ * Closes the MongoDB connection cleanly (useful for tests and graceful shutdown)
+ */
+export async function closeDB() {
+  if (mongoose.connection.readyState !== 0) {
+    try {
+      await mongoose.disconnect();
+    } catch (_) {}
+    isConnected = false;
+  }
 }
